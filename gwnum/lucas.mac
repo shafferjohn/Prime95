@@ -1,0 +1,2751 @@
+; Copyright 1995-2007 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros efficiently implement the basic building blocks of the
+; fast fourier transform used to quickly multiply numbers.
+;
+
+;; The FFT macros multiply by COS + SIN i.  The inverse FFT macros
+;; multiply by COS - SIN i.  The second multiplication "undoes"
+;; the first multiplication because (COS + SIN i)(COS - SIN i) equals
+;; (COS*COS + SIN*SIN) + (COS*SIN - COS*SIN) i which equals 1!
+
+
+; *************** dispatch macros ******************
+; Take macro name and three distance values and call that
+; macro with all eight addresses.
+
+disp	MACRO mac, d1, d2, d4
+	dispc	mac, d1, d2, d4, 0
+	ENDM
+
+; Take macro name and three distance values and call that
+; macro with all eight addresses.  Add a constant to all
+; eight addresses.
+
+dispc	MACRO mac, d1, d2, d4, c
+	dispc1	mac,%(d1),%(d2),%(d4),%(c)
+	ENDM
+dispc1	MACRO mac, d1, d2, d4, c
+	dispi	mac,c,%(d1+c),%(d2+c),%(d2+d1+c),%(d4+c),%(d4+d1+c),%(d4+d2+c),%(d4+d2+d1+c)
+	ENDM
+
+; Take macro name and eight distance values and call that
+; macro with all eight addresses.
+
+dispi	MACRO mac, d1, d2, d3, d4, d5, d6, d7, d8
+	mac	<Q[esi+d1]>,<Q[esi+d2]>,<Q[esi+d3]>,<Q[esi+d4]>,<Q[esi+d5]>,<Q[esi+d6]>,<Q[esi+d7]>,<Q[esi+d8]>
+	ENDM
+
+; Macro to call the cp_ macros
+
+cp_disp	MACRO mac, d1, d2, d4, e1, e2, e4
+	cp1	mac,esi,%(d1),%(d2),%(d4),ecx,%(e1),%(e2),%(e4)
+	ENDM
+cp1	MACRO mac, src, d1, d2, d4, dst, e1, e2, e4
+	cp_&mac	<Q[src]>,<Q[src+d1]>,<Q[src+d2]>,<Q[src+d2+d1]>,<Q[src+d4]>,<Q[src+d4+d1]>,<Q[src+d4+d2]>,<Q[src+d4+d2+d1]>,<Q[dst]>,<Q[dst+e1]>,<Q[dst+e2]>,<Q[dst+e2+e1]>,<Q[dst+e4]>,<Q[dst+e4+e1]>,<Q[dst+e4+e2]>,<Q[dst+e4+e2+e1]>
+	ENDM
+
+
+;; The FFT and inverse FFT macros were written for a different memory
+;; rearranging scheme.  Since macro comments still refer to the old scheme,
+;; the comments for fstp are wrong.  This table maps the old scheme to
+;; the new scheme.
+;;
+;; fft:
+;; Old four complex output numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+;; New four complex output numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+;;
+;; unfft:
+;; Old four complex output numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+;; New four complex output numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+
+
+; *************** eight-reals-first-fft macro ******************
+; This macro takes eight real values and performs the initial three levels
+; of the FFT process.
+
+eight_reals_first_fft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	eight_reals_fft_cmn <R1>,<R2>,<R3>,<R4>,<R5>,<R6>,<R7>,<R8>,ebx
+	ENDM
+
+; *************** eight-reals-fft macro ******************
+; This macro takes eight real values and performs three levels of the
+; FFT process.
+eight_reals_fft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	eight_reals_fft_cmn <R1>,<R2>,<R3>,<R4>,<R5>,<R6>,<R7>,<R8>,0
+	ENDM
+
+; *************** eight-reals-fft-cmn macro ******************
+; Common macro takes eight real values and performs three levels of the
+; FFT process.
+; NOTE: Optimal = 52 clocks, Actual = 52 clocks
+
+eight_reals_fft_cmn MACRO R1,R2,R3,R4,R5,R6,R7,R8,off
+	fld	R1[off]			;; R1
+	fadd	R5[off]			;; new R1 = R1 + R5
+	fld	R1[off]			;; R1
+	fsub	R5[off]			;; new R5 = R1 - R5
+	fld	R3[off]			;; R3
+	fadd	R7[off]			;; new R3 = R3 + R7
+	fld	R3[off]			;; R3
+	fsub	R7[off]			;; new R7 = R3 - R7
+	fld	R2[off]			;; R2
+	fadd	R6[off]			;; new R2 = R2 + R6
+	fld	R2[off]			;; R2
+	fsub	R6[off]			;; new R6 = R2 - R6
+	fld	R4[off]			;; R4
+	fsub	R8[off]			;; new R8 = R4 - R8
+	 fxch	st(4)			;; R3,R6,R2,R7,R8,R5,R1
+	 fsub	st(6), st		;; R1 = R1 - R3 (new R3)
+	 fadd	st, st			;; R3 = R3 * 2
+	fld	R4[off]			;; R4
+	fadd	R8[off]			;; new R4 = R4 + R8
+	  				;; R4,R3,R6,R2,R7,R8,R5,R1
+	 fxch	st(2)			;; R6,R3,R4,R2,R7,R8,R5,R1
+	 fmul	SQRTHALF		;; R6 = R6 * square root of 1/2
+	 fxch	st(1)			;; R3,R6,R4,R2,R7,R8,R5,R1
+	 fadd	st, st(7)		;; R3 = R1 + R3 (new R1)
+	 fxch	st(5)			;; R8,R6,R4,R2,R7,R3,R5,R1
+	 fmul	SQRTHALF		;; R8 = R8 * square root of 1/2
+	 fxch	st(2)			;; R4,R6,R8,R2,R7,R3,R5,R1
+	 fsub	st(3), st		;; R2 = R2 - R4 (new and final R4)
+	 fadd	st, st			;; R4 = R4 * 2
+	 fxch	st(2)			;; R8,R6,R4,R2,R7,R3,R5,R1
+	 fsub	st(1), st		;; R6 = R6 - R8 (Real part)
+	 fadd	st, st			;; R8 = R8 * 2
+	 fxch	st(3)			;; R2,R6,R4,R8,R7,R3,R5,R1
+	 fadd	st(2), st		;; R4 = R2 + R4 (new R2)
+	 				;; R4,R6,R2,R8,R7,R1,R5,R3
+	fxch	st(1)			;; R6,R4,R2,R8,R7,R1,R5,R3
+	fsub	st(6), st		;; R5 = R5 - R6 (Real part - final R7)
+	fadd	st(3), st		;; R8 = R6 + R8 (Imaginary part)
+	fadd	st, st			;; R6 = R6 * 2
+	fxch	st(2)			;; R2,R4,R6,R8,R7,R1,R5,R3
+	fsub	st(5), st		;; R1 = R1 - R2 (final R2)
+	fadd	st, st			;; R2 = R2 * 2
+	fxch	st(3)			;; R8,R4,R6,R2,R7,R1,R5,R3
+	fsub	st(4), st		;; R7 = R7 - R8 (Imaginary - final R8)
+	fadd	st, st			;; R8 = R8 * 2
+	fxch	st(6)			;; R5,R4,R6,R2,R7,R1,R8,R3
+	fadd	st(2), st		;; R6 = R5 + R6 (Real part - final R5)
+	fxch	st(5)			;; R1,R4,R6,R2,R7,R5,R8,R3
+	fadd	st(3), st		;; R2 = R1 + R2 (final R1)
+	fxch	st(4)			;; R7,R4,R6,R2,R1,R5,R8,R3
+	fadd	st(6), st		;; R8 = R7 + R8 (Imaginary - final R6)
+	  				;; Final - R8,R4,R5,R1,R2,R7,R6,R3
+	fstp	R8
+	fstp	R6
+	fstp	R3
+	fstp	R1
+	fstp	R5
+	fstp	R4
+	fstp	R7
+	fstp	R2
+	ENDM
+
+; *************** eight-reals-last-unfft macro ******************
+; This macro takes eight real values and performs the final three levels
+; of the inverse FFT process.
+; NOTE: input R2 is one-half of what it should be because there is no
+;	UNFFT macro for the "nop" step.
+; NOTE: input R1 is one-half of what it should be because the eight_reals_fft
+;	macro produces the R1 inputs.
+; NOTE: Rather than doing the double for the nop step of R3 through R8 we
+;	simply produce eight values that are one-half of what you would expect.
+
+eight_reals_last_unfft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	eight_reals_unfft R1,R2,R3,R4,R5,R6,R7,R8
+	ENDM
+
+; *************** eight-reals-unfft macro ******************
+; This macro takes eight real values and performs three levels of the
+; inverse FFT process.
+; NOTE: input R2 is one-half of what it should be because there is no
+;	UNFFT macro for the "nop" step.
+; NOTE: input R1 is one-half of what it should be because the eight_reals_fft
+;	macro produces the R1 inputs.
+; NOTE: Rather than doing the double for the nop step of R3 through R8 we
+;	simply produce eight values that are one-half of what you would expect.
+; NOTE: Optimal = 50 clocks, Actual = 50 clocks
+
+eight_reals_unfft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R5			;; R5
+	fsub	R7			;; new R6 = R5 - R7
+	fld	R6			;; R6
+	fsub	R8			;; new R8 = R6 - R8
+	fld	R6			;; R6
+	fadd	R8			;; new R7 = R6 + R8
+	fld	R5			;; R5
+	fadd	R7			;; new R5 = R5 + R7
+	fld	R1			;; R1
+	fadd	R2			;; new R1 = R1 + R2
+	fld	R1			;; R1
+	fsub	R2			;; new R2 = R1 - R2
+					;; R2,R1,R5,R7,R8,R6
+	fxch	st(5)			;; R6,R1,R5,R7,R8,R2
+	fsub	st(4), st		;; R8 = R8 - R6
+	fadd	st, st			;; R6 = R6 * 2
+	fld	st(1)			;; R1,R6,R1,R5,R7,R8,R2
+	fsub	R3			;; new R3 = R1 - R3
+	fxch	st(2)			;; R1,R6,R3,R5,R7,R8,R2
+	fadd	R3			;; new R1 = R1 + R3
+	fxch	st(5)			;; R8,R6,R3,R5,R7,R1,R2
+	fadd	st(1), st		;; R6 = R6 + R8
+	fmul	SQRTHALF		;; R8 = R8 * square root of 1/2
+	fld	st(6)			;; R2,R8,R6,R3,R5,R7,R1,R2
+	fsub	R4			;; new R4 = R2 - R4
+	fxch	st(7)			;; R2,R8,R6,R3,R5,R7,R1,R4
+	fadd	R4			;; new R2 = R2 + R4
+	fxch	st(2)			;; R6,R8,R2,R3,R5,R7,R1,R4
+	fmul	SQRTHALF		;; R6 = R6 * square root of 1/2
+
+	fxch	st(4)			;; R5,R8,R2,R3,R6,R7,R1,R4
+	fsub	st(6), st		;; R1 = R1 - R5 (new R5)
+	fadd	st, st			;; R5 = R5 * 2
+	fxch	st(4)			;; R6,R8,R2,R3,R5,R7,R1,R4
+	fsub	st(2), st		;; R2 = R2 - R6 (new R6)
+	fadd	st, st			;; R6 = R6 * 2
+	fxch	st(5)			;; R7,R8,R2,R3,R5,R6,R1,R4
+	fsub	st(3), st		;; R3 = R3 - R7 (new R7)
+	fadd	st, st			;; R7 = R7 * 2
+	fxch	st(1)			;; R8,R7,R2,R3,R5,R6,R1,R4
+	fsub	st(7), st		;; R4 = R4 - R8 (new R8)
+	fadd	st, st			;; R8 = R8 * 2
+	fxch	st(6)			;; R1,R7,R2,R3,R5,R6,R8,R4
+	fadd	st(4), st		;; R5 = R1 + R5 (new R1)
+	fxch	st(2)			;; R2,R7,R1,R3,R5,R6,R8,R4
+	fadd	st(5), st		;; R6 = R2 + R6 (new R2)
+	fxch	st(1)			;; R7,R2,R1,R3,R5,R6,R8,R4
+	fadd	st, st(3)		;; R7 = R3 + R7 (new R3)
+	fxch	st(7)			;; R4,R2,R1,R3,R5,R6,R8,R7
+	fadd	st(6), st		;; R8 = R4 + R8 (new R4)
+					;; R8,R6,R5,R7,R1,R2,R4,R3
+	fstp	R8
+	fstp	R4
+	fstp	R2
+	fstp	R6
+	fstp	R1
+	fstp	R3
+	fstp	R7
+	fstp	R5
+	ENDM
+
+
+; *************** eight-reals-fft-1 macro ******************
+; Take eight real numbers and perform one level of FFT.
+
+eight_reals_fft_1 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1
+	fadd	R5			;; R1 = R1 + R5
+	fld	R1			;; R1
+	fsub	R5			;; R5 = R1 - R5
+	fld	R2			;; R2
+	fadd	R6			;; R2 = R2 + R6
+	fld	R2			;; R2
+	fsub	R6			;; R6 = R2 - R6
+	fld	R3			;; R3
+	fadd	R7			;; R3 = R3 + R7
+	fld	R3			;; R3
+	fsub	R7			;; R7 = R3 - R7
+	fld	R4			;; R4
+	fadd	R8			;; R4 = R4 + R8
+	fld	R4			;; R4
+	fsub	R8			;; R8 = R4 - R8
+	fxch	st(7)			;; R1,R4,R7,R3,R6,R2,R5,R8
+	fstp	R1
+	fstp	R4
+	fstp	R7
+	fstp	R3
+	fstp	R6
+	fstp	R2
+	fstp	R5
+	fstp	R8
+	ENDM
+
+; *************** eight-reals-unfft-1 macro ******************
+; Perform one level of inverse FFT producing eight real numbers
+
+eight_reals_unfft_1 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1
+	fadd	R5			;; R1 = R1 + R5
+	fld	R1			;; R1
+	fsub	R5			;; R5 = R1 - R5
+	fld	R2			;; R2
+	fadd	R6			;; R2 = R2 + R6
+	fld	R2			;; R2
+	fsub	R6			;; R6 = R2 - R6
+	fld	R3			;; R3
+	fadd	R7			;; R3 = R3 + R7
+	fld	R3			;; R3
+	fsub	R7			;; R7 = R3 - R7
+	fld	R4			;; R4
+	fadd	R8			;; R4 = R4 + R8
+	fld	R4			;; R4
+	fsub	R8			;; R8 = R4 - R8
+	fxch	st(7)			;; R1,R4,R7,R3,R6,R2,R5,R8
+	fstp	R1
+	fstp	R4
+	fstp	R7
+	fstp	R3
+	fstp	R6
+	fstp	R2
+	fstp	R5
+	fstp	R8
+	ENDM
+
+; *************** eight-reals-fft-2 macro ******************
+; Take eight real numbers and perform two levels of FFT.
+
+eight_reals_fft_2 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1
+	fadd	R5			;; R1 = R1 + R5
+	fld	R1			;; R1
+	fsub	R5			;; R5 = R1 - R5
+	fld	R2			;; R2
+	fadd	R6			;; R2 = R2 + R6
+	fld	R2			;; R2
+	fsub	R6			;; R6 = R2 - R6
+	fld	R3			;; R3
+	fadd	R7			;; R3 = R3 + R7
+	fld	R3			;; R3
+	fsub	R7			;; R7 = R3 - R7
+	fld	R4			;; R4
+	fadd	R8			;; R4 = R4 + R8
+	fld	R4			;; R4
+	fsub	R8			;; R8 = R4 - R8
+	fxch	st(3)			;; R3,R4,R7,R8,R6,R2,R5,R1
+	fsub	st(7), st		;; R1 = R1 - R3 (final R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(1)			;; R4,R3,R7,R8,R6,R2,R5,R1
+	fsub	st(5), st		;; R2 = R2 - R4 (final R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(7)			;; R1,R3,R7,R8,R6,R2,R5,R4
+	fadd	st(1), st		;; R3 = R1 + R3 (final R1)
+	fxch	st(5)			;; R2,R3,R7,R8,R6,R1,R5,R4
+	fadd	st(7), st		;; R4 = R2 + R4 (final R2)
+					;; R4,R1,R7,R8,R6,R3,R5,R2
+	fstp	R6
+	fstp	R1
+	fstp	R7
+	fstp	R8
+	fstp	R4
+	fstp	R5
+	fstp	R3
+	fstp	R2
+	ENDM
+
+; *************** eight-reals-unfft-2 macro ******************
+; Perform two level of inverse FFT producing eight real numbers
+
+eight_reals_unfft_2 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1
+	fadd	R3			;; R1 = R1 + R3
+	fld	R1			;; R1
+	fsub	R3			;; R3 = R1 - R3
+	fld	R2			;; R2
+	fadd	R4			;; R2 = R2 + R4
+	fld	R2			;; R2
+	fsub	R4			;; R4 = R2 - R4
+					;; No-op on R5 - R8
+	fld	R5			;; R5,R4,R2,R3,R1
+	fadd	st, st(4)		;; R5 = R1 + R5 (final R1)
+	fxch	st(4)			;; R1,R4,R2,R3,R5
+	fsub	R5			;; R1 = R1 - R5 (final R5)
+	fld	R7			;; R7,R1,R4,R2,R3,R5
+	fadd	st, st(4)		;; R7 = R3 + R7 (final R3)
+	fxch	st(4)			;; R3,R1,R4,R2,R7,R5
+	fsub	R7			;; R3 = R3 - R7 (final R7)
+	fld	R6			;; R6,R3,R1,R4,R2,R7,R5
+	fadd	st, st(4)		;; R6 = R2 + R6 (final R2)
+	fxch	st(4)			;; R2,R3,R1,R4,R6,R7,R5
+	fsub	R6			;; R2 = R2 - R6 (final R6)
+	fld	R8			;; R8,R2,R3,R1,R4,R6,R7,R5
+	fadd	st, st(4)		;; R8 = R4 + R8 (final R4)
+	fxch	st(4)			;; R4,R2,R3,R1,R8,R6,R7,R5
+	fsub	R8			;; R4 = R4 - R8 (final R8)
+					;; R8,R6,R7,R5,R4,R2,R3,R1
+	fstp	R8
+	fstp	R4
+	fstp	R7
+	fstp	R3
+	fstp	R6
+	fstp	R2
+	fstp	R5
+	fstp	R1
+	ENDM
+
+; *************** four_real_four_semireal_fft macro ******************
+; Take four real and semi-real numbers and perform two levels of the FFT.
+; NOTE: Optimal = 40 clocks, Actual = 40 clocks
+
+four_real_four_semireal_fft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	cp_four_real_four_semireal_fft R1,R2,R3,R4,R5,R6,R7,R8,R1,R2,R3,R4,R5,R6,R7,R8
+	ENDM
+four_real_four_semireal_first_fft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	cp_four_real_four_semireal_fft R1[ebx],R2[ebx],R3[ebx],R4[ebx],R5[ebx],R6[ebx],R7[ebx],R8[ebx],R1,R2,R3,R4,R5,R6,R7,R8
+	ENDM
+cp_four_real_four_semireal_fft MACRO R1,R2,R3,R4,R5,R6,R7,R8,D1,D2,D3,D4,D5,D6,D7,D8
+	fld	R6			;; R6
+	fmul	SQRTHALF		;; R6 = R6 * square root of 1/2
+	fld	R8			;; R8
+	fmul	SQRTHALF		;; R8 = R8 * square root of 1/2
+	fld	R1			;; R1
+	fadd	R3			;; new R1 = R1 + R3
+	fld	R2			;; R2
+	fadd	R4			;; new R2 = R2 + R4
+	fxch	st(2)			;; R8,R1,R2,R6
+	fsub	st(3), st		;; R6 = R6 - R8 (Real part)
+	fadd	st, st			;; R8 = R8 * 2
+	fld	R1			;; R1
+	fsub	R3			;; new R3 = R1 - R3 (final R3)
+	fld	R2			;; R2
+	fsub	R4			;; new R4 = R2 - R4 (final R4)
+	fxch	st(5)			;; R6,R3,R8,R1,R2,R4
+	fadd	st(2), st		;; R8 = R6 + R8 (Imaginary part)
+
+	fxch	st(4)			;; R2,R3,R8,R1,R6,R4
+	fsub	st(3), st		;; R1 = R1 - R2 (final R2)
+	fadd	st, st			;; R2 = R2 * 2
+	fld	R5			;; R5,R2,R3,R8,R1,R6,R4
+	fxch	st(5)			;; R6,R2,R3,R8,R1,R5,R4
+	fsub	st(5), st		;; R5 = R5 - R6 (final R7)
+	fadd	R5			;; R6 = R5 + R6 (final R5)
+	fld	R7			;; R7,R6,R2,R3,R8,R1,R5,R4
+	fxch	st(4)			;; R8,R6,R2,R3,R7,R1,R5,R4
+	fsub	st(4), st		;; R7 = R7 - R8 (final R8)
+	fadd	R7			;; R8 = R7 + R8 (final R6)
+	fxch	st(5)			;; R1,R6,R2,R3,R7,R8,R5,R4
+	fadd	st(2), st		;; R2 = R1 + R2 (final R1)
+	  				;; R2,R5,R1,R3,R8,R6,R7,R4
+	fstp	D5
+	fstp	D3
+	fstp	D1
+	fstp	D2
+	fstp	D8
+	fstp	D7
+	fstp	D4
+	fstp	D6
+	ENDM
+
+; *************** four_real_four_semireal with square macro ******************
+; Take four real and semi-real numbers and perform two levels of the FFT.
+; Then square the FFT results and perform two levels of inverse FFT.
+; NOTE: This will be called at most once per squaring so speed is
+; pretty much irrelevant.
+
+four_real_four_semireal_square MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	mult7	esi, esi		;; Do ZPAD multiplies
+
+	fld	R1			;; R1
+	fld	R3			;; R3,R1
+	fsub	st(1), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fld	R6			;; R6,R3,R1
+	fmul	SQRTHALF		;; R6 = R6 * square root of 1/2
+	fxch	st(1)			;; R3,R6,R1
+	fadd	st, st(2)		;; R3 = R1 + R3 (new R1)
+	fld	R8			;; R8,R3,R6,R1
+	fmul	SQRTHALF		;; R8 = R8 * square root of 1/2
+	fld	R2			;; R2,R8,R3,R6,R1
+	fld	R4			;; R4,R2,R8,R3,R6,R1
+	fsub	st(1), st		;; R2 = R2 - R4 (new and final R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(2)			;; R8,R2,R4,R3,R6,R1
+	fsub	st(4), st		;; R6 = R6 - R8 (Real part)
+	fadd	st, st			;; R8 = R8 * 2
+	fxch	st(2)			;; R4,R2,R8,R3,R6,R1
+	fadd	st, st(1)		;; R4 = R2 + R4 (new R2)
+					;; R2,R4,R8,R1,R6,R3
+	fld	R5			;; R5,R2,R4,R8,R1,R6,R3
+	fxch	st(5)			;; R6,R2,R4,R8,R1,R5,R3
+	fadd	st(3), st		;; R8 = R6 + R8 (Imaginary part)
+	fsub	st(5), st		;; R5 = R5 - R6 (Real part - final R7)
+	fadd	st, st			;; R6 = R6 * 2
+	fxch	st(1)			;; R2,R6,R4,R8,R1,R5,R3
+	fsub	st(4), st		;; R1 = R1 - R2 (final R2)
+	fadd	st, st			;; R2 = R2 * 2
+	fld	R7			;; R7,R2,R6,R4,R8,R1,R5,R3
+	fxch	st(4)			;; R8,R2,R6,R4,R7,R1,R5,R3
+	fsub	st(4), st		;; R7 = R7 - R8 (Imaginary - final R8)
+	fadd	st, st			;; R8 = R8 * 2
+	fxch	st(2)			;; R6,R2,R8,R4,R7,R1,R5,R3
+	fadd	st, st(6)		;; R6 = R5 + R6 (Real part - final R5)
+	fxch	st(1)			;; R2,R6,R8,R4,R7,R1,R5,R3
+	fadd	st, st(5)		;; R2 = R1 + R2 (final R1)
+	fxch	st(2)			;; R8,R6,R2,R4,R7,R1,R5,R3
+	fadd	st, st(4)		;; R8 = R7 + R8 (Imaginary - final R6)
+	  				;; R6,R5,R1,R4,R8,R2,R7,R3
+
+	fxch	st(2)			;; R1,R5,R6,R4,R8,R2,R7,R3
+	fmul	st, st			;; R1 = R1 * R1
+	fst	QWORD PTR [esi-16]	;; Save product of sum of FFT values
+	fmul	HALF			;; Mul by HALF (see eight_reals_unfft)
+	fxch	st(5)			;; R2,R5,R6,R4,R8,R1,R7,R3
+	fmul	st, st			;; R2 = R2 * R2
+	fmul	HALF			;; Mul by HALF (see eight_reals_unfft)
+	fstp	R2			;; R5,R6,R4,R8,R1,R7,R3
+
+	fld	st(6)			;; TEMP = R3
+	fxch	st(3)			;; R4,R5,R6,TEMP,R8,R1,R7,R3
+	fsub	st(3), st		;; TEMP = TEMP - R4	(R3-R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fmul	st(7), st		;; R3 = R3 * R4		(new R4)
+	fadd	st, st(3)		;; R4 = R4 + TEMP	(R3+R4)
+	fmulp	st(3), st		;; TEMP = R4 * TEMP	(new R3)
+					;; R5,R6,R3,R8,R1,R7,R4
+
+	fld	st			;; TEMP = R5
+	fxch	st(2)			;; R6,R5,TEMP,R3,R8,R1,R7,R4
+	fsub	st(2), st		;; TEMP = TEMP - R6	(R5-R6)
+	fadd	st, st			;; R6 = R6 * 2
+	fmul	st(1), st		;; R5 = R5 * R6		(new R6)
+	fadd	st, st(2)		;; R6 = R6 + TEMP	(R5+R6)
+	fmulp	st(2), st		;; TEMP = R6 * TEMP	(new R5)
+					;; R6,R5,R3,R8,R1,R7,R4
+
+	fld	st(5)			;; TEMP = R7
+	fxch	st(4)			;; R8,R6,R5,R3,TEMP,R1,R7,R4
+	fsub	st(4), st		;; TEMP = TEMP - R8	(R7-R8)
+	fadd	st, st			;; R8 = R8 * 2
+	fmul	st(6), st		;; R7 = R7 * R8		(new R8)
+	fadd	st, st(4)		;; R8 = R8 + TEMP	(R7+R8)
+	fmulp	st(4), st		;; TEMP = R8 * TEMP	(new R7)
+					;; R6,R5,R3,R7,R1,R8,R4
+	fld	R2
+
+	fsub	st(5), st		;; R1 = R1 - R2 (new R2)
+	fadd	st, st			;; R2 = R2 * 2
+	fadd	st, st(5)		;; R2 = R1 + R2 (new R1)
+
+	fxch	st(3)			;; R3,R6,R5,R2,R7,R1,R8,R4
+;;	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(7)			;; R4,R6,R5,R2,R7,R1,R8,R3
+;;	fadd	st, st			;; R4 = R4 * 2
+
+	fxch	st(4)			;; R7,R6,R5,R2,R4,R1,R8,R3
+	fsub	st(2), st		;; R5 = R5 - R7 (new R6)
+	fadd	st, st			;; R7 = R7 * 2
+	fadd	st, st(2)		;; R7 = R5 + R7 (new R5)
+
+	fxch	st(6)			;; R8,R6,R5,R2,R4,R1,R7,R3
+	fsub	st(1), st		;; R6 = R6 - R8 (new R8)
+	fadd	st, st			;; R8 = R8 * 2
+	fadd	st, st(1)		;; R8 = R6 + R8 (new R7)
+	  				;; R7,R8,R6,R1,R4,R2,R5,R3
+
+	fxch	st(2)			;; R6,R8,R7,R1,R4,R2,R5,R3
+	fsub	st(1), st		;; R8 = R8 - R6
+	fadd	st, st			;; R6 = R6 * 2
+	fadd	st, st(1)		;; R6 = R6 + R8
+	fmul	SQRTHALF		;; R6 = R6 * square root of 1/2
+	fxch	st(1)			;; R8,R6,R7,R1,R4,R2,R5,R3
+	fmul	SQRTHALF		;; R8 = R8 * square root of 1/2
+
+	fxch	st(7)			;; R3,R6,R7,R1,R4,R2,R5,R8
+	fsub	st(3), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fadd	st, st(3)		;; R3 = R1 + R3 (new R1)
+
+	fxch	st(4)			;; R4,R6,R7,R1,R3,R2,R5,R8
+	fsub	st(5), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fadd	st, st(5)		;; R4 = R2 + R4 (new R2)
+					;; R2,R6,R7,R3,R1,R4,R5,R8
+
+	fstp	R2
+	fstp	R6
+	fstp	R7
+	fstp	R3
+	fstp	R1
+	fstp	R4
+	fstp	R5
+	fstp	R8
+	ENDM
+
+four_real_four_semireal_mult MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	four_real_four_semireal_fft R1,R2,R3,R4,R5,R6,R7,R8
+	four_real_four_semireal_mulf R1,R2,R3,R4,R5,R6,R7,R8
+	ENDM
+
+four_real_four_semireal_mulf MACRO R1,R3,R5,R7,R2,R4,R6,R8
+	mult7	esi+ebx, esi+ebp	;; Do ZPAD multiplies
+
+	fld	R3[ebx]
+	fmul	R3[ebp]			;; R33
+	fld	R4[ebx]
+	fmul	R4[ebp]			;; R44
+	fld	R3[ebx]
+	fmul	R4[ebp]			;; R34
+	fld	R4[ebx]
+	fmul	R3[ebp]			;; R43
+	fxch	st(2)			;; R44,R34,R43,R33
+	fsubp	st(3), st		;; R34,R43,R3
+	fld	R5[ebx]
+	fmul	R5[ebp]			;; R55,R34,R43,R3
+	fxch	st(1)			;; R34,R55,R43,R3
+	faddp	st(2), st		;; R55,R4,R3
+	fld	R6[ebx]
+	fmul	R6[ebp]			;; R66,R55,R4,R3
+	fld	R5[ebx]
+	fmul	R6[ebp]			;; R56,R66,R55,R4,R3
+	fld	R6[ebx]
+	fmul	R5[ebp]			;; R65,R56,R66,R55,R4,R3
+	fxch	st(2)			;; R66,R56,R65,R55,R4,R3
+	fsubp	st(3), st		;; R56,R65,R5,R4,R3
+	fld	R7[ebx]
+	fmul	R7[ebp]			;; R77,R56,R65,R5,R4,R3
+	fxch	st(1)			;; R56,R77,R65,R5,R4,R3
+	faddp	st(2), st		;; R77,R6,R5,R4,R3
+	fld	R8[ebx]
+	fmul	R8[ebp]			;; R88,R77,R6,R5,R4,R3
+	fld	R7[ebx]
+	fmul	R8[ebp]			;; R78,R88,R77,R6,R5,R4,R3
+	fld	R8[ebx]
+	fmul	R7[ebp]			;; R87,R78,R88,R77,R6,R5,R4,R3
+	fxch	st(2)			;; R88,R78,R87,R77,R6,R5,R4,R3
+	fsubp	st(3), st		;; R78,R87,R7,R6,R5,R4,R3
+	fld	R1[ebx]
+	fmul	R1[ebp]			;; R1,R78,R87,R7,R6,R5,R4,R3
+	fxch	st(1)			;; R78,R1,R87,R7,R6,R5,R4,R3
+	faddp	st(2), st		;; R1,R8,R7,R6,R5,R4,R3
+	fld	R2[ebx]
+	fmul	R2[ebp]			;; R2,R1,R8,R7,R6,R5,R4,R3
+	fxch	st(3)			;; R7,R1,R8,R2,R6,R5,R4,R3
+	fsub	st(5), st		;; R5 = R5 - R7 (new R6)
+	fadd	st, st			;; R7 = R7 * 2
+	fxch	st(1)			;; R1,R7,R8,R2,R6,R5,R4,R3
+	fst	QWORD PTR [esi-16]	;; Save product of sum of FFT values
+	fsub	st, st(3)		;; R1 = R1 - R2 (new R2)
+	fxch	st(2)			;; R8,R7,R1,R2,R6,R5,R4,R3
+	fsub	st(4), st		;; R6 = R6 - R8 (new R8)
+	fadd	st, st			;; R8 = R8 * 2
+	fxch	st(2)			;; R1,R7,R8,R2,R6,R5,R4,R3
+	fmul	HALF			;; Mul R1 by HALF
+	fxch	st(5)			;; R5,R7,R8,R2,R6,R1,R4,R3
+	fadd	st(1), st		;; R7 = R5 + R7 (new R5)
+	fxch	st(4)			;; R6,R7,R8,R2,R5,R1,R4,R3
+	fadd	st(2), st		;; R8 = R6 + R8 (new R7)
+	fxch	st(5)			;; R1,R7,R8,R2,R5,R6,R4,R3
+	fadd	st(3), st		;; R2 = R1 + R2 (new R1)
+					;; R2,R5,R7,R1,R6,R8,R4,R3
+	fxch	st(4)			;; R6,R5,R7,R1,R2,R8,R4,R3
+	fsub	st(5), st		;; R8 = R8 - R6
+	fadd	st, st			;; R6 = R6 * 2
+	fxch	st(6)			;; R4,R5,R7,R1,R2,R8,R6,R3
+	fsub	st(4), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(5)			;; R8,R5,R7,R1,R2,R4,R6,R3
+	fadd	st(6), st		;; R6 = R6 + R8
+	fmul	SQRTHALF		;; R8 = R8 * square root of 1/2
+	fxch	st(7)			;; R3,R5,R7,R1,R2,R4,R6,R8
+	fsub	st(3), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(6)			;; R6,R5,R7,R1,R2,R4,R3,R8
+	fmul	SQRTHALF		;; R6 = R6 * square root of 1/2
+	fxch	st(4)			;; R2,R5,R7,R1,R6,R4,R3,R8
+	fadd	st(5), st		;; R4 = R2 + R4 (new R2)
+	fxch	st(3)			;; R1,R5,R7,R2,R6,R4,R3,R8
+	fadd	st(6), st		;; R3 = R1 + R3 (new R1)
+					;; R3,R5,R7,R4,R6,R2,R1,R8
+	fstp	R5
+	fstp	R2
+	fstp	R6
+	fstp	R7
+	fstp	R4
+	fstp	R3
+	fstp	R1
+	fstp	R8
+	ENDM
+
+; *************** four_real_four_semireal_unfft macro ******************
+; Perform the two levels of inverse FFT generating four real and four
+; semi-real numbers
+; NOTE: Optimal = 39 clocks, Actual = 39 clocks
+
+four_real_four_semireal_unfft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	cp_four_real_four_semireal_unfft R1,R2,R3,R4,R5,R6,R7,R8,R1,R2,R3,R4,R5,R6,R7,R8
+	ENDM
+cp_four_real_four_semireal_unfft MACRO R1,R2,R3,R4,R5,R6,R7,R8,D1,D2,D3,D4,D5,D6,D7,D8
+	fld	R6			;; R6
+	fsub	R8			;; new R8 = R6 - R8
+	fld	R6			;; R6
+	fadd	R8			;; new R7 = R6 + R8
+	fld	R5			;; R5
+	fsub	R7			;; new R6 = R5 - R7
+	fld	R5			;; R5
+	fadd	R7			;; new R5 = R5 + R7
+	fld	R1			;; R1
+	fsub	R2			;; new R2 = R1 - R2
+	fld	R1			;; R1
+	fadd	R2			;; new R1 = R1 + R2
+	fxch	st(3)			;; R6,R2,R5,R1,R7,R8
+	fsub	st(5), st		;; R8 = R8 - R6
+	fadd	st, st			;; R6 = R6 * 2
+	fld	R4			;; R4
+	fxch	st(2)			;; R2,R6,R4,R5,R1,R7,R8
+	fadd	st(2), st		;; R4 = R2 + R4 (new R2)
+	fsub	R4			;; R2 = R2 - R4 (new R4)
+	fxch	st(6)			;; R8,R6,R4,R5,R1,R7,R2
+	fadd	st(1), st		;; R6 = R6 + R8
+	fmul	SQRTHALF		;; R8 = R8 * square root of 1/2
+	fld	R3			;; R3
+	fxch	st(5)			;; R1,R8,R6,R4,R5,R3,R7,R2
+	fadd	st(5), st		;; R3 = R1 + R3 (new R1)
+	fsub	R3			;; R1 = R1 - R3 (new R3)
+	fxch	st(2)			;; R6,R8,R1,R4,R5,R3,R7,R2
+	fmul	SQRTHALF		;; R6 = R6 * square root of 1/2
+	fxch	st(7)			;; R2,R8,R1,R4,R5,R3,R7,R6
+					;; R4,R8,R3,R2,R5,R1,R7,R6
+	fstp	D7
+	fstp	D8
+	fstp	D5
+	fstp	D3
+	fstp	D2
+	fstp	D1
+	fstp	D6
+	fstp	D4
+	ENDM
+
+
+
+; *************** four-complex-fft macro ******************
+; This macro takes four complex values and performs two levels of the
+; FFT process.
+; The four complex input numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; The four complex output numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; edi = array of sin/cos values
+; NOTE: Optimal = 64 clocks, Actual = 64 clocks
+
+four_complex_fft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	cp_four_complex_fft R1,R2,R3,R4,R5,R6,R7,R8,R1,R2,R3,R4,R5,R6,R7,R8
+	ENDM
+cp_four_complex_fft MACRO R1,R2,R3,R4,R5,R6,R7,R8,D1,D2,D3,D4,D5,D6,D7,D8
+	four_complex_fft_cmn R1,R2,R3,R4,R5,R6,R7,R8,D1,D2,D3,D4,D5,D6,D7,D8,0,16,32
+	ENDM
+
+four_complex_fft_cmn MACRO R1,R2,R3,R4,R5,R6,R7,R8,D1,D2,D3,D4,D5,D6,D7,D8,off2,off3,off4
+	fld	R3			;; R3
+	fmul	QWORD PTR [edi+off3+8]	;; A3 = R3 * cosine/sine
+	fld	R7			;; I3,A3
+	fmul	QWORD PTR [edi+off3+8]	;; B3 = I3 * cosine/sine
+	fxch	st(1)			;; A3,B3
+	fsub	R7			;; A3 = A3 - I3
+	fld	R2			;; R2,A3,B3
+	fmul	QWORD PTR [edi+off2+8]	;; A2 = R2 * cosine/sine
+	fxch	st(2)			;; B3,A3,A2
+	fadd	R3			;; B3 = B3 + R3
+	fxch	st(1)			;; A3,B3,A2
+	fmul	QWORD PTR [edi+off3]	;; A3 = A3 * sine (new R3)
+	fxch	st(2)			;; A2,B3,A3
+	fsub	R6			;; A2 = A2 - I2
+	fxch	st(1)			;; B3,A2,A3
+	fmul	QWORD PTR [edi+off3]	;; B3 = B3 * sine (new I3)
+	fld	R6			;; I2,B3,A2,A3
+	fmul	QWORD PTR [edi+off2+8]	;; B2 = I2 * cosine/sine
+	fld	R4			;; R4,B2,B3,A2,A3
+	fmul	QWORD PTR [edi+off4+8]	;; A4 = R4 * cosine/sine
+	fxch	st(1)			;; B2,A4,B3,A2,A3
+	fadd	R2			;; B2 = B2 + R2
+	fxch	st(3)			;; A2,A4,B3,B2,A3
+	fmul	QWORD PTR [edi+off2]	;; A2 = A2 * sine (new R2)
+	fld	R8			;; I4,A2,A4,B3,B2,A3
+	fmul	QWORD PTR [edi+off4+8]	;; B4 = I4 * cosine/sine
+	fxch	st(2)			;; A4,A2,B4,B3,B2,A3
+	fsub	R8			;; A4 = A4 - I4
+	fxch	st(4)			;; B2,A2,B4,B3,A4,A3
+	fmul	QWORD PTR [edi+off2]	;; B2 = B2 * sine (new I2)
+	fxch	st(2)			;; B4,A2,B2,B3,A4,A3
+	fadd	R4			;; B4 = B4 + R4
+	fxch	st(4)			;; A4,A2,B2,B3,B4,A3
+	fmul	QWORD PTR [edi+off4]	;; A4 = A4 * sine (new R4)
+	fld	R1			;; R1,A4,A2,B2,B3,B4,A3
+					;; R1,R4,R2,I2,I3,B4,R3
+	fsub	st, st(6)		;; R1 = R1 - R3 (new R3)
+	fxch	st(5)			;; B4,R4,R2,I2,I3,R1,R3
+	fmul	QWORD PTR [edi+off4]	;; B4 = B4 * sine (new I4)
+	fld	R5			;; I1,I4,R4,R2,I2,I3,R1,R3
+	fsub	st, st(5)		;; I1 = I1 - I3 (new I3)
+	fxch	st(1)			;; I4,I1,R4,R2,I2,I3,R1,R3
+	fsub	st(4), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(2)			;; R4,I1,I4,R2,I2,I3,R1,R3
+	fsub	st(3), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(7)			;; R3,I1,I4,R2,I2,I3,R1,R4
+	fadd	R1			;; R3 = R1 + R3 (new R1)
+	fxch	st(5)			;; I3,I1,I4,R2,I2,R3,R1,R4
+	fadd	R5			;; I3 = I1 + I3 (new I1)
+	fxch	st(4)			;; I2,I1,I4,R2,I3,R3,R1,R4
+	fadd	st(2), st		;; I4 = I2 + I4 (new I2)
+	fxch	st(3)			;; R2,I1,I4,I2,I3,R3,R1,R4
+	fadd	st(7), st		;; R4 = R2 + R4 (new R2)
+					;; R4,I3,I2,I4,I1,R1,R3,R2
+	fxch	st(3)			;; I4,I3,I2,R4,I1,R1,R3,R2
+	fsub	st(6), st		;; R3 = R3 - I4 (new R3)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(3)			;; R4,I3,I2,I4,I1,R1,R3,R2
+	fsub	st(1), st		;; I3 = I3 - R4 (new I4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(7)			;; R2,I3,I2,I4,I1,R1,R3,R4
+	fsub	st(5), st		;; R1 = R1 - R2 (new R2)
+	fadd	st, st			;; R2 = R2 * 2
+	fxch	st(2)			;; I2,I3,R2,I4,I1,R1,R3,R4
+	fsub	st(4), st		;; I1 = I1 - I2 (new I2)
+	fadd	st, st			;; I2 = I2 * 2
+	fxch	st(6)			;; R3,I3,R2,I4,I1,R1,I2,R4
+	fadd	st(3), st		;; I4 = R3 + I4 (new R4)
+	fxch	st(1)			;; I3,R3,R2,I4,I1,R1,I2,R4
+	fadd	st(7), st		;; R4 = I3 + R4 (new I3)
+	fxch	st(5)			;; R1,R3,R2,I4,I1,I3,I2,R4
+	fadd	st(2), st		;; R2 = R1 + R2 (new R1)
+	fxch	st(4)			;; I1,R3,R2,I4,R1,I3,I2,R4
+	fadd	st(6), st		;; I2 = I1 + I2 (new I1)
+					;; I2,R3,R1,R4,R2,I4,I1,I3
+	fstp	D6
+	fstp	D3
+	fstp	D1
+	fstp	D4
+	fstp	D2
+	fstp	D8
+	fstp	D5
+	fstp	D7
+	ENDM
+
+; *************** four-complex-unfft macro ******************
+; This macro takes four complex values and performs two levels of the
+; inverse FFT process.
+; The four complex input numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; The four complex output numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; edi = array of sin/cos values
+; NOTE: Optimal = 65 clocks, Actual = 65 clocks
+
+four_complex_unfft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	cp_four_complex_unfft R1,R2,R3,R4,R5,R6,R7,R8,R1,R2,R3,R4,R5,R6,R7,R8
+	ENDM
+cp_four_complex_unfft MACRO R1,R2,R3,R4,R5,R6,R7,R8,D1,D2,D3,D4,D5,D6,D7,D8
+	four_complex_unfft_cmn R1,R2,R3,R4,R5,R6,R7,R8,D1,D2,D3,D4,D5,D6,D7,D8,0,16,32
+	ENDM
+
+four_complex_unfft_cmn MACRO R1,R2,R3,R4,R5,R6,R7,R8,D1,D2,D3,D4,D5,D6,D7,D8,off2,off3,off4
+	fld	R1			;; R1
+	fsub	R3			;; new R2 = R1 - R2
+	fld	R2			;; I1
+	fadd	R4			;; new I1 = I1 + I2
+	fld	R2			;; I1
+	fsub	R4			;; new I2 = I1 - I2
+	fld	R7			;; R4
+	fadd	R5			;; new R3 = R3 + R4
+	fld	R7			;; R4
+	fsub	R5			;; new I4 = R4 - R3
+	fld	R1			;; R1
+	fadd	R3			;; new R1 = R1 + R2
+	fld	R6			;; I3
+	fsub	R8			;; new R4 = I3 - I4
+	fld	R6			;; I3
+	fadd	R8			;; new I3 = I3 + I4
+					;; I3,R4,R1,I4,R3,I2,I1,R2
+	fxch	st(4)			;; R3,R4,R1,I4,I3,I2,I1,R2
+	fsub	st(2), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(4)			;; I3,R4,R1,I4,R3,I2,I1,R2
+	fsub	st(6), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(1)			;; R4,I3,R1,I4,R3,I2,I1,R2
+	fsub	st(7), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(3)			;; I4,I3,R1,R4,R3,I2,I1,R2
+	fsub	st(5), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(2)			;; R1,I3,I4,R4,R3,I2,I1,R2
+	fadd	st(4), st		;; R3 = R1 + R3 (new R1)
+	fmul	QWORD PTR [edi+off3]	;; A3 = new R3 * sine
+	fxch	st(6)			;; I1,I3,I4,R4,R3,I2,R1,R2
+	fadd	st(1), st		;; I3 = I1 + I3 (new I1)
+	fmul	QWORD PTR [edi+off3]	;; B3 = new I3 * sine
+	fxch	st(7)			;; R2,I3,I4,R4,R3,I2,R1,I1
+	fadd	st(3), st		;; R4 = R2 + R4 (new R2)
+	fmul	QWORD PTR [edi+off4]	;; A4 = new R4 * sine
+	fxch	st(5)			;; I2,I3,I4,R4,R3,R2,R1,I1
+	fadd	st(2), st		;; I4 = I2 + I4 (new I2)
+	fmul	QWORD PTR [edi+off4]	;; B4 = new I4 * sine
+					;; B4,I1,I2,R2,R1,A4,A3,B3
+	fxch	st(4)			;; R1,I1,I2,R2,B4,A4,A3,B3
+	fstp	D1			;; I1,I2,R2,B4,A4,A3,B3
+	fstp	D2			;; I2,R2,B4,A4,A3,B3
+	fmul	QWORD PTR [edi+off2]	;; B2 = I2 * sine
+	fld	st(5)			;; C3 = B3 (C3,B2,R2,B4,A4,A3,B3)
+	fmul	QWORD PTR [edi+off3+8]	;; C3 = C3 * cosine/sine
+	fld	st(3)			;; C4 = B4 (C4,C3,B2,R2,B4,A4,A3,B3)
+	fmul	QWORD PTR [edi+off4+8]	;; C4 = C4 * cosine/sine
+	fxch	st(6)			;; A3,C3,B2,R2,B4,A4,C4,B3
+	fsub	st(1), st		;; C3 = C3 - A3 (new I3)
+	fmul	QWORD PTR [edi+off3+8]	;; A3 = A3 * cosine/sine
+	fxch	st(5)			;; A4,C3,B2,R2,B4,A3,C4,B3
+	fsub	st(6), st		;; C4 = C4 - A4 (new I4)
+	fmul	QWORD PTR [edi+off4+8]	;; A4 = A4 * cosine/sine
+	fxch	st(5)			;; A3,C3,B2,R2,B4,A4,C4,B3
+	faddp	st(7), st		;; B3 = B3 + A3 (new R3)
+	fxch	st(2)			;; R2,B2,C3,B4,A4,C4,B3
+	fmul	QWORD PTR [edi+off2]	;; A2 = R2 * sine
+	fld	st(1)			;; C2 = B2 (C2,A2,B2,C3,B4,A4,C4,B3)
+	fmul	QWORD PTR [edi+off2+8]	;; C2 = C2 * cosine/sine
+	fxch	st(3)			;; C3,A2,B2,C2,B4,A4,C4,B3
+	fstp	D6			;; A2,B2,C2,B4,A4,C4,B3
+	fsub	st(2), st		;; C2 = C2 - A2 (new I2)
+	fmul	QWORD PTR [edi+off2+8]	;; A2 = A2 * cosine/sine
+	fxch	st(6)			;; B3,B2,C2,B4,A4,C4,A2
+	fstp	D5			;; B2,C2,B4,A4,C4,A2
+	faddp	st(5), st		;; A2 = B2 + A2 (new R2)
+	fxch	st(2)			;; A4,B4,C2,C4,A2
+	faddp	st(1), st		;; B4 = B4 + A4 (new R4)
+	fxch	st(2)			;; C4,C2,B4,A2
+					;; I4,I2,R4,R2
+	fstp	D8
+	fstp	D4
+	fstp	D7
+	fstp	D3
+	ENDM
+
+; *************** four-complex with square macro ******************
+; Take four complex numbers and perform the last two levels of FFT.
+; Then square the FFT results and perform two levels of inverse FFT.
+; The four complex input numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; NOTE: Optimal = 144 clocks, Actual = 144 clocks
+
+four_complex_square MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R2			;; R2
+	fmul	QWORD PTR [edi]		;; A2 = R2 * sine
+	fld	R6			;; I2,A2
+	fmul	QWORD PTR [edi]		;; B2 = I2 * sine
+	fld	R3			;; R3,B2,A2
+	fmul	QWORD PTR [edi+16]	;; A3 = R3 * sine
+	fld	st(1)			;; C2 = B2 (C2,A3,B2,A2)
+	fmul	QWORD PTR [edi+8]	;; C2 = C2 * cosine/sine
+	fld	R7			;; I3,C2,A3,B2,A2
+	fmul	QWORD PTR [edi+16]	;; B3 = I3 * sine
+	fxch	st(4)			;; A2,C2,A3,B2,B3
+	fadd	st(1), st		;; C2 = C2 + A2 (new I2)
+	fmul	QWORD PTR [edi+8]	;; A2 = A2 * cosine/sine
+	fld	R8			;; I4,A2,C2,A3,B2,B3
+	fmul	QWORD PTR [edi+32]	;; B4 = I4 * sine
+	fxch	st(4)			;; B2,A2,C2,A3,B4,B3
+	fsubp	st(1), st		;; A2 = A2 - B2 (new R2)
+	fld	R4			;; R4,A2,C2,A3,B4,B3
+	fmul	QWORD PTR [edi+32]	;; A4 = R4 * sine
+	fld	st(5)			;; C3 = B3 (C3,A4,A2,C2,A3,B4,B3)
+	fmul	QWORD PTR [edi+24]	;; C3 = C3 * cosine/sine
+	fld	st(5)			;; C4 = B4 (C4,C3,A4,A2,C2,A3,B4,B3)
+	fmul	QWORD PTR [edi+40]	;; C4 = C4 * cosine/sine
+	fxch	st(5)			;; A3,C3,A4,A2,C2,C4,B4,B3
+	fadd	st(1), st		;; C3 = C3 + A3 (new I3)
+	fmul	QWORD PTR [edi+24]	;; A3 = A3 * cosine/sine
+	fxch	st(2)			;; A4,C3,A3,A2,C2,C4,B4,B3
+	fadd	st(5), st		;; C4 = C4 + A4 (new I4)
+	fmul	QWORD PTR [edi+40]	;; A4 = A4 * cosine/sine
+	fxch	st(7)			;; B3,C3,A3,A2,C2,C4,B4,A4
+	fsubp	st(2), st		;; A3 = A3 - B3 (new R3)
+	fld	R5			;; I1,C3,A3,A2,C2,C4,B4,A4
+	fxch	st(6)			;; B4,C3,A3,A2,C2,C4,I1,A4
+	fsubp	st(7), st		;; A4 = A4 - B4 (new R4)
+	fld	R1			;; R1,I3,R3,R2,I2,I4,I1,R4
+
+	fxch	st(2)			;; R3,I3,R1,R2,I2,I4,I1,R4
+	fsub	st(2), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(1)			;; I3,R3,R1,R2,I2,I4,I1,R4
+	fsub	st(6), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(7)			;; R4,R3,R1,R2,I2,I4,I1,I3
+	fsub	st(3), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(5)			;; I4,R3,R1,R2,I2,R4,I1,I3
+	fsub	st(4), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(2)			;; R1,R3,I4,R2,I2,R4,I1,I3
+	fadd	st(1), st		;; R3 = R1 + R3 (new R1)
+	fxch	st(3)			;; R2,R3,I4,R1,I2,R4,I1,I3
+	fadd	st(5), st		;; R4 = R2 + R4 (new R2)
+	fxch	st(6)			;; I1,R3,I4,R1,I2,R4,R2,I3
+	fadd	st(7), st		;; I3 = I1 + I3 (new I1)
+ 	fxch	st(4)			;; I2,R3,I4,R1,I1,R4,R2,I3
+	fadd	st(2), st		;; I4 = I2 + I4 (new I2)
+					;; I4,R1,I2,R3,I3,R2,R4,I1
+	 fxch	st(5)			;; R2,R1,I2,R3,I3,I4,R4,I1
+	 fsub	st(1), st		;; R1 = R1 - R2 (new R2)
+	 fadd	st, st			;; R2 = R2 * 2
+	 fxch	st(2)			;; I2,R1,R2,R3,I3,I4,R4,I1
+	 fsub	st(7), st		;; I1 = I1 - I2 (new I2)
+	 fadd	st, st			;; I2 = I2 * 2
+	 fxch	st(1)			;; R1,I2,R2,R3,I3,I4,R4,I1
+	 fst	R2			;; Save new R2
+	 faddp	st(2), st		;; R2 = R1 + R2 (new R1)
+	 fadd	st, st(6)		;; I2 = I1 + I2 (new I1)
+	 				;; I1,R1,R3,I3,I4,R4,I2
+	 fxch	st(4)			;; I4,R1,R3,I3,I1,R4,I2
+	 fsub	st(2), st		;; R3 = R3 - I4 (new R3)
+	 fadd	st, st			;; I4 = I4 * 2
+	fld	st(1)			;; TEMP1 = R1 (T,I4,R1,R3,I3,I1,R4,I2)
+	fxch	st(5)			;; I1,I4,R1,R3,I3,TEMP1,R4,I2
+	fsub	st(5), st		;; TEMP1 = TEMP1 - I1 (R1-I1)
+	fadd	st, st			;; I1 = I1 * 2
+	 fxch	st(6)			;; R4,I4,R1,R3,I3,TEMP1,I1,I2
+	 fsub	st(4), st		;; I3 = I3 - R4 (new I4)
+	 fadd	st, st			;; R4 = R4 * 2
+	fxch	st(6)			;; I1,I4,R1,R3,I3,TEMP1,R4,I2
+	fmul	st(2), st		;; R1 = R1 * I1 (new I1)
+	fadd	st, st(5)		;; I1 = I1 + TEMP1 (R1+I1)
+	 fxch	st(1)			;; I4,I1,R1,R3,I3,TEMP1,R4,I2
+	 fadd	st, st(3)		;; I4 = R3 + I4 (new R4)
+	 fxch	st(6)			;; R4,I1,R1,R3,I3,TEMP1,I4,I2
+	 fadd	st, st(4)		;; R4 = I3 + R4 (new I3)
+	 				;; I3,I1,R1,R3,I4,TEMP1,R4,I2
+	fxch	st(1)			;; I1,I3,R1,R3,I4,TEMP1,R4,I2
+	fmulp	st(5), st		;; TEMP1 = I1 * TEMP1 (new R1)
+	fxch	st(1)			;; I1,I3,R3,I4,R1,R4,I2
+	fstp	R5			;; Save new I1
+	fld	st(1)			;; TEMP3 = R3 (T,I3,R3,I4,R1,R4,I2)
+	fxch	st(1)			;; I3,TEMP3,R3,I4,R1,R4,I2
+	fsub	st(1), st		;; TEMP3 = TEMP3 - I3 (R3-I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fld	st(5)			;; TEMP4 = R4 (T4,I3,T3,R3,I4,R1,R4,I2)
+	fxch	st(4)			;; I4,I3,TEMP3,R3,TEMP4,R1,R4,I2
+	fsub	st(4), st		;; TEMP4 = TEMP4 - I4 (R4-I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(1)			;; I3,I4,TEMP3,R3,TEMP4,R1,R4,I2
+	fmul	st(3), st		;; R3 = R3 * I3 (new I3)
+	fadd	st, st(2)		;; I3 = I3 + TEMP3 (R3+I3)
+	fxch	st(1)			;; I4,I3,TEMP3,R3,TEMP4,R1,R4,I2
+	fmul	st(6), st		;; R4 = R4 * I4 (new I4)
+	fadd	st, st(4)		;; I4 = I4 + TEMP4 (R4+I4)
+	fxch	st(1)			;; I3,I4,TEMP3,R3,TEMP4,R1,R4,I2
+	fmulp	st(2), st		;; TEMP3 = I3 * TEMP3 (new R3)
+					;; I4,R3,I3,TEMP4,R1,R4,I2
+	fld	R2			;; R2,I4,R3,I3,TEMP4,R1,R4,I2
+	fxch	st(1)			;; I4,R2,R3,I3,TEMP4,R1,R4,I2
+	fmulp	st(4), st		;; TEMP4 = I4 * TEMP4 (new R4)
+					;; R2,R3,I3,R4,R1,I4,I2
+	fld	st			;; TEMP2 = R2 (T,R2,R3,I3,R4,R1,I4,I2)
+	fxch	st(7)			;; I2,R2,R3,I3,R4,R1,I4,TEMP2
+	fsub	st(7), st		;; TEMP2 = TEMP2 - I2 (R2-I2)
+	fadd	st, st			;; I2 = I2 * 2
+	 fxch	st(2)			;; R3,R2,I2,I3,R4,R1,I4,TEMP2
+	 fsub	st(4), st		;; R4 = R4 - R3 (new I4)
+	 fadd	st, st			;; R3 = R3 * 2
+	fxch	st(2)			;; I2,R2,R3,I3,R4,R1,I4,TEMP2
+	fmul	st(1), st		;; R2 = R2 * I2 (new I2)
+	fadd	st, st(7)		;; I2 = I2 + TEMP2 (R2+I2)
+	 fxch	st(6)			;; I4,R2,R3,I3,R4,R1,I2,TEMP2
+	 fsub	st(3), st		;; I3 = I3 - I4 (new R4)
+	 fadd	st, st			;; I4 = I4 * 2
+	fxch	st(6)			;; I2,R2,R3,I3,R4,R1,I4,TEMP2
+	fmulp	st(7), st		;; TEMP2 = I2 * TEMP2 (new R2)
+					;; I2,R3,I3,R4,R1,I4,R2
+	fld	R5			;; I1,I2,R3,I3,R4,R1,I4,R2
+	 fxch	st(1)			;; I2,I1,R3,I3,R4,R1,I4,R2
+	 fsub	st(1), st		;; I1 = I1 - I2 (new I2)
+	 fadd	st, st			;; I2 = I2 * 2
+	 fxch	st(7)			;; R2,I1,R3,I3,R4,R1,I4,I2
+	 fsub	st(5), st		;; R1 = R1 - R2 (new R2)
+	 fadd	st, st			;; R2 = R2 * 2
+	 fxch	st(4)			;; R4,I1,R3,I3,R2,R1,I4,I2
+	 fadd	st(2), st		;; R3 = R3 + R4 (new R3)
+	 fxch	st(3)			;; I3,I1,R3,R4,R2,R1,I4,I2
+	 fadd	st(6), st		;; I4 = I3 + I4 (new I3)
+	 fxch	st(1)			;; I1,I3,R3,R4,R2,R1,I4,I2
+	 fadd	st(7), st		;; I2 = I1 + I2 (new I1)
+	 fxch	st(5)			;; R1,I3,R3,R4,R2,I1,I4,I2
+	 fadd	st(4), st		;; R2 = R1 + R2 (new R1)
+					;; R2,R4,R3,I4,R1,I2,I3,I1
+	fxch	st(1)			;; R4,R2,R3,I4,R1,I2,I3,I1
+	fsub	st(1), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(3)			;; I4,R2,R3,R4,R1,I2,I3,I1
+	fsub	st(5), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(2)			;; R3,R2,I4,R4,R1,I2,I3,I1
+	fsub	st(4), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(6)			;; I3,R2,I4,R4,R1,I2,R3,I1
+	fsub	st(7), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(1)			;; R2,I3,I4,R4,R1,I2,R3,I1
+	fadd	st(3), st		;; R4 = R2 + R4 (new R2)
+	fmul	QWORD PTR [edi+32]	;; A4 = new R4 * sine
+	fxch	st(5)			;; I2,I3,I4,R4,R1,A4,R3,I1
+	fadd	st(2), st		;; I4 = I2 + I4 (new I2)
+	fmul	QWORD PTR [edi+32]	;; B4 = new I4 * sine
+	fxch	st(4)			;; R1,I3,I4,R4,B4,A4,R3,I1
+	fadd	st(6), st		;; R3 = R1 + R3 (new R1)
+	fmul	QWORD PTR [edi+16]	;; A3 = new R3 * sine
+	fxch	st(7)			;; I1,I3,I4,R4,B4,A4,R3,A3
+	fadd	st(1), st		;; I3 = I1 + I3 (new I1)
+	fmul	QWORD PTR [edi+16]	;; B3 = new I3 * sine
+					;; B3,I1,I2,R2,B4,A4,R1,A3
+
+	fxch	st(6)			;; R1,I1,I2,R2,B4,A4,B3,A3
+	fstp	R1			;; I1,I2,R2,B4,A4,B3,A3
+	fstp	R5			;; I2,R2,B4,A4,B3,A3
+	fmul	QWORD PTR [edi]		;; B2 = I2 * sine
+	fld	st(4)			;; C3 = B3 (C3,B2,R2,B4,A4,B3,A3)
+	fmul	QWORD PTR [edi+24]	;; C3 = C3 * cosine/sine
+	fld	st(3)			;; C4 = B4 (C4,C3,B2,R2,B4,A4,B3,A3)
+	fmul	QWORD PTR [edi+40]	;; C4 = C4 * cosine/sine
+	fxch	st(7)			;; A3,C3,B2,R2,B4,A4,B3,C4
+	fsub	st(1), st		;; C3 = C3 - A3 (new I3)
+	fmul	QWORD PTR [edi+24]	;; A3 = A3 * cosine/sine
+	fxch	st(5)			;; A4,C3,B2,R2,B4,A3,B3,C4
+	fsub	st(7), st		;; C4 = C4 - A4 (new I4)
+	fmul	QWORD PTR [edi+40]	;; A4 = A4 * cosine/sine
+	fxch	st(5)			;; A3,C3,B2,R2,B4,A4,B3,C4
+	faddp	st(6), st		;; B3 = B3 + A3 (new R3)
+	fxch	st(2)			;; R2,B2,I3,B4,A4,R3,C4
+	fmul	QWORD PTR [edi]		;; A2 = R2 * sine
+	fld	st(1)			;; C2 = B2 (C2,A2,B2,I3,B4,A4,R3,C4)
+	fmul	QWORD PTR [edi+8]	;; C2 = C2 * cosine/sine
+	fxch	st(3)			;; I3,A2,B2,C2,B4,A4,R3,C4
+	fstp	R7			;; A2,B2,C2,B4,A4,R3,C4
+	fsub	st(2), st		;; C2 = C2 - A2 (new I2)
+	fmul	QWORD PTR [edi+8]	;; A2 = A2 * cosine/sine
+	fxch	st(5)			;; R3,B2,C2,B4,A4,A2,C4
+	fstp	R3			;; B2,C2,B4,A4,A2,C4
+	faddp	st(4), st		;; A2 = B2 + A2 (new R2)
+	fxch	st(2)			;; A4,B4,I2,R2,C4
+	faddp	st(1), st		;; B4 = B4 + A4 (new R4)
+					;; R4,I2,R2,I4
+	fxch	st(3)			;; I4,I2,R2,R4
+	fstp	R8
+	fstp	R6
+	fstp	R2
+	fstp	R4
+	ENDM
+
+four_complex_mult MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R2			;; R2
+	fmul	QWORD PTR [edi]		;; A2 = R2 * sine
+	fld	R6			;; I2,A2
+	fmul	QWORD PTR [edi]		;; B2 = I2 * sine
+	fld	R3			;; R3,B2,A2
+	fmul	QWORD PTR [edi+16]	;; A3 = R3 * sine
+	fld	st(1)			;; C2 = B2 (C2,A3,B2,A2)
+	fmul	QWORD PTR [edi+8]	;; C2 = C2 * cosine/sine
+	fld	R7			;; I3,C2,A3,B2,A2
+	fmul	QWORD PTR [edi+16]	;; B3 = I3 * sine
+	fxch	st(4)			;; A2,C2,A3,B2,B3
+	fadd	st(1), st		;; C2 = C2 + A2 (new I2)
+	fmul	QWORD PTR [edi+8]	;; A2 = A2 * cosine/sine
+	fld	R8			;; I4,A2,C2,A3,B2,B3
+	fmul	QWORD PTR [edi+32]	;; B4 = I4 * sine
+	fxch	st(4)			;; B2,A2,C2,A3,B4,B3
+	fsubp	st(1), st		;; A2 = A2 - B2 (new R2)
+	fld	R4			;; R4,A2,C2,A3,B4,B3
+	fmul	QWORD PTR [edi+32]	;; A4 = R4 * sine
+	fld	st(5)			;; C3 = B3 (C3,A4,A2,C2,A3,B4,B3)
+	fmul	QWORD PTR [edi+24]	;; C3 = C3 * cosine/sine
+	fld	st(5)			;; C4 = B4 (C4,C3,A4,A2,C2,A3,B4,B3)
+	fmul	QWORD PTR [edi+40]	;; C4 = C4 * cosine/sine
+	fxch	st(5)			;; A3,C3,A4,A2,C2,C4,B4,B3
+	fadd	st(1), st		;; C3 = C3 + A3 (new I3)
+	fmul	QWORD PTR [edi+24]	;; A3 = A3 * cosine/sine
+	fxch	st(2)			;; A4,C3,A3,A2,C2,C4,B4,B3
+	fadd	st(5), st		;; C4 = C4 + A4 (new I4)
+	fmul	QWORD PTR [edi+40]	;; A4 = A4 * cosine/sine
+	fxch	st(7)			;; B3,C3,A3,A2,C2,C4,B4,A4
+	fsubp	st(2), st		;; A3 = A3 - B3 (new R3)
+	fld	R5			;; I1,C3,A3,A2,C2,C4,B4,A4
+	fxch	st(6)			;; B4,C3,A3,A2,C2,C4,I1,A4
+	fsubp	st(7), st		;; A4 = A4 - B4 (new R4)
+	fld	R1			;; R1,I3,R3,R2,I2,I4,I1,R4
+
+	fxch	st(2)			;; R3,I3,R1,R2,I2,I4,I1,R4
+	fsub	st(2), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(1)			;; I3,R3,R1,R2,I2,I4,I1,R4
+	fsub	st(6), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(7)			;; R4,R3,R1,R2,I2,I4,I1,I3
+	fsub	st(3), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(5)			;; I4,R3,R1,R2,I2,R4,I1,I3
+	fsub	st(4), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(2)			;; R1,R3,I4,R2,I2,R4,I1,I3
+	fadd	st(1), st		;; R3 = R1 + R3 (new R1)
+	fxch	st(3)			;; R2,R3,I4,R1,I2,R4,I1,I3
+	fadd	st(5), st		;; R4 = R2 + R4 (new R2)
+	fxch	st(6)			;; I1,R3,I4,R1,I2,R4,R2,I3
+	fadd	st(7), st		;; I3 = I1 + I3 (new I1)
+ 	fxch	st(4)			;; I2,R3,I4,R1,I1,R4,R2,I3
+	fadd	st(2), st		;; I4 = I2 + I4 (new I2)
+					;; I4,R1,I2,R3,I3,R2,R4,I1
+	 fxch	st(5)			;; R2,R1,I2,R3,I3,I4,R4,I1
+	 fsub	st(1), st		;; R1 = R1 - R2 (new R2)
+	 fadd	st, st			;; R2 = R2 * 2
+	 fxch	st(2)			;; I2,R1,R2,R3,I3,I4,R4,I1
+	 fsub	st(7), st		;; I1 = I1 - I2 (new I2)
+	 fadd	st, st			;; I2 = I2 * 2
+	 fxch	st(1)			;; R1,I2,R2,R3,I3,I4,R4,I1
+	 fst	R3			;; Save new R2
+	 faddp	st(2), st		;; R2 = R1 + R2 (new R1)
+	 fxch	st(6)			;; I1,newR1,R3,I3,I4,R4,I2
+	 fst	R4			;; Save new I2
+	 faddp	st(6), st		;; I2 = I1 + I2 (new I1)
+	 				;; newR1,R3,I3,I4,R4,newI1
+	fld	R1[ebp]
+	fmul	st, st(1)		;; R1R1,newR1,R3,I3,I4,R4,newI1
+	fld	R5[ebp]			;; FFTed R2
+	fmul	st, st(7)		;; I1I1,R1R1,newR1,R3,I3,I4,R4,newI1
+	fxch	st(5)			;; I4,R1R1,newR1,R3,I3,I1I1,R4,newI1
+	 fsub	st(3), st		;; R3 = R3 - I4 (new R3)
+	 fxch	st(2)			;; newR1,R1R1,I4,R3,I3,I1I1,R4,newI1
+	fmul	R5[ebp]			;; R1I1,R1R1,I4,R3,I3,I1I1,R4,newI1
+	fxch	st(2)			;; I4,R1R1,R1I1,R3,I3,I1I1,R4,newI1
+	 fadd	st, st			;; I4 = I4 * 2
+	 fxch	st(7)			;; newI1,R1R1,R1I1,R3,I3,I1I1,R4,I4
+	fmul	R1[ebp]			;; I1R1,R1R1,R1I1,R3,I3,I1I1,R4,I4
+	fxch	st(5)			;; I1I1,R1R1,R1I1,R3,I3,I1R1,R4,I4
+	fsubp	st(1), st		;; R1 = R1R1 - I1I1
+	fld	R3[ebp]			;; FFTed R5
+	fmul	st, st(3)		;; R3R3,R1,R1I1,R3,I3,I1R1,R4,I4
+	fxch	st(3)			;; R3,R1,R1I1,R3R3,I3,I1R1,R4,I4
+	 fadd	st(7), st		;; I4 = R3 + I4 (new R4)
+	fmul	R7[ebp]			;; R3I3,R1,R1I1,R3R3,I3,I1R1,R4,newR4
+	fxch	st(6)			;; R4,R1,R1I1,R3R3,I3,I1R1,R3I3,newR4
+	 fsub	st(4), st		;; I3 = I3 - R4 (new I4)
+	 fadd	st, st			;; R4 = R4 * 2
+	 fxch	st(1)			;; R1,R4,R1I1,R3R3,I3,I1R1,R3I3,newR4
+	 fstp	R1			;; R4,R1I1,R3R3,I3,I1R1,R3I3,newR4
+	fld	R4[ebp]			;; FFTed R4
+	fmul	st, st(7)		;; R4R4,R4,R1I1,R3R3,I3,I1R1,R3I3,newR4
+	fxch	st(5)			;; I1R1,R4,R1I1,R3R3,I3,R4R4,R3I3,newR4
+	faddp	st(2), st		;; I1 = R1I1 + I1R1
+	fxch	st(6)			;; newR4,I1,R3R3,I3,R4R4,R3I3,R4
+	fmul	R8[ebp]			;; R4I4,I1,R3R3,I3,R4R4,R3I3,R4
+	fld	R8[ebp]
+	fmul	st, st(4)		;; I4I4,R4I4,I1,R3R3,I3,R4R4,R3I3,R4
+	fxch	st(4)			;; I3,R4I4,I1,R3R3,I4I4,R4R4,R3I3,R4
+	 fadd	st(7), st		;; R4 = I3 + R4 (new I3)
+	fmul	R4[ebp]		      ;; I4R4,R4I4,I1,R3R3,I4I4,R4R4,R3I3,newI3
+	fxch	st(4)		      ;; I4I4,R4I4,I1,R3R3,I4R4,R4R4,R3I3,newI3
+	fsubp	st(5), st		;; R4 = R4R4 - I4I4
+	fld	R7[ebp]			;; FFTed R6
+	fmul	st, st(7)		;; I3I3,R4I4,I1,R3R3,I4R4,R4,R3I3,newI3
+	fxch	st(4)			;; I4R4,R4I4,I1,R3R3,I3I3,R4,R3I3,newI3
+	faddp	st(1), st		;; I4 = R4I4 + I4R4
+	fld	R2[ebp]			;; FFTed R3
+	fmul	R3			;; R2R2,I4,I1,R3R3,I3I3,R4,R3I3,newI3
+	fxch	st(4)			;; I3I3,I4,I1,R3R3,R2R2,R4,R3I3,newI3
+	fsubp	st(3), st		;; R3 = R3R3 - I3I3
+	fxch	st(6)			;; newI3,I1,R3,R2R2,R4,R3I3,I4
+	fmul	R3[ebp]			;; I3R3
+	fld	R6[ebp]			;; FFTed R4
+	fmul	R4			;; I2I2,I3R3,I1,R3,R2R2,R4,R3I3,I4
+	fxch	st(1)			;; I3R3,I2I2,I1,R3,R2R2,R4,R3I3,I4
+	faddp	st(6), st		;; I3 = R3I3 + I3R3
+	fld	R3
+	fmul	R6[ebp]			;; R2I2,I2I2,I1,R3,R2R2,R4,I3,I4
+	fxch	st(1)			;; I2I2,R2I2,I1,R3,R2R2,R4,I3,I4
+	fsubp	st(4), st		;; R2 = R2R2 - I2I2
+	fld	R4
+	fmul	R2[ebp]			;; I2R2,R2I2,I1,R3,R2,R4,I3,I4
+	fxch	st(7)			;; I4,R2I2,I1,R3,R2,R4,I3,I2R2
+	 fsub	st(6), st		;; I3 = I3 - I4 (new R4)
+	 fadd	st, st			;; I4 = I4 * 2
+	 fxch	st(7)			;; I2R2,R2I2,I1,R3,R2,R4,I3,I4
+	faddp	st(1), st		;; I2 = R2I2 + I2R2
+	 fld	R1			;; R1,I2,I1,R3,R2,R4,I3,I4
+	 fsub	st, st(4)		;; R1 = R1 - R2 (new R2)
+	 fxch	st(1)			;; I2,R1,I1,R3,R2,R4,I3,I4
+	 fsub	st(2), st		;; I1 = I1 - I2 (new I2)
+	 fadd	st, st			;; I2 = I2 * 2
+	 fxch	st(3)			;; R3,R1,I1,I2,R2,R4,I3,I4
+	 fsub	st(5), st		;; R4 = R4 - R3 (new I4)
+	 fadd	st, st			;; R3 = R3 * 2
+	 fxch	st(6)			;; I3,R1,I1,I2,R2,R4,R3,I4
+	 fadd	st(7), st		;; I4 = I3 + I4 (new I3)
+	 fxch	st(4)			;; R2,R1,I1,I2,I3,R4,R3,I4
+	 fadd	R1			;; R2 = R1 + R2 (new R1)
+	 fxch	st(2)			;; I1,R1,R2,I2,I3,R4,R3,I4
+	 fadd	st(3), st		;; I2 = I1 + I2 (new I1)
+	 fxch	st(5)			;; R4,R1,R2,I2,I3,I1,R3,I4
+	 fadd	st(6), st		;; R3 = R3 + R4 (new R3)
+					;; I4,R2,R1,I1,R4,I2,R3,I3
+	fxch	st(4)			;; R4,R2,R1,I1,I4,I2,R3,I3
+	fsub	st(1), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(4)			;; I4,R2,R1,I1,R4,I2,R3,I3
+	fsub	st(5), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(2)			;; R1,R2,I4,I1,R4,I2,R3,I3
+	fsub	st, st(6)		;; R1 = R1 - R3 (new R3)
+	fxch	st(6)			;; R3,R2,I4,I1,R4,I2,R1,I3
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(7)			;; I3,R2,I4,I1,R4,I2,R1,R3
+	fsub	st(3), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(1)			;; R2,I3,I4,I1,R4,I2,R1,R3
+	fadd	st(4), st		;; R4 = R2 + R4 (new R2)
+	fmul	QWORD PTR [edi+32]	;; A4 = new R4 * sine
+	fxch	st(5)			;; I2,I3,I4,I1,R4,A4,R1,R3
+	fadd	st(2), st		;; I4 = I2 + I4 (new I2)
+	fmul	QWORD PTR [edi+32]	;; B4 = new I4 * sine
+	fxch	st(6)			;; R1,I3,I4,I1,R4,A4,B4,R3
+	fadd	st(7), st		;; R3 = R1 + R3 (new R1)
+	fmul	QWORD PTR [edi+16]	;; A3 = new R3 * sine
+	fxch	st(3)			;; I1,I3,I4,A3,R4,A4,B4,R3
+	fadd	st(1), st		;; I3 = I1 + I3 (new I1)
+	fmul	QWORD PTR [edi+16]	;; B3 = new I3 * sine
+					;; B3,I1,I2,A3,R2,A4,B4,R1
+	fxch	st(7)			;; R1,I1,I2,A3,R2,A4,B4,B3
+	fstp	R1			;; I1,I2,A3,R2,A4,B4,B3
+	fstp	R5			;; I2,A3,R2,A4,B4,B3
+	fmul	QWORD PTR [edi]		;; B2 = I2 * sine
+	fld	st(5)			;; C3 = B3 (C3,B2,A3,R2,A4,B4,B3)
+	fmul	QWORD PTR [edi+24]	;; C3 = C3 * cosine/sine
+	fld	st(5)			;; C4 = B4 (C4,C3,B2,A3,R2,A4,B4,B3)
+	fmul	QWORD PTR [edi+40]	;; C4 = C4 * cosine/sine
+	fxch	st(3)			;; A3,C3,B2,C4,R2,A4,B4,B3
+	fsub	st(1), st		;; C3 = C3 - A3 (new I3)
+	fmul	QWORD PTR [edi+24]	;; A3 = A3 * cosine/sine
+	fxch	st(5)			;; A4,I3,B2,C4,R2,A3,B4,B3
+	fsub	st(3), st		;; C4 = C4 - A4 (new I4)
+	fmul	QWORD PTR [edi+40]	;; A4 = A4 * cosine/sine
+	fxch	st(5)			;; A3,I3,B2,I4,R2,A4,B4,B3
+	faddp	st(7), st		;; B3 = B3 + A3 (new R3)
+	fxch	st(3)			;; R2,B2,I4,I3,A4,B4,R3
+	fmul	QWORD PTR [edi]		;; A2 = R2 * sine
+	fld	st(1)			;; C2 = B2 (C2,A2,B2,I4,I3,A4,B4,R3)
+	fmul	QWORD PTR [edi+8]	;; C2 = C2 * cosine/sine
+	fxch	st(4)			;; I3,A2,B2,I4,C2,A4,B4,R3
+	fstp	R7			;; A2,B2,I4,C2,A4,B4,R3
+	fsub	st(3), st		;; C2 = C2 - A2 (new I2)
+	fmul	QWORD PTR [edi+8]	;; A2 = A2 * cosine/sine
+	fxch	st(6)			;; R3,B2,I4,I2,A4,B4,A2
+	fstp	R3			;; B2,I4,I2,A4,B4,A2
+	faddp	st(5), st		;; A2 = B2 + A2 (new R2)
+	fxch	st(2)			;; A4,I2,I4,B4,R2
+	faddp	st(3), st		;; B4 = B4 + A4 (new R4)
+					;; I2,I4,R4,R2
+	fstp	R6
+	fstp	R8
+	fstp	R4
+	fstp	R2
+	ENDM
+
+four_complex_mulf MACRO R1,R3,R5,R7,R2,R4,R6,R8
+	fld	R1[ebx]
+	fmul	R1[ebp]			;; R11
+	fld	R2[ebx]
+	fmul	R2[ebp]			;; R22,R11
+	fld	R1[ebx]
+	fmul	R2[ebp]			;; R12,R22,R11
+	fld	R2[ebx]
+	fmul	R1[ebp]			;; R21,R12,R22,R11
+	fxch	st(2)			;; R22,R12,R21,R11
+	fsubp	st(3), st		;; R12,R21,R1
+	fld	R3[ebx]
+	fmul	R3[ebp]			;; R33,R12,R21,R1
+	fxch	st(1)			;; R12,R33,R21,R1
+	faddp	st(2), st		;; R33,I1,R1
+	fld	R4[ebx]
+	fmul	R4[ebp]			;; R44,R33,I1,R1
+	fld	R3[ebx]
+	fmul	R4[ebp]			;; R34,R44,R33,I1,R1
+	fld	R4[ebx]
+	fmul	R3[ebp]			;; R43,R34,R44,R33,I1,R1
+	fxch	st(2)			;; R44,R34,R43,R33,I1,R1
+	fsubp	st(3), st		;; R34,R43,R2,I1,R1
+	fxch	st(3)			;; I1,R43,R2,R34,R1
+	fstp	R2			;; R43,R2,R34,R1
+	fld	R5[ebx]
+	fmul	R5[ebp]			;; R55,R43,R2,R34,R1
+	fxch	st(1)			;; R43,R55,R2,R34,R1
+	faddp	st(3), st		;; R55,R2,I2,R1
+	fld	R6[ebx]
+	fmul	R6[ebp]			;; R66,R55,R2,I2,R1
+	fld	R5[ebx]
+	fmul	R6[ebp]			;; R56,R66,R55,R2,I2,R1
+	fld	R6[ebx]
+	fmul	R5[ebp]			;; R65,R56,R66,R55,R2,I2,R1
+	fxch	st(2)			;; R66,R56,R65,R55,R2,I2,R1
+	fsubp	st(3), st		;; R56,R65,R3,R2,I2,R1
+	fld	R7[ebx]
+	fmul	R7[ebp]			;; R77,R56,R65,R3,R2,I2,R1
+	fxch	st(1)			;; R56,R77,R65,R3,R2,I2,R1
+	faddp	st(2), st		;; R77,I3,R3,R2,I2,R1
+	fld	R8[ebx]
+	fmul	R8[ebp]			;; R88,R77,I3,R3,R2,I2,R1
+	fld	R7[ebx]
+	fmul	R8[ebp]			;; R78,R88,R77,I3,R3,R2,I2,R1
+	fxch	st(1)			;; R88,R78,R77,I3,R3,R2,I2,R1
+	fsubp	st(2), st		;; R78,R4,I3,R3,R2,I2,R1
+	fld	R8[ebx]
+	fmul	R7[ebp]			;; R87,R78,R4,I3,R3,R2,I2,R1
+	fxch	st(5)			;; R2,R78,R4,I3,R3,R87,I2,R1
+	 fsub	st(7), st		;; R1 = R1 - R2 (new R2)
+	 fadd	st, st			;; R2 = R2 * 2
+	 fxch	st(5)			;; R87,R78,R4,I3,R3,R2,I2,R1
+	faddp	st(1), st		;; I4,R4,I3,R3,R2,I2,R1
+	 fld	R2			;; I1,I4,R4,I3,R3,R2,I2,R1
+	 fsub	st, st(6)		;; I1 = I1 - I2 (new I2)
+	 fxch	st(4)			;; R3,I4,R4,I3,I1,R2,I2,R1
+	 fsub	st(2), st		;; R4 = R4 - R3 (new I4)
+	 fadd	st, st			;; R3 = R3 * 2
+	 fxch	st(1)			;; I4,R3,R4,I3,I1,R2,I2,R1
+	 fsub	st(3), st		;; I3 = I3 - I4 (new R4)
+	 fadd	st, st			;; I4 = I4 * 2
+	 fxch	st(7)			;; R1,R3,R4,I3,I1,R2,I2,I4
+	 fadd	st(5), st		;; R2 = R1 + R2 (new R1)
+	 fxch	st(6)			;; I2,R3,R4,I3,I1,R2,R1,I4
+	 fadd	R2			;; I2 = I1 + I2 (new I1)
+	 fxch	st(2)			;; R4,R3,I2,I3,I1,R2,R1,I4
+	 fadd	st(1), st		;; R3 = R3 + R4 (new R3)
+	 fxch	st(3)			;; I3,R3,I2,R4,I1,R2,R1,I4
+	 fadd	st(7), st		;; I4 = I3 + I4 (new I3)
+					;; R4,R3,I1,I4,I2,R1,R2,I3
+	fsub	st(6), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(3)			;; I4,R3,I1,R4,I2,R1,R2,I3
+	fsub	st(4), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(1)			;; R3,I4,I1,R4,I2,R1,R2,I3
+	fsub	st(5), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(7)			;; I3,I4,I1,R4,I2,R1,R2,R3
+	fsub	st(2), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(6)			;; R2,I4,I1,R4,I2,R1,I3,R3
+	fadd	st(3), st		;; R4 = R2 + R4 (new R2)
+	fmul	QWORD PTR [edi+32]	;; A4 = new R4 * sine
+	fxch	st(4)			;; I2,I4,I1,R4,A4,R1,I3,R3
+	fadd	st(1), st		;; I4 = I2 + I4 (new I2)
+	fmul	QWORD PTR [edi+32]	;; B4 = new I4 * sine
+	fxch	st(5)			;; R1,I4,I1,R4,A4,B4,I3,R3
+	fadd	st(7), st		;; R3 = R1 + R3 (new R1)
+	fmul	QWORD PTR [edi+16]	;; A3 = new R3 * sine
+	fxch	st(2)			;; I1,I4,A3,R4,A4,B4,I3,R3
+	fadd	st(6), st		;; I3 = I1 + I3 (new I1)
+	fmul	QWORD PTR [edi+16]	;; B3 = new I3 * sine
+					;; B3,I2,A3,R2,A4,B4,I1,R1
+
+	fxch	st(7)			;; R1,I2,A3,R2,A4,B4,I1,B3
+	fstp	R1			;; I2,A3,R2,A4,B4,I1,B3
+	fmul	QWORD PTR [edi]		;; B2 = I2 * sine
+	fxch	st(5)			;; I1,A3,R2,A4,B4,B2,B3
+	fstp	R2			;; A3,R2,A4,B4,B2,B3
+	fld	st(5)			;; C3 = B3 (C3,A3,R2,A4,B4,B2,B3)
+	fmul	QWORD PTR [edi+24]	;; C3 = C3 * cosine/sine
+	fld	st(4)			;; C4 = B4 (C4,C3,A3,R2,A4,B4,B2,B3)
+	fmul	QWORD PTR [edi+40]	;; C4 = C4 * cosine/sine
+	fxch	st(2)			;; A3,C3,C4,R2,A4,B4,B2,B3
+	fsub	st(1), st		;; C3 = C3 - A3 (new I3)
+	fmul	QWORD PTR [edi+24]	;; A3 = A3 * cosine/sine
+	fxch	st(4)			;; A4,C3,C4,R2,A3,B4,B2,B3
+	fsub	st(2), st		;; C4 = C4 - A4 (new I4)
+	fmul	QWORD PTR [edi+40]	;; A4 = A4 * cosine/sine
+	fxch	st(4)			;; A3,C3,C4,R2,A4,B4,B2,B3
+	faddp	st(7), st		;; B3 = B3 + A3 (new R3)
+	fxch	st(2)			;; R2,C4,C3,A4,B4,B2,B3
+	fmul	QWORD PTR [edi]		;; A2 = R2 * sine
+	fld	st(5)			;; C2 = B2 (C2,A2,C4,C3,A4,B4,B2,B3)
+	fmul	QWORD PTR [edi+8]	;; C2 = C2 * cosine/sine
+	fxch	st(3)			;; C3,A2,C4,C2,A4,B4,B2,B3
+	fstp	R6			;; A2,C4,C2,A4,B4,B2,B3
+	fsub	st(2), st		;; C2 = C2 - A2 (new I2)
+	fmul	QWORD PTR [edi+8]	;; A2 = A2 * cosine/sine
+	fxch	st(1)			;; C4,A2,C2,A4,B4,B2,B3
+	fstp	R8			;; A2,C2,A4,B4,B2,B3
+	faddp	st(4), st		;; B2 = B2 + A2 (new R2)
+	fstp	R4			;; A4,B4,B2,B3
+	faddp	st(1), st		;; B4 = B4 + A4 (new R4)
+					;; R4,R2,R3
+	fxch	st(2)			;; R3,R2,R4
+	fstp	R5
+	fstp	R3
+	fstp	R7
+	ENDM
+
+
+; *************** four-complex-first-fft macro ******************
+; This macro multiplies numbers by the proper root of i for
+; modular 2^N+1 arithmetic.  The multiplier is
+; cos(j*pi/fftlen) + sin(j*pi/fftlen)*i
+; Let R be the real value, I be the imaginary value, S be the sine,
+; C be the cosine.  We want to compute (R+Ii) * (C+Si) which equals
+; (RC-IS) + (RS+IC)i
+; These are computed as follows (S/C and C are precomputed):
+; B1 = real result = (R - (I * S/C)) * C
+; A1 = imag result = ((R * S/C) + I) * C
+; This macro takes four complex values, premultiplies 4 of the values
+; by 2^N+1 multipliers and performs two levels of the FFT process.
+; These two levels use the first set of sine/cosine values.
+; The four complex input numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; The four complex output numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; edi = array of multiplier values
+
+four_complex_fft_premult MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	four_complex_fft4_cmn <R1>,<R2>,<R3>,<R4>,<R5>,<R6>,<R7>,<R8>,0,0,16,32,48
+	ENDM
+four_complex_first_fft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	four_complex_fft4_cmn <R1>,<R2>,<R3>,<R4>,<R5>,<R6>,<R7>,<R8>,ebx,0,16,32,48
+	ENDM
+four_complex_fft4_cmn MACRO R1,R2,R3,R4,R5,R6,R7,R8,off,off1,off2,off3,off4
+	fld	R1[off]			;; R1
+	fmul	QWORD PTR [edi+off1+8]	;; A1 = R1 * premul_real/premul_imag
+	fld	R5[off]			;; I1,A1
+	fmul	QWORD PTR [edi+off1+8]	;; B1 = I1 * premul_real/premul_imag
+	fxch	st(1)			;; A1,B1
+	fsub	R5[off]			;; A1 = A1 - I1
+	fld	R3[off]			;; R3,A1,B1
+	fmul	QWORD PTR [edi+off3+8]	;; A3 = R3 * premul_real/premul_imag
+	fxch	st(2)			;; B1,A1,A3
+	fadd	R1[off]			;; B1 = B1 + R1
+	fxch	st(1)			;; A1,B1,A3
+	fmul	QWORD PTR [edi+off1]	;; A1 = A1 * premul_imag (new R1)
+	fld	R7[off]			;; I3,A1,B1,A3
+	fmul	QWORD PTR [edi+off3+8]	;; B3 = I3 * premul_real/premul_imag
+	fxch	st(3)			;; A3,A1,B1,B3
+	fsub	R7[off]			;; A3 = A3 - I3
+	fxch	st(2)			;; B1,A1,A3,B3
+	fmul	QWORD PTR [edi+off1]	;; B1 = B1 * premul_imag (new I1)
+	fld	R2[off]			;; R2,B1,A1,A3,B3
+	fmul	QWORD PTR [edi+off2+8]	;; A2 = R2 * premul_real/premul_imag
+	fxch	st(4)			;; B3,B1,A1,A3,A2
+	fadd	R3[off]			;; B3 = B3 + R3
+	fxch	st(3)			;; A3,B1,A1,B3,A2
+	fmul	QWORD PTR [edi+off3]	;; A3 = A3 * premul_imag (new R3)
+	fxch	st(4)			;; A2,B1,A1,B3,A3
+	fsub	R6[off]			;; A2 = A2 - I2
+	fxch	st(3)			;; B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi+off3]	;; B3 = B3 * premul_imag (new I3)
+	fld	R6[off]			;; I2,B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi+off2+8]	;; B2 = I2 * premul_real/premul_imag
+	fld	R4[off]			;; R4,B2,B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi+off4+8]	;; A4 = R4 * premul_real/premul_imag
+	fxch	st(1)			;; B2,A4,B3,B1,A1,A2,A3
+	fadd	R2[off]			;; B2 = B2 + R2
+	fxch	st(5)			;; A2,A4,B3,B1,A1,B2,A3
+	fmul	QWORD PTR [edi+off2]	;; A2 = A2 * premul_imag (new R2)
+	fld	R8[off]			;; I4,A2,A4,B3,B1,A1,B2,A3
+	fmul	QWORD PTR [edi+off4+8]	;; B4 = I4 * premul_real/premul_imag
+	fxch	st(2)			;; A4,A2,B4,B3,B1,A1,B2,A3
+	fsub	R8[off]			;; A4 = A4 - I4
+	fxch	st(6)			;; B2,A2,B4,B3,B1,A1,A4,A3
+	fmul	QWORD PTR [edi+off2]	;; B2 = B2 * premul_imag (new I2)
+	fxch	st(2)			;; B4,A2,B2,B3,B1,A1,A4,A3
+	fadd	R4[off]			;; B4 = B4 + R4
+	fxch	st(6)			;; A4,A2,B2,B3,B1,A1,B4,A3
+	fmul	QWORD PTR [edi+off4]	;; A4 = A4 * premul_imag (new R4)
+					;; R4,R2,I2,I3,I1,R1,B4,R3
+	fxch	st(7)			;; R3,R2,I2,I3,I1,R1,B4,R4
+	fsub	st(5), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	 fxch	st(6)			;; B4,R2,I2,I3,I1,R1,R3,R4
+	 fmul	QWORD PTR [edi+off4]	;; B4 = B4 * premul_imag (new I4)
+	fxch	st(3)			;; I3,R2,I2,I4,I1,R1,R3,R4
+	fsub	st(4), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(7)			;; R4,R2,I2,I4,I1,R1,R3,I3
+	fsub	st(1), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(3)			;; I4,R2,I2,R4,I1,R1,R3,I3
+	fsub	st(2), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(5)			;; R1,R2,I2,R4,I1,I4,R3,I3
+	fadd	st(6), st		;; R3 = R1 + R3 (new R1)
+	fxch	st(4)			;; I1,R2,I2,R4,R1,I4,R3,I3
+	fadd	st(7), st		;; I3 = I1 + I3 (new I1)
+	fxch	st(1)			;; R2,I1,I2,R4,R1,I4,R3,I3
+	fadd	st(3), st		;; R4 = R2 + R4 (new R2)
+	fxch	st(2)			;; I2,I1,R2,R4,R1,I4,R3,I3
+	fadd	st(5), st		;; I4 = I2 + I4 (new I2)
+					;; I4,I3,R4,R2,R3,I2,R1,I1
+	fsub	st(4), st		;; R3 = R3 - I4 (new R3)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(2)			;; R4,I3,I4,R2,R3,I2,R1,I1
+	fsub	st(1), st		;; I3 = I3 - R4 (new I4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(3)			;; R2,I3,I4,R4,R3,I2,R1,I1
+	fsub	st(6), st		;; R1 = R1 - R2 (new R2)
+	fadd	st, st			;; R2 = R2 * 2
+	fxch	st(5)			;; I2,I3,I4,R4,R3,R2,R1,I1
+	fsub	st(7), st		;; I1 = I1 - I2 (new I2)
+	fadd	st, st			;; I2 = I2 * 2
+	fxch	st(4)			;; R3,I3,I4,R4,I2,R2,R1,I1
+	fadd	st(2), st		;; I4 = R3 + I4 (new R4)
+	fxch	st(1)			;; I3,R3,I4,R4,I2,R2,R1,I1
+	fadd	st(3), st		;; R4 = I3 + R4 (new I3)
+	fxch	st(6)			;; R1,R3,I4,R4,I2,R2,I3,I1
+	fadd	st(5), st		;; R2 = R1 + R2 (new R1)
+	fxch	st(7)			;; I1,R3,I4,R4,I2,R2,I3,R1
+	fadd	st(4), st		;; I2 = I1 + I2 (new I1)
+					;; I2,R3,R4,I3,I1,R1,I4,R2
+	fstp	R6
+	fstp	R3
+	fstp	R4
+	fstp	R7
+	fstp	R5
+	fstp	R1
+	fstp	R8
+	fstp	R2
+	ENDM
+
+; *************** four-complex-last-unfft macro ******************
+; This macro divides numbers by the proper root of i for
+; mod 2^N+1 arithmetic.  This division is done with a multiply of
+; cos(j*pi/fftlen) - sin(j*pi/fftlen)*i
+; Let R be the real value, I be the imaginary value, S be the sine,
+; C be the cosine.  We want to compute (R+Ii) * (C-Si) which equals
+; (RC+IS) + (IC-RS)i
+; These are computed as follows (S/C and C are precomputed):
+; B1 = real result = ((I * S/C) + R) * C
+; A1 = imag result = (I - (R * S/C)) * C
+; This macro takes four complex values and performs two levels of the
+; inverse FFT process.  Then the 2^N+1 multipliers are applied.
+; These two levels use the first set of sine/cosine values.
+; The four complex input numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; The four complex output numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; edi = array of group multipliers values
+
+four_complex_last_unfft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	four_complex_unfft4_cmn <R1>,<R2>,<R3>,<R4>,<R5>,<R6>,<R7>,<R8>
+	ENDM
+
+four_complex_unfft4_cmn MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R2			;; I1
+	fadd	R4			;; new I1 = I1 + I2
+	fld	R6			;; I3
+	fadd	R8			;; new I3 = I3 + I4
+	fld	R1			;; R1
+	fadd	R3			;; new R1 = R1 + R2
+	fld	R7			;; R4
+	fadd	R5			;; new R3 = R3 + R4
+	fld	R2			;; I1
+	fsub	R4			;; new I2 = I1 - I2
+	fld	R7			;; R4
+	fsub	R5			;; new I4 = R4 - R3
+	fld	R1			;; R1
+	fsub	R3			;; new R2 = R1 - R2
+	fld	R6			;; I3
+	fsub	R8			;; new R4 = I3 - I4
+					;; R4,R2,I4,I2,R3,R1,I3,I1
+	fxch	st(6)			;; I3,R2,I4,I2,R3,R1,R4,I1
+	fsub	st(7), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(4)			;; R3,R2,I4,I2,I3,R1,R4,I1
+	fsub	st(5), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(7)			;; I1,R2,I4,I2,I3,R1,R4,R3
+	fadd	st(4), st		;; I3 = I1 + I3 (new I1)
+	fmul	QWORD PTR [edi+32]	;; B3 = new I3 * premul_imag
+	fxch	st(5)			;; R1,R2,I4,I2,newI1,B3,R4,R3
+	fadd	st(7), st		;; R3 = R1 + R3 (new R1)
+	fmul	QWORD PTR [edi+32]	;; A3 = new R3 * premul_imag
+	fxch	st(4)			;; newI1,R2,I4,I2,A3,B3,R4,newR1
+	fstp	R1			;; Free up a register
+	fld	st(4)			;; C3 = B3 (C3,R2,I4,I2,A3,B3,R4,newR1)
+	fmul	QWORD PTR [edi+40]	;; C3 = C3 * premul_real/premul_imag
+	fxch	st(6)			;; R4,R2,I4,I2,A3,B3,C3,newR1
+	fsub	st(1), st		;; R2 = R2 - R4 (new R4)
+	fxch	st(7)			;; newR1,R2,I4,I2,A3,B3,C3,R4
+	fmul	QWORD PTR [edi]		;; A1 = new R1 * premul_imag
+	fxch	st(7)			;; R4,R2,I4,I2,A3,B3,C3,A1
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(4)			;; A3,R2,I4,I2,R4,B3,C3,A1
+	fsub	st(6), st		;; C3 = C3 - A3 (new I3)
+	fmul	QWORD PTR [edi+40]	;; A3 = A3 * premul_real/premul_imag
+	fxch	st(2)			;; I4,R2,A3,I2,R4,B3,C3,A1
+	fsub	st(3), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(2)			;; A3,R2,I4,I2,R4,B3,C3,A1
+	faddp	st(5), st		;; B3 = B3 + A3 (new R3)
+	fxch	st(5)			;; C3,I4,I2,R4,B3,R2,A1
+	fstp	R6			;; I4,I2,R4,B3,R2,A1
+	fadd	st, st(1)		;; I4 = I2 + I4 (new I2)
+	fxch	st(1)			;; I2,I4,R4,B3,R2,A1
+	fmul	QWORD PTR [edi+48]	;; B4 = new I4 * premul_imag
+	fxch	st(4)			;; R2,newI2,R4,B3,B4,A1
+	fadd	st(2), st		;; R4 = R2 + R4 (new R2)
+	fmul	QWORD PTR [edi+48]	;; A4 = new R4 * premul_imag
+	fxch	st(3)			;; B3,newI2,newR2,A4,B4,A1
+	fstp	R5			;; newI2,newR2,A4,B4,A1
+	fmul	QWORD PTR [edi+16]	;; B2 = new I2 * premul_imag
+	fld	st(3)			;; C4 = B4 (C4,B2,newR2,A4,B4,A1)
+	fmul	QWORD PTR [edi+56]	;; C4 = C4 * premul_real/premul_imag
+	fld	R1			;; newI1,C4,B2,newR2,A4,B4,A1
+	fmul	QWORD PTR [edi]		;; B1 = new I1 * premul_imag
+	fxch	st(4)			;; A4,C4,B2,newR2,B1,B4,A1
+	fsub	st(1), st		;; C4 = C4 - A4 (new I4)
+	fmul	QWORD PTR [edi+56]	;; A4 = A4 * premul_real/premul_imag
+	fld	st(2)			;; C2 = B2 (C2,A4,C4,B2,newR2,B1,B4,A1)
+	fmul	QWORD PTR [edi+24]	;; C2 = C2 * premul_real/premul_imag
+	fxch	st(1)			;; A4,C2,C4,B2,newR2,B1,B4,A1
+	faddp	st(6), st		;; B4 = B4 + A4 (new R4)
+	fxch	st(3)			;; newR2,C4,B2,C2,B1,B4,A1
+	fmul	QWORD PTR [edi+16]	;; A2 = new R2 * premul_imag
+	fld	st(4)			;; C1 = B1 (C1,A2,C4,B2,C2,B1,B4,A1)
+	fmul	QWORD PTR [edi+8]	;; C1 = C1 * premul_real/premul_imag
+	fxch	st(1)			;; A2,C1,C4,B2,C2,B1,B4,A1
+	fsub	st(4), st		;; C2 = C2 - A2 (new I2)
+	fmul	QWORD PTR [edi+24]	;; A2 = A2 * premul_real/premul_imag
+	fxch	st(7)			;; A1,C1,C4,B2,C2,B1,B4,A2
+	fsub	st(1), st		;; C1 = C1 - A1 (new I1)
+	fmul	QWORD PTR [edi+8]	;; A1 = A1 * premul_real/premul_imag
+	fxch	st(2)			;; C4,C1,A1,B2,C2,B1,B4,A2
+	fstp	R8			;; C1,A1,B2,C2,B1,B4,A2
+	fstp	R2			;; A1,B2,C2,B1,B4,A2
+	faddp	st(3), st		;; B1 = B1 + A1 (new R1)
+	faddp	st(4), st		;; A2 = B2 + A2 (new R2)
+	fstp	R4			;; B1,B4,A2
+	fstp	R1			;; B4,A2
+	fstp	R7			;; A2
+	fstp	R3
+	ENDM
+
+
+; *************** four_real_four_semireal_fft_1 macro ******************
+; Take four real and four semi-real numbers and perform one level of the FFT.
+; Of the four reals, two are real, two are semi-real.
+
+four_real_four_semireal_fft_1 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1
+	fadd	R3			;; new R1 = R1 + R3
+	fld	R1			;; R1
+	fsub	R3			;; new R3 = R1 - R3
+	fld	R5			;; Nop R5
+	fstp	R3
+	fstp	R5
+	fstp	R1
+	fld	R2			;; R2
+	fadd	R4			;; new R2 = R2 + R4
+	fld	R2			;; R2
+	fsub	R4			;; new R4 = R2 - R4
+	fld	R6			;; Nop R6
+	fstp	R4
+	fstp	R6
+	fstp	R2
+	ENDM
+
+
+; *************** four_real_four_semireal_unfft_1 macro ******************
+; Take four real and four semi-real numbers and perform one level of
+; the inverse FFT.
+
+four_real_four_semireal_unfft_1 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1
+	fadd	R3			;; new R1 = R1 + R3
+	fld	R1			;; R1
+	fsub	R3			;; new R3 = R1 - R3
+	fld	R5			;; Nop R5
+	fstp	R3
+	fstp	R5
+	fstp	R1
+	fld	R2			;; R2
+	fadd	R4			;; new R2 = R2 + R4
+	fld	R2			;; R2
+	fsub	R4			;; new R4 = R2 - R4
+	fld	R6			;; Nop R6
+	fstp	R4
+	fstp	R6
+	fstp	R2
+	ENDM
+
+
+; *************** four-complex-fft-1 macro ******************
+; This macro performs two two-complex-fft operations.
+; One of the two complex operations is on: R1 + R5i, R3 + R7i
+; The other two complex operation is on: R2 + R6i, R4 + R8i
+; edi = array of sin/cos values
+; NOTE: Optimal = 48 clocks, Actual = 48 clocks
+
+four_complex_fft_1 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R3			;; R3
+	fmul	QWORD PTR [edi+24]	;; A3 = R3 * cosine/sine
+	fld	R7			;; I3,A3
+	fmul	QWORD PTR [edi+24]	;; B3 = I3 * cosine/sine
+	fxch	st(1)			;; A3,B3
+	fsub	R7			;; A3 = A3 - I3
+	fld	R4			;; R4,A3,B3
+	fmul	QWORD PTR [edi+24]	;; A4 = R4 * cosine/sine
+	fxch	st(2)			;; B3,A3,A4
+	fadd	R3			;; B3 = B3 + R3
+	fxch	st(1)			;; A3,B3,A4
+	fmul	QWORD PTR [edi+16]	;; A3 = A3 * sine (new R3)
+	fxch	st(2)			;; A4,B3,A3
+	fsub	R8			;; A4 = A4 - I4
+	fxch	st(1)			;; B3,A4,A3
+	fmul	QWORD PTR [edi+16]	;; B3 = B3 * sine (new I3)
+	fld	R8			;; I4,B3,A4,A3
+	fmul	QWORD PTR [edi+24]	;; B4 = I4 * cosine/sine
+	fld	R1			;; R1,B4,B3,A4,A3
+	fld	R5			;; I1,R1,B4,B3,A4,A3
+	fxch	st(2)			;; B4,R1,I1,B3,A4,A3
+	fadd	R4			;; B4 = B4 + R4
+	fxch	st(4)			;; A4,R1,I1,B3,B4,A3
+	fmul	QWORD PTR [edi+16]	;; A4 = A4 * sine (new R4)
+	fld	R2			;; R2,A4,R1,I1,B3,B4,A3
+	fxch	st(5)			;; B4,A4,R1,I1,B3,R2,A3
+	fmul	QWORD PTR [edi+16]	;; B4 = B4 * sine (new I4)
+	fld	R6			;; I2,B4,A4,R1,I1,B3,R2,A3
+					;; I2,I4,R4,R1,I1,I3,R2,R3
+	fxch	st(5)			;; I3,I4,R4,R1,I1,I2,R2,R3
+	fsub	st(4), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(7)			;; R3,I4,R4,R1,I1,I2,R2,I3
+	fsub	st(3), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(1)			;; I4,R3,R4,R1,I1,I2,R2,I3
+	fsub	st(5), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(2)			;; R4,R3,I4,R1,I1,I2,R2,I3
+	fsub	st(6), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(4)			;; I1,R3,I4,R1,R4,I2,R2,I3
+	fadd	st(7), st		;; I3 = I1 + I3 (new I1)
+	fxch	st(3)			;; R1,R3,I4,I1,R4,I2,R2,I3
+	fadd	st(1), st		;; R3 = R1 + R3 (new R1)
+	fxch	st(5)			;; I2,R3,I4,I1,R4,R1,R2,I3
+	fadd	st(2), st		;; I4 = I2 + I4 (new I2)
+	fxch	st(6)			;; R2,R3,I4,I1,R4,R1,I2,I3
+	fadd	st(4), st		;; R4 = R2 + R4 (new R2)
+					;; R4,R1,I2,I3,R2,R3,I4,I1
+					;; R6,R1,R4,R7,R2,R5,R8,R3
+	fstp	R4
+	fstp	R1
+	fstp	R6
+	fstp	R7
+	fstp	R2
+	fstp	R3
+	fstp	R8
+	fstp	R5
+	ENDM
+
+; *************** four-complex-unfft-1 macro ******************
+; This macro performs two two-complex-unfft operations.
+; One of the two complex operations is on: R1 + R3i, R5 + R7i
+; The other two complex operation is on: R2 + R4i, R6 + R8i
+; edi = array of sin/cos values
+; NOTE: Optimal = 46 clocks, Actual = 46 clocks
+
+four_complex_unfft_1 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R3			;; I1
+	fsub	R7			;; new I3 = I1 - I3
+	fld	R1			;; R1
+	fsub	R5			;; new R3 = R1 - R3
+	fxch	st(1)			;; I3,R3
+	fmul	QWORD PTR [edi+16]	;; B3 = I3 * sine
+	fld	R4			;; I2
+	fsub	R8			;; new I4 = I2 - I4
+	fxch	st(2)			;; R3,B3,I4
+	fmul	QWORD PTR [edi+16]	;; A3 = R3 * sine
+	fld	st(1)			;; C3 = B3 (C3,A3,B3,I4)
+	fmul	QWORD PTR [edi+24]	;; C3 = C3 * cosine/sine
+	fld	R2			;; R2
+	fsub	R6			;; new R4 = R2 - R4
+	fxch	st(4)			;; I4,C3,A3,B3,R4
+	fmul	QWORD PTR [edi+16]	;; B4 = I4 * sine
+	fxch	st(2)			;; A3,C3,I4,B3,R4
+	fsub	st(1), st		;; C3 = C3 - A3 (new I3)
+	fmul	QWORD PTR [edi+24]	;; A3 = A3 * cosine/sine
+	fld	R1			;; R1
+	fadd	R5			;; new R1 = R1 + R3
+	fxch	st(5)			;; R4,A3,C3,B4,B3,R1
+	fmul	QWORD PTR [edi+16]	;; A4 = R4 * sine
+	fld	st(3)			;; C4 = B4 (C4,A4,A3,C3,B4,B3,R1)
+	fmul	QWORD PTR [edi+24]	;; C4 = C4 * cosine/sine
+	fld	R3			;; I1
+	fadd	R7			;; new I1 = I1 + I3
+	fxch	st(2)			;; A4,C4,I1,A3,C3,B4,B3,R1
+	fsub	st(1), st		;; C4 = C4 - A4 (new I4)
+	fmul	QWORD PTR [edi+24]	;; A4 = A4 * cosine/sine
+	fxch	st(7)			;; R1,C4,I1,A3,C3,B4,B3,A4
+	fstp	R1			;; C4,I1,A3,C3,B4,B3,A4
+	fld	R2			;; R2
+	fadd	R6			;; new R2 = R2 + R4
+	fxch	st(6)			;; B3,C4,I1,A3,C3,B4,R2,A4
+	faddp	st(3), st		;; A3 = A3 + B3 (new R3)
+	fxch	st(4)			;; B4,I1,A3,C3,C4,R2,A4
+	faddp	st(6), st		;; A4 = A4 + B4 (new R4)
+	fld	R4			;; I2
+	fadd	R8			;; new I2 = I2 + I4
+					;; I2,I1,R3,I3,I4,R2,R4
+	fxch	st(5)			;; R2,I1,R3,I3,I4,I2,R4
+					;; R2,R5,R3,R7,R8,R6,R4
+	fstp	R2
+	fstp	R3
+	fstp	R5
+	fstp	R7
+	fstp	R8
+	fstp	R4
+	fstp	R6
+	ENDM
+
+
+; *************** four-complex-gpm4-fft macro ******************
+; This macro takes four complex values, premultiplies 4 of the values
+; by "group" multipliers and performs two levels of the FFT process.
+; These two levels use the first set of sine/cosine values.
+; The four complex input numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; The four complex output numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; edi = array of group multiplier values
+; NOTE: Optimal = 72 clocks, Actual = 72 clocks
+
+four_complex_gpm4_fft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	four_complex_fft4_cmn <R1>,<R2>,<R3>,<R4>,<R5>,<R6>,<R7>,<R8>,ebx,0,16,32,48
+	ENDM
+
+; *************** four-complex-gpm4-unfft-0 macro ******************
+; This macro takes four complex values and performs two levels of the
+; inverse FFT process.  Then the 4 "group" multipliers are applied.
+; These two levels use the first set of sine/cosine values.
+; The four complex input numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; The four complex output numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; edi = array of group multipliers values
+; NOTE: Optimal = 75 clocks, Actual = 75 clocks
+
+four_complex_gpm4_unfft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	four_complex_unfft4_cmn <R1>,<R2>,<R3>,<R4>,<R5>,<R6>,<R7>,<R8>
+	ENDM
+
+
+; *************** four-complex-cpm-fft-0 macro ******************
+; This macro takes four complex values and premultiplies the 4 values
+; by the "column" multiplier, then performs two levels of the FFT process.
+; These two levels use the first set of sine/cosine values.
+; Note that we save 3 complex multiplies by storing the column multiplier
+; times 1, .924+.383i, SQRTHALF+SQRTHALFi, .383+.924i.
+; Calling the 4 values above A, B, C, D, in this macro we multiply all the
+; complex values by A.
+; The four complex input numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; The four complex output numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; edi = array of column multiplier values
+
+four_complex_cpm_fft_0 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	four_complex_fft4_cmn <R1>,<R2>,<R3>,<R4>,<R5>,<R6>,<R7>,<R8>,0,0,0,0,0
+	ENDM
+
+; *************** four-complex-cpm-unfft-0 macro ******************
+; This macro takes four complex values and performs two levels of the
+; inverse FFT process.  Then the values are multiplied by the "column"
+; multiplier.  These two levels use the first set of sine/cosine values.
+; Note that we save 3 complex multiplies by storing the column multiplier
+; times 1, .924+.383i, SQRTHALF+SQRTHALFi, .383+.924i.
+; Calling the 4 values above A, B, C, D, in this macro we multiply all the
+; complex values by A.  Furthermore, since every value is multiplied by
+; the same multiplier, we can do a pre-multiply instead of a post-multiply
+; which is 3 clocks cheaper.
+; The four complex input numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; The four complex output numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; edi = array of column multipliers values
+; NOTE: Optimal = 72 clocks, Actual = 72 clocks
+
+four_complex_cpm_unfft_0 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1
+	fmul	QWORD PTR [edi+8]	;; A1 = R1 * premul_real/premul_imag
+	fld	R2			;; I1,A1
+	fmul	QWORD PTR [edi+8]	;; B1 = I1 * premul_real/premul_imag
+	fxch	st(1)			;; A1,B1
+	fadd	R2			;; A1 = A1 + I1
+	fld	R5			;; R3,A1,B1
+	fmul	QWORD PTR [edi+8]	;; A3 = R3 * premul_real/premul_imag
+	fxch	st(2)			;; B1,A1,A3
+	fsub	R1			;; B1 = B1 - R1
+	fxch	st(1)			;; A1,B1,A3
+	fmul	QWORD PTR [edi]		;; A1 = A1 * premul_imag (new R1)
+	fld	R6			;; I3,A1,B1,A3
+	fmul	QWORD PTR [edi+8]	;; B3 = I3 * premul_real/premul_imag
+	fxch	st(3)			;; A3,A1,B1,B3
+	fadd	R6			;; A3 = A3 + I3
+	fxch	st(2)			;; B1,A1,A3,B3
+	fmul	QWORD PTR [edi]		;; B1 = B1 * premul_imag (new I1)
+	fld	R3			;; R2,B1,A1,A3,B3
+	fmul	QWORD PTR [edi+8]	;; A2 = R2 * premul_real/premul_imag
+	fxch	st(4)			;; B3,B1,A1,A3,A2
+	fsub	R5			;; B3 = B3 - R3
+	fxch	st(3)			;; A3,B1,A1,B3,A2
+	fmul	QWORD PTR [edi]		;; A3 = A3 * premul_imag (new R3)
+	fxch	st(4)			;; A2,B1,A1,B3,A3
+	fadd	R4			;; A2 = A2 + I2
+	fxch	st(3)			;; B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi]		;; B3 = B3 * premul_imag (new I3)
+	fld	R4			;; I2,B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi+8]	;; B2 = I2 * premul_real/premul_imag
+	fld	R7			;; R4,B2,B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi+8]	;; A4 = R4 * premul_real/premul_imag
+	fxch	st(1)			;; B2,A4,B3,B1,A1,A2,A3
+	fsub	R3			;; B2 = B2 - R2
+	fxch	st(5)			;; A2,A4,B3,B1,A1,B2,A3
+	fmul	QWORD PTR [edi]		;; A2 = A2 * premul_imag (new R2)
+	fld	R8			;; I4,A2,A4,B3,B1,A1,B2,A3
+	fmul	QWORD PTR [edi+8]	;; B4 = I4 * premul_real/premul_imag
+	fxch	st(2)			;; A4,A2,B4,B3,B1,A1,B2,A3
+	fadd	R8			;; A4 = A4 + I4
+	fxch	st(6)			;; B2,A2,B4,B3,B1,A1,A4,A3
+	fmul	QWORD PTR [edi]		;; B2 = B2 * premul_imag (new I2)
+	fxch	st(2)			;; B4,A2,B2,B3,B1,A1,A4,A3
+	fsub	R7			;; B4 = B4 - R4
+	fxch	st(6)			;; A4,A2,B2,B3,B1,A1,B4,A3
+	fmul	QWORD PTR [edi]		;; A4 = A4 * premul_imag (new R4)
+					;; R4,R2,I2,I3,I1,R1,B4,R3
+	fxch	st(1)			;; R2,R4,I2,I3,I1,R1,B4,R3
+	fsub	st(5), st		;; R1 = R1 - R2 (new R2)
+	fadd	st, st			;; R2 = R2 * 2
+	 fxch	st(6)			;; B4,R4,I2,I3,I1,R1,R2,R3
+	 fmul	QWORD PTR [edi]		;; B4 = B4 * premul_imag (new I4)
+	fxch	st(2)			;; I2,R4,I4,I3,I1,R1,R2,R3
+	fsub	st(4), st		;; I1 = I1 - I2 (new I2)
+	fadd	st, st			;; I2 = I2 * 2
+	fxch	st(7)			;; R3,R4,I4,I3,I1,R1,R2,I2
+	fsub	st(1), st		;; R4 = R4 - R3 (new I4)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(2)			;; I4,R4,R3,I3,I1,R1,R2,I2
+	fsub	st(3), st		;; I3 = I3 - I4 (new R4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(5)			;; R1,R4,R3,I3,I1,I4,R2,I2
+	fadd	st(6), st		;; R2 = R1 + R2 (new R1)
+	fxch	st(4)			;; I1,R4,R3,I3,R1,I4,R2,I2
+	fadd	st(7), st		;; I2 = I1 + I2 (new I1)
+	fxch	st(1)			;; R4,I1,R3,I3,R1,I4,R2,I2
+	fadd	st(2), st		;; R3 = R3 + R4 (new R3)
+	fxch	st(3)			;; I3,I1,R3,R4,R1,I4,R2,I2
+	fadd	st(5), st		;; I4 = I3 + I4 (new I3)
+					;; R4,I2,R3,I4,R2,I3,R1,I1
+	fxch	st(3)			;; I4,I2,R3,R4,R2,I3,R1,I1
+	fsub	st(1), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(3)			;; R4,I2,R3,I4,R2,I3,R1,I1
+	fsub	st(4), st		;; R2 = R2 - R4 (new R4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(2)			;; R3,I2,R4,I4,R2,I3,R1,I1
+	fsub	st(6), st		;; R1 = R1 - R3 (new R3)
+	fadd	st, st			;; R3 = R3 * 2
+	fxch	st(5)			;; I3,I2,R4,I4,R2,R3,R1,I1
+	fsub	st(7), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(1)			;; I2,I3,R4,I4,R2,R3,R1,I1
+	fadd	st(3), st		;; I4 = I2 + I4 (new I2)
+	fxch	st(4)			;; R2,I3,R4,I4,I2,R3,R1,I1
+	fadd	st(2), st		;; R4 = R2 + R4 (new R2)
+	fxch	st(6)			;; R1,I3,R4,I4,I2,R3,R2,I1
+	fadd	st(5), st		;; R3 = R1 + R3 (new R1)
+	fxch	st(1)			;; I3,R1,R4,I4,I2,R3,R2,I1
+	fadd	st, st(7)		;; I3 = I1 + I3 (new I1)
+	fxch	st(7)			;; I1,R1,R4,I4,I2,R3,R2,I3
+					;; I3,R3,R2,I2,I4,R1,R4,I1
+					;; Scramble end results:
+					;; R7,R3,R2,R6,R8,R1,R4,R5
+	fstp	R6
+	fstp	R5
+	fstp	R3
+	fstp	R4
+	fstp	R8
+	fstp	R1
+	fstp	R7
+	fstp	R2
+	ENDM
+
+; *************** four-complex-cpm-fft-1 macro ******************
+; This macro takes four complex values and premultiplies the 4 values
+; by the "column" multiplier, then performs two levels of the FFT process.
+; These two levels use the second set of sine/cosine values.
+; Note that we save 3 complex multiplies by storing the column multiplier
+; times 1, .924+.383i, SQRTHALF+SQRTHALFi, .383+.924i.
+; Calling the 4 values above A, B, C, D, in this macro we multiply the
+; complex values by A, C, A * i, C * i.
+; The four complex input numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; The four complex output numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; edi = array of column multiplier values
+; NOTE: Optimal = 72 clocks, Actual = 72 clocks
+
+four_complex_cpm_fft_1 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1
+	fmul	QWORD PTR [edi+8]	;; A1 = R1 * premul_real/premul_imag
+	fld	R5			;; I1,A1
+	fmul	QWORD PTR [edi+8]	;; B1 = I1 * premul_real/premul_imag
+	fxch	st(1)			;; A1,B1
+	fsub	R5			;; A1 = A1 - I1
+	fld	R3			;; R3,A1,B1
+	fmul	QWORD PTR [edi+8]	;; A3 = R3 * premul_real/premul_imag
+	fxch	st(2)			;; B1,A1,A3
+	fadd	R1			;; B1 = B1 + R1
+	fxch	st(1)			;; A1,B1,A3
+	fmul	QWORD PTR [edi]		;; A1 = A1 * premul_imag (new R1)
+	fld	R7			;; I3,A1,B1,A3
+	fmul	QWORD PTR [edi+8]	;; B3 = I3 * premul_real/premul_imag
+	fxch	st(3)			;; A3,A1,B1,B3
+	fsub	R7			;; A3 = A3 - I3
+	fxch	st(2)			;; B1,A1,A3,B3
+	fmul	QWORD PTR [edi]		;; B1 = B1 * premul_imag (new I1)
+	fld	R2			;; R2,B1,A1,A3,B3
+	fmul	QWORD PTR [edi+40]	;; A2 = R2 * premul_real/premul_imag
+	fxch	st(4)			;; B3,B1,A1,A3,A2
+	fadd	R3			;; B3 = B3 + R3
+	fxch	st(3)			;; A3,B1,A1,B3,A2
+	fmul	QWORD PTR [edi]		;; A3 = A3 * premul_imag (new I3)
+	fxch	st(4)			;; A2,B1,A1,B3,A3
+	fsub	R6			;; A2 = A2 - I2
+	fxch	st(3)			;; B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi]		;; B3 = B3 * premul_imag (new negR3)
+	fld	R6			;; I2,B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi+40]	;; B2 = I2 * premul_real/premul_imag
+	fld	R4			;; R4,B2,B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi+40]	;; A4 = R4 * premul_real/premul_imag
+	fxch	st(1)			;; B2,A4,B3,B1,A1,A2,A3
+	fadd	R2			;; B2 = B2 + R2
+	fxch	st(5)			;; A2,A4,B3,B1,A1,B2,A3
+	fmul	QWORD PTR [edi+32]	;; A2 = A2 * premul_imag (new R2)
+	fld	R8			;; I4,A2,A4,B3,B1,A1,B2,A3
+	fmul	QWORD PTR [edi+40]	;; B4 = I4 * premul_real/premul_imag
+	fxch	st(2)			;; A4,A2,B4,B3,B1,A1,B2,A3
+	fsub	R8			;; A4 = A4 - I4
+	fxch	st(6)			;; B2,A2,B4,B3,B1,A1,A4,A3
+	fmul	QWORD PTR [edi+32]	;; B2 = B2 * premul_imag (new I2)
+	fxch	st(2)			;; B4,A2,B2,B3,B1,A1,A4,A3
+	fadd	R4			;; B4 = B4 + R4
+	fxch	st(6)			;; A4,A2,B2,B3,B1,A1,B4,A3
+	fmul	QWORD PTR [edi+32]	;; A4 = A4 * premul_imag (new I4)
+					;; I4,R2,I2,negR3,I1,R1,B4,I3
+	fxch	st(3)			;; negR3,R2,I2,I4,I1,R1,B4,I3
+	fsub	st(5), st		;; R1 = R1 + R3 (new R1)
+	fadd	st, st			;; negR3 = negR3 * 2
+	 fxch	st(6)			;; B4,R2,I2,I4,I1,R1,negR3,I3
+	 fmul	QWORD PTR [edi+32]	;; B4 = B4 * premul_imag (new negR4)
+	fxch	st(7)			;; I3,R2,I2,I4,I1,R1,negR3,negR4
+	fsub	st(4), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(3)			;; I4,R2,I2,I3,I1,R1,negR3,negR4
+	fsub	st(2), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(7)			;; negR4,R2,I2,I3,I1,R1,negR3,I4
+	fsub	st(1), st		;; R2 = R2 + R4 (new R2)
+	fadd	st, st			;; negR4 = negR4 * 2
+	fxch	st(5)			;; R1,R2,I2,I3,I1,negR4,negR3,I4
+	fadd	st(6), st		;; negR3 = R1 - R3 (new R3)
+	fxch	st(4)			;; I1,R2,I2,I3,R1,negR4,negR3,I4
+	fadd	st(3), st		;; I3 = I1 + I3 (new I1)
+	fxch	st(2)			;; I2,R2,I1,I3,R1,negR4,negR3,I4
+	fadd	st(7), st		;; I4 = I2 + I4 (new I2)
+	fxch	st(1)			;; R2,I2,I1,I3,R1,negR4,negR3,I4
+	fadd	st(5), st		;; negR4 = R2 - R4 (new R4)
+					;; R2,I4,I3,I1,R1,R4,R3,I2
+	fsub	st(4), st		;; R1 = R1 - R2 (new R2)
+	fadd	st, st			;; R2 = R2 * 2
+	fxch	st(1)			;; I4,R2,I3,I1,R1,R4,R3,I2
+	fsub	st(6), st		;; R3 = R3 - I4 (new R3)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(5)			;; R4,R2,I3,I1,R1,I4,R3,I2
+	fsub	st(2), st		;; I3 = I3 - R4 (new I4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(7)			;; I2,R2,I3,I1,R1,I4,R3,R4
+	fsub	st(3), st		;; I1 = I1 - I2 (new I2)
+	fadd	st, st			;; I2 = I2 * 2
+	fxch	st(4)			;; R1,R2,I3,I1,I2,I4,R3,R4
+	fadd	st(1), st		;; R2 = R1 + R2 (new R1)
+	fxch	st(6)			;; R3,R2,I3,I1,I2,I4,R1,R4
+	fadd	st(5), st		;; I4 = R3 + I4 (new R4)
+	fxch	st(2)			;; I3,R2,R3,I1,I2,I4,R1,R4
+	fadd	st(7), st		;; R4 = I3 + R4 (new I3)
+	fxch	st(3)			;; I1,R2,R3,I3,I2,I4,R1,R4
+	fadd	st(4), st		;; I2 = I1 + I2 (new I1)
+					;; I2,R1,R3,I4,I1,R4,R2,I3
+					;; Scramble end results:
+					;; R4,R1,R5,R8,R2,R7,R3,R6
+	fstp	R6
+	fstp	R1
+	fstp	R3
+	fstp	R8
+	fstp	R5
+	fstp	R4
+	fstp	R2
+	fstp	R7
+	ENDM
+
+; *************** four-complex-cpm-unfft-1 macro ******************
+; This macro takes four complex values and performs two levels of the
+; inverse FFT process.  Then the values are multiplied by the "column"
+; multiplier.  These two levels use the second set of sine/cosine values.
+; Note that we save 3 complex multiplies by storing the column multiplier
+; times 1, .924+.383i, SQRTHALF+SQRTHALFi, .383+.924i.
+; Calling the 4 values above A, B, C, D, in this macro we multiply the
+; complex values by A, C, A * i, C * i.
+; The four complex input numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; The four complex output numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; edi = array of column multipliers values
+; NOTE: Optimal = 75 clocks, Actual = 75 clocks
+
+four_complex_cpm_unfft_1 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R2			;; I1
+	fadd	R4			;; new I1 = I1 + I2
+	fld	R6			;; I3
+	fadd	R8			;; new I3 = I3 + I4
+	fld	R1			;; R1
+	fadd	R3			;; new R1 = R1 + R2
+	fld	R7			;; R4
+	fadd	R5			;; new R3 = R3 + R4
+	fld	R2			;; I1
+	fsub	R4			;; new I2 = I1 - I2
+	fld	R7			;; R4
+	fsub	R5			;; new I4 = R4 - R3
+	fld	R1			;; R1
+	fsub	R3			;; new R2 = R1 - R2
+	fld	R6			;; I3
+	fsub	R8			;; new R4 = I3 - I4
+					;; R4,R2,I4,I2,R3,R1,I3,I1
+	fxch	st(6)			;; I3,R2,I4,I2,R3,R1,R4,I1
+	fsub	st(7), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(5)			;; R1,R2,I4,I2,R3,I3,R4,I1
+	fsub	st(4), st		;; R3 = R3 - R1 (new negR3)
+	fadd	st, st			;; R1 = R1 * 2
+	fxch	st(7)			;; I1,R2,I4,I2,R3,I3,R4,R1
+	fadd	st(5), st		;; I3 = I1 + I3 (new I1)
+	fmul	QWORD PTR [edi]		;; B3 = new I3 * premul_imag
+	fxch	st(4)			;; R3,R2,I4,I2,B3,I3,R4,R1
+	fadd	st(7), st		;; R1 = R1 + R3 (new R1)
+	fmul	QWORD PTR [edi]		;; A3 = new negR3 * premul_imag
+	fxch	st(5)			;; newI1,R2,I4,I2,B3,A3,R4,newR1
+	fstp	R1			;; Free up a register
+	fld	st(3)			;; C3 = B3 (C3,R2,I4,I2,B3,A3,R4,newR1)
+	fmul	QWORD PTR [edi+8]	;; C3 = C3 * premul_real/premul_imag
+	fxch	st(1)			;; R2,C3,I4,I2,B3,A3,R4,newR1
+	fsub	st(6), st		;; R4 = R4 - R2 (new negR4)
+	fxch	st(7)			;; newR1,C3,I4,I2,B3,A3,R4,R2
+	fmul	QWORD PTR [edi]		;; A1 = new R1 * premul_imag
+	fxch	st(7)			;; R2,C3,I4,I2,B3,A3,R4,A1
+	fadd	st, st			;; R2 = R2 * 2
+	fxch	st(5)			;; A3,C3,I4,I2,B3,R2,R4,A1
+	fadd	st(1), st		;; C3 = C3 + A3 (new R3)
+	fmul	QWORD PTR [edi+8]	;; A3 = A3 * premul_real/premul_imag
+	fxch	st(2)			;; I4,C3,A3,I2,B3,R2,R4,A1
+	fsub	st(3), st		;; I2 = I2 - I4 (new I4)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(2)			;; A3,C3,I4,I2,B3,R2,R4,A1
+	fsubrp	st(4), st		;; B3 = A3 - B3 (new I3)
+	fstp	R5			;; I4,I2,B3,R2,R4,A1
+	fadd	st, st(1)		;; I4 = I2 + I4 (new I2)
+	fxch	st(1)			;; I2,I4,B3,R2,R4,A1
+	fmul	QWORD PTR [edi+32]	;; B4 = new I4 * premul_imag
+	fxch	st(4)			;; R4,I4,B3,R2,B4,A1
+	fadd	st(3), st		;; R2 = R2 + R4 (new R2)
+	fmul	QWORD PTR [edi+32]	;; A4 = new negR4 * premul_imag
+	fxch	st(2)			;; B3,I4,A4,R2,B4,A1
+	fstp	R6			;; I4,A4,R2,B4,A1
+	fmul	QWORD PTR [edi+32]	;; B2 = new I2 * premul_imag
+	fld	st(3)			;; C4 = B4 (C4,B2,A4,R2,B4,A1)
+	fmul	QWORD PTR [edi+40]	;; C4 = C4 * premul_real/premul_imag
+	fld	R1			;; I1,C4,B2,A4,R2,B4,A1
+	fmul	QWORD PTR [edi]		;; B1 = new I1 * premul_imag
+	fxch	st(3)			;; A4,C4,B2,B1,R2,B4,A1
+	fadd	st(1), st		;; C4 = C4 + A4 (new R4)
+	fmul	QWORD PTR [edi+40]	;; A4 = A4 * premul_real/premul_imag
+	fld	st(2)			;; C2 = B2 (C2,A4,C4,B2,B1,R2,B4,A1)
+	fmul	QWORD PTR [edi+40]	;; C2 = C2 * premul_real/premul_imag
+	fxch	st(1)			;; A4,C2,C4,B2,B1,R2,B4,A1
+	fsubrp	st(6), st		;; B4 = A4 - B4 (new I4)
+	fxch	st(4)			;; R2,C4,B2,B1,C2,B4,A1
+	fmul	QWORD PTR [edi+32]	;; A2 = new R2 * premul_imag
+	fld	st(3)			;; C1 = B1 (C1,A2,C4,B2,B1,C2,B4,A1)
+	fmul	QWORD PTR [edi+8]	;; C1 = C1 * premul_real/premul_imag
+	fxch	st(1)			;; A2,C1,C4,B2,B1,C2,B4,A1
+	fsub	st(5), st		;; C2 = C2 - A2 (new I2)
+	fmul	QWORD PTR [edi+40]	;; A2 = A2 * premul_real/premul_imag
+	fxch	st(7)			;; A1,C1,C4,B2,B1,C2,B4,A2
+	fsub	st(1), st		;; C1 = C1 - A1 (new I1)
+	fmul	QWORD PTR [edi+8]	;; A1 = A1 * premul_real/premul_imag
+	fxch	st(2)			;; C4,C1,A1,B2,B1,C2,B4,A2
+	fstp	R7			;; C1,A1,B2,B1,C2,B4,A2
+	fstp	R2			;; A1,B2,B1,C2,B4,A2
+	faddp	st(2), st		;; B1 = B1 + A1 (new R1)
+	faddp	st(4), st		;; A2 = B2 + A2 (new R2)
+	fxch	st(2)			;; B4,C2,B1,A2
+	fstp	R8
+	fstp	R4
+	fstp	R1
+	fstp	R3
+	ENDM
+
+; *************** four-complex-cpm-fft-2 macro ******************
+; This macro takes four complex values and premultiplies the 4 values
+; by the "column" multiplier, then performs two levels of the FFT process.
+; These two levels use the third set of sine/cosine values.
+; Note that we save 3 complex multiplies by storing the column multiplier
+; times 1, .924+.383i, SQRTHALF+SQRTHALFi, .383+.924i.
+; Calling the 4 values above A, B, C, D, in this macro we multiply the
+; complex values by A, B, C, D.
+; The four complex input numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; The four complex output numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; edi = array of column multiplier values
+; NOTE: Optimal = 72 clocks, Actual = 72 clocks
+
+four_complex_cpm_fft_2 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	four_complex_fft4_cmn <R1>,<R2>,<R3>,<R4>,<R5>,<R6>,<R7>,<R8>,0,0,16,32,48
+	ENDM
+
+; *************** four-complex-cpm-unfft-2 macro ******************
+; This macro takes four complex values and performs two levels of the
+; inverse FFT process.  Then the values are multiplied by the "column"
+; multiplier.  These two levels use the third set of sine/cosine values.
+; Note that we save 3 complex multiplies by storing the column multiplier
+; times 1, .924+.383i, SQRTHALF+SQRTHALFi, .383+.924i.
+; The four complex input numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; The four complex output numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; edi = array of column multipliers values
+; NOTE: Optimal = 75 clocks, Actual = 75 clocks
+
+four_complex_cpm_unfft_2 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	four_complex_unfft4_cmn <R1>,<R2>,<R3>,<R4>,<R5>,<R6>,<R7>,<R8>
+	ENDM
+
+; *************** four-complex-cpm-fft-3 macro ******************
+; This macro takes four complex values and premultiplies the 4 values
+; by the "column" multiplier, then performs two levels of the FFT process.
+; These two levels use the fourth set of sine/cosine values.
+; Note that we save 3 complex multiplies by storing the column multiplier
+; times 1, .924+.383i, SQRTHALF+SQRTHALFi, .383+.924i.
+; Calling the 4 values above A, B, C, D, in this macro we multiply the
+; complex values by A, D, C * i, -B.
+; The four complex input numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; The four complex output numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; edi = array of column multiplier values
+; NOTE: Optimal = 72 clocks, Actual = 72 clocks
+
+four_complex_cpm_fft_3 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1
+	fmul	QWORD PTR [edi+8]	;; A1 = R1 * premul_real/premul_imag
+	fld	R5			;; I1,A1
+	fmul	QWORD PTR [edi+8]	;; B1 = I1 * premul_real/premul_imag
+	fxch	st(1)			;; A1,B1
+	fsub	R5			;; A1 = A1 - I1
+	fld	R3			;; R3,A1,B1
+	fmul	QWORD PTR [edi+40]	;; A3 = R3 * premul_real/premul_imag
+	fxch	st(2)			;; B1,A1,A3
+	fadd	R1			;; B1 = B1 + R1
+	fxch	st(1)			;; A1,B1,A3
+	fmul	QWORD PTR [edi]		;; A1 = A1 * premul_imag (new R1)
+	fld	R7			;; I3,A1,B1,A3
+	fmul	QWORD PTR [edi+40]	;; B3 = I3 * premul_real/premul_imag
+	fxch	st(3)			;; A3,A1,B1,B3
+	fsub	R7			;; A3 = A3 - I3
+	fxch	st(2)			;; B1,A1,A3,B3
+	fmul	QWORD PTR [edi]		;; B1 = B1 * premul_imag (new I1)
+	fld	R2			;; R2,B1,A1,A3,B3
+	fmul	QWORD PTR [edi+56]	;; A2 = R2 * premul_real/premul_imag
+	fxch	st(4)			;; B3,B1,A1,A3,A2
+	fadd	R3			;; B3 = B3 + R3
+	fxch	st(3)			;; A3,B1,A1,B3,A2
+	fmul	QWORD PTR [edi+32]	;; A3 = A3 * premul_imag (new I3)
+	fxch	st(4)			;; A2,B1,A1,B3,A3
+	fsub	R6			;; A2 = A2 - I2
+	fxch	st(3)			;; B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi+32]	;; B3 = B3 * premul_imag (new negR3)
+	fld	R6			;; I2,B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi+56]	;; B2 = I2 * premul_real/premul_imag
+	fld	R4			;; R4,B2,B3,B1,A1,A2,A3
+	fmul	QWORD PTR [edi+24]	;; A4 = R4 * premul_real/premul_imag
+	fxch	st(1)			;; B2,A4,B3,B1,A1,A2,A3
+	fadd	R2			;; B2 = B2 + R2
+	fxch	st(5)			;; A2,A4,B3,B1,A1,B2,A3
+	fmul	QWORD PTR [edi+48]	;; A2 = A2 * premul_imag (new R2)
+	fld	R8			;; I4,A2,A4,B3,B1,A1,B2,A3
+	fmul	QWORD PTR [edi+24]	;; B4 = I4 * premul_real/premul_imag
+	fxch	st(2)			;; A4,A2,B4,B3,B1,A1,B2,A3
+	fsub	R8			;; A4 = A4 - I4
+	fxch	st(6)			;; B2,A2,B4,B3,B1,A1,A4,A3
+	fmul	QWORD PTR [edi+48]	;; B2 = B2 * premul_imag (new I2)
+	fxch	st(2)			;; B4,A2,B2,B3,B1,A1,A4,A3
+	fadd	R4			;; B4 = B4 + R4
+	fxch	st(6)			;; A4,A2,B2,B3,B1,A1,B4,A3
+	fmul	QWORD PTR [edi+16]	;; A4 = A4 * premul_imag (new negR4)
+					;; negR4,R2,I2,negR3,I1,R1,B4,I3
+	fxch	st(3)			;; negR3,R2,I2,negR4,I1,R1,B4,I3
+	fsub	st(5), st		;; R1 = R1 + R3 (new R1)
+	fadd	st, st			;; negR3 = negR3 * 2
+	 fxch	st(6)			;; B4,R2,I2,negR4,I1,R1,negR3,I3
+	 fmul	QWORD PTR [edi+16]	;; B4 = B4 * premul_imag (new negI4)
+	fxch	st(7)			;; I3,R2,I2,negR4,I1,R1,negR3,negI4
+	fsub	st(4), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(3)			;; negR4,R2,I2,I3,I1,R1,negR3,negI4
+	fsub	st(1), st		;; R2 = R2 + R4 (new R2)
+	fadd	st, st			;; negR4 = negR4 * 2
+	fxch	st(7)			;; negI4,R2,I2,I3,I1,R1,negR3,negR4
+	fsub	st(2), st		;; I2 = I2 + I4 (new I2)
+	fadd	st, st			;; negI4 = negI4 * 2
+	fxch	st(5)			;; R1,R2,I2,I3,I1,negI4,negR3,negR4
+	fadd	st(6), st		;; negR3 = R1 - R3 (new R3)
+	fxch	st(4)			;; I1,R2,I2,I3,R1,negI4,negR3,negR4
+	fadd	st(3), st		;; I3 = I1 + I3 (new I1)
+	fxch	st(1)			;; R2,I1,I2,I3,R1,negI4,negR3,negR4
+	fadd	st(7), st		;; negR4 = R2 - R4 (new R4)
+	fxch	st(2)			;; I2,I1,R2,I3,R1,negI4,negR3,negR4
+	fadd	st(5), st		;; negI4 = I2 - I4 (new I4)
+					;; I2,I3,R2,I1,R1,I4,R3,R4
+	fsub	st(3), st		;; I1 = I1 - I2 (new I2)
+	fadd	st, st			;; I2 = I2 * 2
+	fxch	st(2)			;; R2,I3,I2,I1,R1,I4,R3,R4
+	fsub	st(4), st		;; R1 = R1 - R2 (new R2)
+	fadd	st, st			;; R2 = R2 * 2
+	fxch	st(7)			;; R4,I3,I2,I1,R1,I4,R3,R2
+	fsub	st(1), st		;; I3 = I3 - R4 (new I4)
+	fadd	st, st			;; R4 = R4 * 2
+	fxch	st(5)			;; I4,I3,I2,I1,R1,R4,R3,R2
+	fsub	st(6), st		;; R3 = R3 - I4 (new R3)
+	fadd	st, st			;; I4 = I4 * 2
+	fxch	st(3)			;; I1,I3,I2,I4,R1,R4,R3,R2
+	fadd	st(2), st		;; I2 = I1 + I2 (new I1)
+	fxch	st(4)			;; R1,I3,I2,I4,I1,R4,R3,R2
+	fadd	st(7), st		;; R2 = R1 + R2 (new R1)
+	fxch	st(1)			;; I3,R1,I2,I4,I1,R4,R3,R2
+	fadd	st(5), st		;; R4 = I3 + R4 (new I3)
+	fxch	st(6)			;; R3,R1,I2,I4,I1,R4,I3,R2
+	fadd	st(3), st		;; I4 = R3 + I4 (new R4)
+					;; R3,R2,I1,R4,I2,I3,I4,R1
+					;; Scramble end results:
+					;; R5,R3,R2,R7,R4,R6,R8,R1
+	fstp	R3
+	fstp	R2
+	fstp	R5
+	fstp	R4
+	fstp	R6
+	fstp	R7
+	fstp	R8
+	fstp	R1
+	ENDM
+
+; *************** four-complex-cpm-unfft-3 macro ******************
+; This macro takes four complex values and performs two levels of the
+; inverse FFT process.  Then the values are multiplied by the "column"
+; multiplier.  These two levels use the fourth set of sine/cosine values.
+; Note that we save 3 complex multiplies by storing the column multiplier
+; times 1, .924+.383i, SQRTHALF+SQRTHALFi, .383+.924i.
+; Calling the 4 values above A, B, C, D, in this macro we multiply the
+; complex values by A, D, C * i, -B.
+; The four complex input numbers are: R1 + R2i, R3 + R4i, R5 + R6i, R7 + R8i
+; The four complex output numbers are: R1 + R5i, R2 + R6i, R3 + R7i, R4 + R8i
+; edi = array of column multipliers values
+; NOTE: Optimal = 75 clocks, Actual = 75 clocks
+
+four_complex_cpm_unfft_3 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R2			;; I1
+	fadd	R4			;; new I1 = I1 + I2
+	fld	R6			;; I3
+	fadd	R8			;; new I3 = I3 + I4
+	fld	R1			;; R1
+	fadd	R3			;; new R1 = R1 + R2
+	fld	R7			;; R4
+	fadd	R5			;; new R3 = R3 + R4
+	fld	R2			;; I1
+	fsub	R4			;; new I2 = I1 - I2
+	fld	R7			;; R4
+	fsub	R5			;; new I4 = R4 - R3
+	fld	R1			;; R1
+	fsub	R3			;; new R2 = R1 - R2
+	fld	R6			;; I3
+	fsub	R8			;; new R4 = I3 - I4
+					;; R4,R2,I4,I2,R3,R1,I3,I1
+	fxch	st(5)			;; R1,R2,I4,I2,R3,R4,I3,I1
+	fsub	st(4), st		;; R3 = R3 - R1 (new negR3)
+	fadd	st, st			;; R1 = R1 * 2
+	fxch	st(6)			;; I3,R2,I4,I2,R3,R4,R1,I1
+	fsub	st(7), st		;; I1 = I1 - I3 (new I3)
+	fadd	st, st			;; I3 = I3 * 2
+	fxch	st(4)			;; R3,R2,I4,I2,I3,R4,R1,I1
+	fadd	st(6), st		;; R1 = R1 + R3 (new R1)
+	fmul	QWORD PTR [edi+32]	;; A3 = new negR3 * premul_imag
+	fxch	st(7)			;; I1,R2,I4,I2,I3,R4,newR1,A3
+	fadd	st(4), st		;; I3 = I1 + I3 (new I1)
+	fmul	QWORD PTR [edi+32]	;; B3 = new I3 * premul_imag
+	fxch	st(6)			;; newR1,R2,I4,I2,newI1,R4,B3,A3
+	fstp	R1			;; Free up a register
+	fld	st(6)			;; C3 = A3 (C3,R2,I4,I2,newI1,R4,B3,A3)
+	fmul	QWORD PTR [edi+40]	;; C3 = C3 * premul_real/premul_imag
+	fxch	st(1)			;; R2,C3,I4,I2,newI1,R4,B3,A3
+	fsub	st(5), st		;; R4 = R4 - R2 (new negR4)
+	fxch	st(4)			;; newI1,C3,I4,I2,R2,R4,B3,A3
+	fmul	QWORD PTR [edi]		;; B1 = new I1 * premul_imag
+	fxch	st(4)			;; R2,C3,I4,I2,B1,R4,B3,A3
+	fadd	st, st			;; R2 = R2 * 2
+	fxch	st(6)			;; B3,C3,I4,I2,B1,R4,R2,A3
+	fsub	st(1), st		;; C3 = C3 - B3 (new I3)
+	fmul	QWORD PTR [edi+40]	;; B3 = B3 * premul_real/premul_imag
+	fxch	st(3)			;; I2,C3,I4,B3,B1,R4,R2,A3
+	fsub	st(2), st		;; I4 = I4 - I2 (new negI4)
+	fadd	st, st			;; I2 = I2 * 2
+	fxch	st(3)			;; B3,C3,I4,I2,B1,R4,R2,A3
+	faddp	st(7), st		;; A3 = B3 + A3 (new R3)
+	fstp	R6			;; I4,I2,B1,R4,R2,A3
+	fadd	st(1), st		;; I2 = I2 + I4 (new I2)
+	fmul	QWORD PTR [edi+16]	;; B4 = new negI4 * premul_imag
+	fxch	st(3)			;; R4,I2,B1,B4,R2,A3
+	fadd	st(4), st		;; R2 = R2 + R4 (new R2)
+	fmul	QWORD PTR [edi+16]	;; A4 = new negR4 * premul_imag
+	fxch	st(5)			;; A3,I2,B1,B4,R2,A4
+	fstp	R5			;; I2,B1,B4,R2,A4
+	fmul	QWORD PTR [edi+48]	;; B2 = new I2 * premul_imag
+	fld	st(2)			;; C4 = B4 (C4,B2,B1,B4,R2,A4)
+	fmul	QWORD PTR [edi+24]	;; C4 = C4 * premul_real/premul_imag
+	fld	R1			;; R1,C4,B2,B1,B4,R2,A4
+	fmul	QWORD PTR [edi]		;; A1 = new R1 * premul_imag
+	fxch	st(6)			;; A4,C4,B2,B1,B4,R2,A1
+	fsub	st(1), st		;; C4 = C4 - A4 (new I4)
+	fmul	QWORD PTR [edi+24]	;; A4 = A4 * premul_real/premul_imag
+	fld	st(2)			;; C2 = B2 (C2,A4,C4,B2,B1,B4,R2,A1)
+	fmul	QWORD PTR [edi+56]	;; C2 = C2 * premul_real/premul_imag
+	fxch	st(1)			;; A4,C2,C4,B2,B1,B4,R2,A1
+	faddp	st(5), st		;; B4 = B4 + A4 (new R4)
+	fxch	st(5)			;; R2,C4,B2,B1,B4,C2,A1
+	fmul	QWORD PTR [edi+48]	;; A2 = new R2 * premul_imag
+	fld	st(3)			;; C1 = B1 (C1,A2,C4,B2,B1,B4,C2,A1)
+	fmul	QWORD PTR [edi+8]	;; C1 = C1 * premul_real/premul_imag
+	fxch	st(1)			;; A2,C1,C4,B2,B1,B4,C2,A1
+	fsub	st(6), st		;; C2 = C2 - A2 (new I2)
+	fmul	QWORD PTR [edi+56]	;; A2 = A2 * premul_real/premul_imag
+	fxch	st(7)			;; A1,C1,C4,B2,B1,B4,C2,A2
+	fsub	st(1), st		;; C1 = C1 - A1 (new I1)
+	fmul	QWORD PTR [edi+8]	;; A1 = A1 * premul_real/premul_imag
+	fxch	st(2)			;; C4,C1,A1,B2,B1,B4,C2,A2
+	fstp	R8			;; C1,A1,B2,B1,B4,C2,A2
+	fstp	R2			;; A1,B2,B1,B4,C2,A2
+	faddp	st(2), st		;; B1 = B1 + A1 (new R1)
+	faddp	st(4), st		;; A2 = B2 + A2 (new R2)
+	fxch	st(2)			;; C2,B4,B1,A2
+	fstp	R4
+	fstp	R7
+	fstp	R1
+	fstp	R3
+	ENDM
+
+
+;; When doing zero-padded FFTs the 7 words around the halfway point must
+;; be copied for later processing in mult7.  This macro does that copying.
+
+copy_7_words MACRO
+	LOCAL	nozpad
+	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
+	je	short nozpad		;; No, skip 7 word copy
+	fld	QWORD PTR [esi+ebx+8]	;; Copy 1st word above half-way point
+	fstp	QWORD PTR [esi-40]
+	fld	QWORD PTR [esi+ebx+24]	;; Copy 2nd word
+	fstp	QWORD PTR [esi-48]
+	fld	QWORD PTR [esi+ebx+40]	;; Copy 3rd word
+	fstp	QWORD PTR [esi-56]
+	fld	QWORD PTR [esi+ebx+56]	;; Copy 4th word
+	fstp	QWORD PTR [esi-64]
+	mov	eax, esi		;; Copy 1st word below half-way point
+	add	eax, HIGH_WORD1_OFFSET
+	fld	QWORD PTR [eax+ebx]
+	fstp	QWORD PTR [esi-72]
+	mov	eax, esi		;; Copy 2nd word
+	add	eax, HIGH_WORD2_OFFSET
+	fld	QWORD PTR [eax+ebx]
+	fstp	QWORD PTR [esi-80]
+	mov	eax, esi		;; Copy 3rd word
+	add	eax, HIGH_WORD3_OFFSET
+	fld	QWORD PTR [eax+ebx]
+	fstp	QWORD PTR [esi-88]
+nozpad:
+	ENDM
+
+;; When POSTFFT is set, we must copy the 7 words at two different spots.
+;; These two macros copy the four values above the half-way point after
+;; carries have been propagated and copy the three words just below the
+;; half-way point right after the last NORMRTN has been called.
+
+copy_4_words MACRO
+	LOCAL	nozpad
+	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
+	je	short nozpad		;; No, skip 4 word copy
+	fld	QWORD PTR [esi+8]	;; Copy 1st word above half-way point
+	fstp	QWORD PTR [esi-40]
+	fld	QWORD PTR [esi+24]	;; Copy 2nd word
+	fstp	QWORD PTR [esi-48]
+	fld	QWORD PTR [esi+40]	;; Copy 3rd word
+	fstp	QWORD PTR [esi-56]
+	fld	QWORD PTR [esi+56]	;; Copy 4th word
+	fstp	QWORD PTR [esi-64]
+nozpad:
+	ENDM
+
+copy_3_words MACRO clm, scratch
+	LOCAL	nozpad, iter2
+	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
+	je	short nozpad		;; No, skip 3 word copy
+	IF clm GE 2
+	cmp	edx, 65536+256		;; Only copy on last inverse FFT pass
+	jne	short nozpad		;; Jump if delaying
+	mov	edi, DESTARG		;; Load destination pointer
+	IF scratch EQ 0
+	mov	eax, HIGH_WORD1_OFFSET	;; Copy 1st word below half-way point
+	fld	QWORD PTR [edi+eax]
+	fstp	QWORD PTR [edi-72]
+	mov	eax, HIGH_WORD2_OFFSET	;; Copy 2nd word
+	fld	QWORD PTR [edi+eax]
+	fstp	QWORD PTR [edi-80]
+	mov	eax, HIGH_WORD3_OFFSET	;; Copy 3rd word
+	fld	QWORD PTR [edi+eax]
+	fstp	QWORD PTR [edi-88]
+	ELSE
+	mov	eax, HIGH_SCRATCH1_OFFSET;; Copy 1st word below half-way point
+	fld	QWORD PTR [esi+eax]
+	fstp	QWORD PTR [edi-72]
+	mov	eax, HIGH_SCRATCH2_OFFSET;; Copy 2nd word
+	fld	QWORD PTR [esi+eax]
+	fstp	QWORD PTR [edi-80]
+	mov	eax, HIGH_SCRATCH3_OFFSET;; Copy 3rd word
+	fld	QWORD PTR [esi+eax]
+	fstp	QWORD PTR [edi-88]
+	ENDIF
+	ELSE
+	cmp	edx, 65536+2*256	;; Copy on last two inverse FFT passes
+	jg	short nozpad		;; Jump if delaying
+	mov	edi, DESTARG		;; Load destination pointer
+	IF scratch EQ 1
+	pusher	ecx
+	mov	ecx, scratch_area
+	ENDIF
+	je	short iter2		;; Jump if next to last pass
+	IF scratch EQ 0
+	mov	eax, HIGH_WORD1_OFFSET	;; Copy 1st word below half-way point
+	fld	QWORD PTR [edi+eax]
+	fstp	QWORD PTR [edi-72]
+	mov	eax, HIGH_WORD2_OFFSET	;; Copy 2nd word
+	fld	QWORD PTR [edi+eax]
+	fstp	QWORD PTR [edi-80]
+	jmp	short nozpad
+iter2:	mov	eax, HIGH_WORD3_OFFSET	;; Copy 3rd word
+	fld	QWORD PTR [edi+eax]
+	fstp	QWORD PTR [edi-88]
+	ELSE
+	mov	eax, HIGH_SCRATCH1_OFFSET;; Copy 1st word below half-way point
+	fld	QWORD PTR [ecx+eax]
+	fstp	QWORD PTR [edi-72]
+	mov	eax, HIGH_SCRATCH2_OFFSET;; Copy 2nd word
+	fld	QWORD PTR [ecx+eax]
+	fstp	QWORD PTR [edi-80]
+	jmp	short nozpad
+iter2:	mov	eax, HIGH_SCRATCH3_OFFSET;; Copy 3rd word
+	fld	QWORD PTR [ecx+eax]
+	fstp	QWORD PTR [edi-88]
+	popper	ecx
+	ENDIF
+	ENDIF
+nozpad:
+	ENDM
+
+;; Do the brute-force multiplication of the 7 words near the half-way point.
+;; These seven words were copied to an area 32-96 bytes before the FFT data.
+;; This is done for zero-padded FFTs only.
+
+mult7	MACRO	src1, src2
+	LOCAL	nozpad
+
+	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
+	je	nozpad			;; No, skip 7 word multiply
+	fld	QWORD PTR [src1-40]	;; Result0 = word0 * word0
+	fmul	QWORD PTR [src2-40]
+	fld	QWORD PTR [src1-48]	;;	   + word1 * word-1
+	fmul	QWORD PTR [src2-72]
+	faddp	st(1), st
+	fld	QWORD PTR [src1-56]	;;	   + word2 * word-2
+	fmul	QWORD PTR [src2-80]
+	fld	QWORD PTR [src1-64]	;;	   + word3 * word-3
+	fmul	QWORD PTR [src2-88]
+	faddp	st(1), st
+	faddp	st(1), st
+	fld	QWORD PTR [src1-72]	;;	   + word-1 * word1
+	fmul	QWORD PTR [src2-48]
+	fld	QWORD PTR [src1-80]	;;	   + word-2 * word2
+	fmul	QWORD PTR [src2-56]
+	faddp	st(1), st
+	faddp	st(1), st
+	fld	QWORD PTR [src1-88]	;;	   + word-3 * word3
+	fmul	QWORD PTR [src2-64]
+	faddp	st(1), st
+	fstp	ZPAD0
+
+	fld	QWORD PTR [src1-40]	;; Result1 = word0 * word1
+	fmul	QWORD PTR [src2-48]
+	fld	QWORD PTR [src1-48]	;;	   + word1 * word0
+	fmul	QWORD PTR [src2-40]
+	faddp	st(1), st
+	fld	QWORD PTR [src1-56]	;;	   + word2 * word-1
+	fmul	QWORD PTR [src2-72]
+	fld	QWORD PTR [src1-64]	;;	   + word3 * word-2
+	fmul	QWORD PTR [src2-80]
+	faddp	st(1), st
+	faddp	st(1), st
+	fld	QWORD PTR [src1-72]	;;	   + word-1 * word2
+	fmul	QWORD PTR [src2-56]
+	fld	QWORD PTR [src1-80]	;;	   + word-2 * word3
+	fmul	QWORD PTR [src2-64]
+	faddp	st(1), st
+	faddp	st(1), st
+	fstp	ZPAD1
+
+	fld	QWORD PTR [src1-40]	;; Result2 = word0 * word2
+	fmul	QWORD PTR [src2-56]
+	fld	QWORD PTR [src1-48]	;;	   + word1 * word1
+	fmul	QWORD PTR [src2-48]
+	faddp	st(1), st
+	fld	QWORD PTR [src1-56]	;;	   + word2 * word0
+	fmul	QWORD PTR [src2-40]
+	fld	QWORD PTR [src1-64]	;;	   + word3 * word-1
+	fmul	QWORD PTR [src2-72]
+	faddp	st(1), st
+	faddp	st(1), st
+	fld	QWORD PTR [src1-72]	;;	   + word-1 * word3
+	fmul	QWORD PTR [src2-64]
+	faddp	st(1), st
+	fstp	ZPAD2
+
+	fld	QWORD PTR [src1-40]	;; Result3 = word0 * word3
+	fmul	QWORD PTR [src2-64]
+	fld	QWORD PTR [src1-48]	;;	   + word1 * word2
+	fmul	QWORD PTR [src2-56]
+	faddp	st(1), st
+	fld	QWORD PTR [src1-56]	;;	   + word2 * word1
+	fmul	QWORD PTR [src2-48]
+	fld	QWORD PTR [src1-64]	;;	   + word3 * word0
+	fmul	QWORD PTR [src2-40]
+	faddp	st(1), st
+	faddp	st(1), st
+	fstp	ZPAD3
+
+	fld	QWORD PTR [src1-48]	;; Result4 = word1 * word3
+	fmul	QWORD PTR [src2-64]
+	fld	QWORD PTR [src1-56]	;;	   + word2 * word2
+	fmul	QWORD PTR [src2-56]
+	faddp	st(1), st
+	fld	QWORD PTR [src1-64]	;;	   + word3 * word1
+	fmul	QWORD PTR [src2-48]
+	faddp	st(1), st
+	fstp	ZPAD4
+
+	fld	QWORD PTR [src1-56]	;; Result5 = word2 * word3
+	fmul	QWORD PTR [src2-64]
+	fld	QWORD PTR [src1-64]	;;	   + word3 * word2
+	fmul	QWORD PTR [src2-56]
+	faddp	st(1), st
+	fstp	ZPAD5
+
+	fld	QWORD PTR [src1-64]	;; Result6 = word3 * word3
+	fmul	QWORD PTR [src2-64]
+	fstp	ZPAD6
+
+	pusher	eax
+	lea	eax, ZPAD0
+	mov	zpad_addr, eax 
+	popper	eax
+nozpad:
+	ENDM
+
+;
+; On Pentium Pro and later machines, replace some of the macros above with
+; identical macros that are a little bit faster than the Pentium optimized
+; versions above.
+;
+
+IFDEF PPRO
+INCLUDE	lucasp.mac
+ENDIF

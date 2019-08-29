@@ -1,0 +1,545 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 45;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1DDD58160DA1D0A300B32029 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 1DDD58140DA1D0A300B32029 /* MainMenu.xib */; };
+		5EBA78B00F96D6B900F79624 /* Mersenne.icns in Resources */ = {isa = PBXBuildFile; fileRef = 5EBA78AF0F96D6B900F79624 /* Mersenne.icns */; };
+		5ED7E7F70F98F7CB00BC5767 /* AppController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7E7F60F98F7CB00BC5767 /* AppController.m */; };
+		5ED7E8650F9918C400BC5767 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5ED7E8640F9918C400BC5767 /* IOKit.framework */; };
+		5ED7E88F0F99620300BC5767 /* AboutController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7E88E0F99620300BC5767 /* AboutController.m */; };
+		5ED7E8930F99635600BC5767 /* About.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7E8920F99635600BC5767 /* About.xib */; };
+		5ED7E91C0F9A5B3500BC5767 /* Window.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7E91B0F9A5B3500BC5767 /* Window.xib */; };
+		5ED7E9240F9A5D7F00BC5767 /* WindowController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7E9230F9A5D7F00BC5767 /* WindowController.m */; };
+		5ED7EA400F9C00C700BC5767 /* Continue.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EA3F0F9C00C700BC5767 /* Continue.xib */; };
+		5ED7EA480F9C03B600BC5767 /* ContinueController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EA470F9C03B600BC5767 /* ContinueController.m */; };
+		5ED7EA620F9C16E100BC5767 /* Stop.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EA610F9C16E100BC5767 /* Stop.xib */; };
+		5ED7EA660F9C178600BC5767 /* StopController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EA650F9C178600BC5767 /* StopController.m */; };
+		5ED7EBAA0FA21B6300BC5767 /* Test.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EBA90FA21B6300BC5767 /* Test.xib */; };
+		5ED7EBAD0FA21B7800BC5767 /* TestController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EBAC0FA21B7800BC5767 /* TestController.m */; };
+		5ED7EBDE0FA2459F00BC5767 /* Pminus1Controller.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EBDD0FA2459F00BC5767 /* Pminus1Controller.m */; };
+		5ED7EBE00FA245B600BC5767 /* Pminus1.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EBDF0FA245B600BC5767 /* Pminus1.xib */; };
+		5ED7EBF10FA25E1500BC5767 /* ECM.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EBF00FA25E1500BC5767 /* ECM.xib */; };
+		5ED7EBFF0FA261E500BC5767 /* ECMController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EBFE0FA261E500BC5767 /* ECMController.m */; };
+		5ED7EC3B0FA28A3200BC5767 /* PRPController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EC3A0FA28A3200BC5767 /* PRPController.m */; };
+		5ED7EC3D0FA28A4200BC5767 /* PRP.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EC3C0FA28A4200BC5767 /* PRP.xib */; };
+		5ED7EC680FA2A70C00BC5767 /* TimeController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EC670FA2A70C00BC5767 /* TimeController.m */; };
+		5ED7EC6A0FA2A72500BC5767 /* Time.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EC690FA2A72500BC5767 /* Time.xib */; };
+		5ED7EC7C0FA2ACC100BC5767 /* UnreserveController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EC7B0FA2ACC100BC5767 /* UnreserveController.m */; };
+		5ED7EC7E0FA2ACD400BC5767 /* Unreserve.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EC7D0FA2ACD400BC5767 /* Unreserve.xib */; };
+		5ED7EC9A0FA32CD100BC5767 /* StatusController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EC990FA32CD100BC5767 /* StatusController.m */; };
+		5ED7EC9C0FA32CE500BC5767 /* Status.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EC9B0FA32CE500BC5767 /* Status.xib */; };
+		5ED7ECE50FA36C9E00BC5767 /* ManualCommunicationController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7ECE40FA36C9E00BC5767 /* ManualCommunicationController.m */; };
+		5ED7ECE70FA36CBB00BC5767 /* ManualCommunication.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7ECE60FA36CBB00BC5767 /* ManualCommunication.xib */; };
+		5ED7ED050FA387D900BC5767 /* CPU.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7ED040FA387D900BC5767 /* CPU.xib */; };
+		5ED7ED080FA387EA00BC5767 /* CPUController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7ED070FA387EA00BC5767 /* CPUController.m */; };
+		5ED7ED710FA3AB9400BC5767 /* TortureTestController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7ED700FA3AB9400BC5767 /* TortureTestController.m */; };
+		5ED7ED730FA3ABAE00BC5767 /* TortureTest.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7ED720FA3ABAE00BC5767 /* TortureTest.xib */; };
+		5ED7ED9C0FA402B500BC5767 /* PreferencesController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7ED9B0FA402B500BC5767 /* PreferencesController.m */; };
+		5ED7ED9E0FA402CA00BC5767 /* Preferences.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7ED9D0FA402CA00BC5767 /* Preferences.xib */; };
+		5ED7EE100FA4B8B900BC5767 /* PrimeNetController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EE0F0FA4B8B900BC5767 /* PrimeNetController.m */; };
+		5ED7EE120FA4B8CB00BC5767 /* PrimeNet.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EE110FA4B8CB00BC5767 /* PrimeNet.xib */; };
+		5ED7EE430FA4DD8F00BC5767 /* ConnectionController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EE420FA4DD8F00BC5767 /* ConnectionController.m */; };
+		5ED7EE450FA4DDA800BC5767 /* Connection.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EE440FA4DDA800BC5767 /* Connection.xib */; };
+		5ED7EE5B0FA552DD00BC5767 /* WorkerWindowsController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EE5A0FA552DD00BC5767 /* WorkerWindowsController.m */; };
+		5ED7EE5D0FA552ED00BC5767 /* WorkerWindows.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EE5C0FA552ED00BC5767 /* WorkerWindows.xib */; };
+		5ED7EFF80FAB893E00BC5767 /* QuitGIMPSController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5ED7EFF70FAB893E00BC5767 /* QuitGIMPSController.m */; };
+		5ED7EFFA0FAB895600BC5767 /* QuitGIMPS.xib in Resources */ = {isa = PBXBuildFile; fileRef = 5ED7EFF90FAB895600BC5767 /* QuitGIMPS.xib */; };
+		8D11072B0486CEB800E47090 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 089C165CFE840E0CC02AAC07 /* InfoPlist.strings */; };
+		8D11072D0486CEB800E47090 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 29B97316FDCFA39411CA2CEA /* main.m */; settings = {ATTRIBUTES = (); }; };
+		8D11072F0486CEB800E47090 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1058C7A1FEA54F0111CA2CBB /* Cocoa.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		089C165DFE840E0CC02AAC07 /* English */ = {isa = PBXFileReference; fileEncoding = 10; lastKnownFileType = text.plist.strings; name = English; path = English.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		1058C7A1FEA54F0111CA2CBB /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = /System/Library/Frameworks/Cocoa.framework; sourceTree = "<absolute>"; };
+		13E42FB307B3F0F600E4EEF1 /* CoreData.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreData.framework; path = /System/Library/Frameworks/CoreData.framework; sourceTree = "<absolute>"; };
+		1DDD58150DA1D0A300B32029 /* English */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = English; path = English.lproj/MainMenu.xib; sourceTree = "<group>"; };
+		29B97316FDCFA39411CA2CEA /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		29B97324FDCFA39411CA2CEA /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = /System/Library/Frameworks/AppKit.framework; sourceTree = "<absolute>"; };
+		29B97325FDCFA39411CA2CEA /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = /System/Library/Frameworks/Foundation.framework; sourceTree = "<absolute>"; };
+		32CA4F630368D1EE00C91783 /* Prime95_Prefix.pch */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Prime95_Prefix.pch; sourceTree = "<group>"; };
+		5EBA78AF0F96D6B900F79624 /* Mersenne.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Mersenne.icns; sourceTree = "<group>"; };
+		5ED7E7F50F98F7CB00BC5767 /* AppController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AppController.h; sourceTree = "<group>"; };
+		5ED7E7F60F98F7CB00BC5767 /* AppController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = AppController.m; sourceTree = "<group>"; };
+		5ED7E8640F9918C400BC5767 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = /System/Library/Frameworks/IOKit.framework; sourceTree = "<absolute>"; };
+		5ED7E88D0F99620300BC5767 /* AboutController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AboutController.h; sourceTree = "<group>"; };
+		5ED7E88E0F99620300BC5767 /* AboutController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = AboutController.m; sourceTree = "<group>"; };
+		5ED7E8920F99635600BC5767 /* About.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = About.xib; sourceTree = "<group>"; };
+		5ED7E8EB0F9A055900BC5767 /* prime95.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = prime95.h; sourceTree = "<group>"; };
+		5ED7E91B0F9A5B3500BC5767 /* Window.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = Window.xib; sourceTree = "<group>"; };
+		5ED7E9220F9A5D7F00BC5767 /* WindowController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WindowController.h; sourceTree = "<group>"; };
+		5ED7E9230F9A5D7F00BC5767 /* WindowController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = WindowController.m; sourceTree = "<group>"; };
+		5ED7EA3F0F9C00C700BC5767 /* Continue.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = Continue.xib; sourceTree = "<group>"; };
+		5ED7EA460F9C03B600BC5767 /* ContinueController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ContinueController.h; sourceTree = "<group>"; };
+		5ED7EA470F9C03B600BC5767 /* ContinueController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ContinueController.m; sourceTree = "<group>"; };
+		5ED7EA610F9C16E100BC5767 /* Stop.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = Stop.xib; sourceTree = "<group>"; };
+		5ED7EA640F9C178600BC5767 /* StopController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = StopController.h; sourceTree = "<group>"; };
+		5ED7EA650F9C178600BC5767 /* StopController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = StopController.m; sourceTree = "<group>"; };
+		5ED7EBA90FA21B6300BC5767 /* Test.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = Test.xib; sourceTree = "<group>"; };
+		5ED7EBAB0FA21B7800BC5767 /* TestController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TestController.h; sourceTree = "<group>"; };
+		5ED7EBAC0FA21B7800BC5767 /* TestController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TestController.m; sourceTree = "<group>"; };
+		5ED7EBDC0FA2459F00BC5767 /* Pminus1Controller.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Pminus1Controller.h; sourceTree = "<group>"; };
+		5ED7EBDD0FA2459F00BC5767 /* Pminus1Controller.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Pminus1Controller.m; sourceTree = "<group>"; };
+		5ED7EBDF0FA245B600BC5767 /* Pminus1.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = Pminus1.xib; sourceTree = "<group>"; };
+		5ED7EBF00FA25E1500BC5767 /* ECM.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = ECM.xib; sourceTree = "<group>"; };
+		5ED7EBFD0FA261E500BC5767 /* ECMController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ECMController.h; sourceTree = "<group>"; };
+		5ED7EBFE0FA261E500BC5767 /* ECMController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ECMController.m; sourceTree = "<group>"; };
+		5ED7EC390FA28A3200BC5767 /* PRPController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PRPController.h; sourceTree = "<group>"; };
+		5ED7EC3A0FA28A3200BC5767 /* PRPController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PRPController.m; sourceTree = "<group>"; };
+		5ED7EC3C0FA28A4200BC5767 /* PRP.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = PRP.xib; sourceTree = "<group>"; };
+		5ED7EC660FA2A70C00BC5767 /* TimeController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TimeController.h; sourceTree = "<group>"; };
+		5ED7EC670FA2A70C00BC5767 /* TimeController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TimeController.m; sourceTree = "<group>"; };
+		5ED7EC690FA2A72500BC5767 /* Time.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = Time.xib; sourceTree = "<group>"; };
+		5ED7EC7A0FA2ACC100BC5767 /* UnreserveController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = UnreserveController.h; sourceTree = "<group>"; };
+		5ED7EC7B0FA2ACC100BC5767 /* UnreserveController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = UnreserveController.m; sourceTree = "<group>"; };
+		5ED7EC7D0FA2ACD400BC5767 /* Unreserve.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = Unreserve.xib; sourceTree = "<group>"; };
+		5ED7EC980FA32CD100BC5767 /* StatusController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = StatusController.h; sourceTree = "<group>"; };
+		5ED7EC990FA32CD100BC5767 /* StatusController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = StatusController.m; sourceTree = "<group>"; };
+		5ED7EC9B0FA32CE500BC5767 /* Status.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = Status.xib; sourceTree = "<group>"; };
+		5ED7ECE30FA36C9E00BC5767 /* ManualCommunicationController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ManualCommunicationController.h; sourceTree = "<group>"; };
+		5ED7ECE40FA36C9E00BC5767 /* ManualCommunicationController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ManualCommunicationController.m; sourceTree = "<group>"; };
+		5ED7ECE60FA36CBB00BC5767 /* ManualCommunication.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = ManualCommunication.xib; sourceTree = "<group>"; };
+		5ED7ED040FA387D900BC5767 /* CPU.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = CPU.xib; sourceTree = "<group>"; };
+		5ED7ED060FA387EA00BC5767 /* CPUController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = CPUController.h; sourceTree = "<group>"; };
+		5ED7ED070FA387EA00BC5767 /* CPUController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = CPUController.m; sourceTree = "<group>"; };
+		5ED7ED6F0FA3AB9400BC5767 /* TortureTestController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TortureTestController.h; sourceTree = "<group>"; };
+		5ED7ED700FA3AB9400BC5767 /* TortureTestController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TortureTestController.m; sourceTree = "<group>"; };
+		5ED7ED720FA3ABAE00BC5767 /* TortureTest.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = TortureTest.xib; sourceTree = "<group>"; };
+		5ED7ED9A0FA402B500BC5767 /* PreferencesController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PreferencesController.h; sourceTree = "<group>"; };
+		5ED7ED9B0FA402B500BC5767 /* PreferencesController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PreferencesController.m; sourceTree = "<group>"; };
+		5ED7ED9D0FA402CA00BC5767 /* Preferences.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = Preferences.xib; sourceTree = "<group>"; };
+		5ED7EE0E0FA4B8B900BC5767 /* PrimeNetController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PrimeNetController.h; sourceTree = "<group>"; };
+		5ED7EE0F0FA4B8B900BC5767 /* PrimeNetController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PrimeNetController.m; sourceTree = "<group>"; };
+		5ED7EE110FA4B8CB00BC5767 /* PrimeNet.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = PrimeNet.xib; sourceTree = "<group>"; };
+		5ED7EE410FA4DD8F00BC5767 /* ConnectionController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ConnectionController.h; sourceTree = "<group>"; };
+		5ED7EE420FA4DD8F00BC5767 /* ConnectionController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ConnectionController.m; sourceTree = "<group>"; };
+		5ED7EE440FA4DDA800BC5767 /* Connection.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = Connection.xib; sourceTree = "<group>"; };
+		5ED7EE590FA552DD00BC5767 /* WorkerWindowsController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WorkerWindowsController.h; sourceTree = "<group>"; };
+		5ED7EE5A0FA552DD00BC5767 /* WorkerWindowsController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = WorkerWindowsController.m; sourceTree = "<group>"; };
+		5ED7EE5C0FA552ED00BC5767 /* WorkerWindows.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = WorkerWindows.xib; sourceTree = "<group>"; };
+		5ED7EFF60FAB893E00BC5767 /* QuitGIMPSController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = QuitGIMPSController.h; sourceTree = "<group>"; };
+		5ED7EFF70FAB893E00BC5767 /* QuitGIMPSController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = QuitGIMPSController.m; sourceTree = "<group>"; };
+		5ED7EFF90FAB895600BC5767 /* QuitGIMPS.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = QuitGIMPS.xib; sourceTree = "<group>"; };
+		8D1107310486CEB800E47090 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8D1107320486CEB800E47090 /* Prime95.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Prime95.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		8D11072E0486CEB800E47090 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8D11072F0486CEB800E47090 /* Cocoa.framework in Frameworks */,
+				5ED7E8650F9918C400BC5767 /* IOKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		080E96DDFE201D6D7F000001 /* Classes */ = {
+			isa = PBXGroup;
+			children = (
+				5ED7E88D0F99620300BC5767 /* AboutController.h */,
+				5ED7E88E0F99620300BC5767 /* AboutController.m */,
+				5ED7E7F50F98F7CB00BC5767 /* AppController.h */,
+				5ED7E7F60F98F7CB00BC5767 /* AppController.m */,
+				5ED7EE410FA4DD8F00BC5767 /* ConnectionController.h */,
+				5ED7EE420FA4DD8F00BC5767 /* ConnectionController.m */,
+				5ED7EA460F9C03B600BC5767 /* ContinueController.h */,
+				5ED7EA470F9C03B600BC5767 /* ContinueController.m */,
+				5ED7ED060FA387EA00BC5767 /* CPUController.h */,
+				5ED7ED070FA387EA00BC5767 /* CPUController.m */,
+				5ED7EBFD0FA261E500BC5767 /* ECMController.h */,
+				5ED7EBFE0FA261E500BC5767 /* ECMController.m */,
+				5ED7ECE30FA36C9E00BC5767 /* ManualCommunicationController.h */,
+				5ED7ECE40FA36C9E00BC5767 /* ManualCommunicationController.m */,
+				5ED7EBDC0FA2459F00BC5767 /* Pminus1Controller.h */,
+				5ED7EBDD0FA2459F00BC5767 /* Pminus1Controller.m */,
+				5ED7ED9A0FA402B500BC5767 /* PreferencesController.h */,
+				5ED7ED9B0FA402B500BC5767 /* PreferencesController.m */,
+				5ED7EE0E0FA4B8B900BC5767 /* PrimeNetController.h */,
+				5ED7EE0F0FA4B8B900BC5767 /* PrimeNetController.m */,
+				5ED7EC390FA28A3200BC5767 /* PRPController.h */,
+				5ED7EC3A0FA28A3200BC5767 /* PRPController.m */,
+				5ED7EFF60FAB893E00BC5767 /* QuitGIMPSController.h */,
+				5ED7EFF70FAB893E00BC5767 /* QuitGIMPSController.m */,
+				5ED7EC980FA32CD100BC5767 /* StatusController.h */,
+				5ED7EC990FA32CD100BC5767 /* StatusController.m */,
+				5ED7EA640F9C178600BC5767 /* StopController.h */,
+				5ED7EA650F9C178600BC5767 /* StopController.m */,
+				5ED7EBAB0FA21B7800BC5767 /* TestController.h */,
+				5ED7EBAC0FA21B7800BC5767 /* TestController.m */,
+				5ED7EC660FA2A70C00BC5767 /* TimeController.h */,
+				5ED7EC670FA2A70C00BC5767 /* TimeController.m */,
+				5ED7ED6F0FA3AB9400BC5767 /* TortureTestController.h */,
+				5ED7ED700FA3AB9400BC5767 /* TortureTestController.m */,
+				5ED7EC7A0FA2ACC100BC5767 /* UnreserveController.h */,
+				5ED7EC7B0FA2ACC100BC5767 /* UnreserveController.m */,
+				5ED7E9220F9A5D7F00BC5767 /* WindowController.h */,
+				5ED7E9230F9A5D7F00BC5767 /* WindowController.m */,
+				5ED7EE590FA552DD00BC5767 /* WorkerWindowsController.h */,
+				5ED7EE5A0FA552DD00BC5767 /* WorkerWindowsController.m */,
+			);
+			name = Classes;
+			sourceTree = "<group>";
+		};
+		1058C7A0FEA54F0111CA2CBB /* Linked Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				5ED7E8640F9918C400BC5767 /* IOKit.framework */,
+				1058C7A1FEA54F0111CA2CBB /* Cocoa.framework */,
+			);
+			name = "Linked Frameworks";
+			sourceTree = "<group>";
+		};
+		1058C7A2FEA54F0111CA2CBB /* Other Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				29B97324FDCFA39411CA2CEA /* AppKit.framework */,
+				13E42FB307B3F0F600E4EEF1 /* CoreData.framework */,
+				29B97325FDCFA39411CA2CEA /* Foundation.framework */,
+			);
+			name = "Other Frameworks";
+			sourceTree = "<group>";
+		};
+		19C28FACFE9D520D11CA2CBB /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				8D1107320486CEB800E47090 /* Prime95.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		29B97314FDCFA39411CA2CEA /* Prime95 */ = {
+			isa = PBXGroup;
+			children = (
+				080E96DDFE201D6D7F000001 /* Classes */,
+				29B97315FDCFA39411CA2CEA /* Other Sources */,
+				29B97317FDCFA39411CA2CEA /* Resources */,
+				29B97323FDCFA39411CA2CEA /* Frameworks */,
+				19C28FACFE9D520D11CA2CBB /* Products */,
+			);
+			name = Prime95;
+			sourceTree = "<group>";
+		};
+		29B97315FDCFA39411CA2CEA /* Other Sources */ = {
+			isa = PBXGroup;
+			children = (
+				32CA4F630368D1EE00C91783 /* Prime95_Prefix.pch */,
+				5ED7E8EB0F9A055900BC5767 /* prime95.h */,
+				29B97316FDCFA39411CA2CEA /* main.m */,
+			);
+			name = "Other Sources";
+			sourceTree = "<group>";
+		};
+		29B97317FDCFA39411CA2CEA /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				5ED7E8920F99635600BC5767 /* About.xib */,
+				5ED7EE440FA4DDA800BC5767 /* Connection.xib */,
+				5ED7EA3F0F9C00C700BC5767 /* Continue.xib */,
+				5ED7ED040FA387D900BC5767 /* CPU.xib */,
+				5ED7EBF00FA25E1500BC5767 /* ECM.xib */,
+				8D1107310486CEB800E47090 /* Info.plist */,
+				089C165CFE840E0CC02AAC07 /* InfoPlist.strings */,
+				1DDD58140DA1D0A300B32029 /* MainMenu.xib */,
+				5ED7ECE60FA36CBB00BC5767 /* ManualCommunication.xib */,
+				5EBA78AF0F96D6B900F79624 /* Mersenne.icns */,
+				5ED7EBDF0FA245B600BC5767 /* Pminus1.xib */,
+				5ED7ED9D0FA402CA00BC5767 /* Preferences.xib */,
+				5ED7EE110FA4B8CB00BC5767 /* PrimeNet.xib */,
+				5ED7EC3C0FA28A4200BC5767 /* PRP.xib */,
+				5ED7EFF90FAB895600BC5767 /* QuitGIMPS.xib */,
+				5ED7EC9B0FA32CE500BC5767 /* Status.xib */,
+				5ED7EA610F9C16E100BC5767 /* Stop.xib */,
+				5ED7EBA90FA21B6300BC5767 /* Test.xib */,
+				5ED7EC690FA2A72500BC5767 /* Time.xib */,
+				5ED7ED720FA3ABAE00BC5767 /* TortureTest.xib */,
+				5ED7EC7D0FA2ACD400BC5767 /* Unreserve.xib */,
+				5ED7E91B0F9A5B3500BC5767 /* Window.xib */,
+				5ED7EE5C0FA552ED00BC5767 /* WorkerWindows.xib */,
+			);
+			name = Resources;
+			sourceTree = "<group>";
+		};
+		29B97323FDCFA39411CA2CEA /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				1058C7A0FEA54F0111CA2CBB /* Linked Frameworks */,
+				1058C7A2FEA54F0111CA2CBB /* Other Frameworks */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8D1107260486CEB800E47090 /* Prime95 */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C01FCF4A08A954540054247B /* Build configuration list for PBXNativeTarget "Prime95" */;
+			buildPhases = (
+				8D1107290486CEB800E47090 /* Resources */,
+				8D11072C0486CEB800E47090 /* Sources */,
+				8D11072E0486CEB800E47090 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Prime95;
+			productInstallPath = "$(HOME)/Applications";
+			productName = Prime95;
+			productReference = 8D1107320486CEB800E47090 /* Prime95.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		29B97313FDCFA39411CA2CEA /* Project object */ = {
+			isa = PBXProject;
+			buildConfigurationList = C01FCF4E08A954540054247B /* Build configuration list for PBXProject "Prime95" */;
+			compatibilityVersion = "Xcode 3.1";
+			hasScannedForEncodings = 1;
+			mainGroup = 29B97314FDCFA39411CA2CEA /* Prime95 */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8D1107260486CEB800E47090 /* Prime95 */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8D1107290486CEB800E47090 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8D11072B0486CEB800E47090 /* InfoPlist.strings in Resources */,
+				1DDD58160DA1D0A300B32029 /* MainMenu.xib in Resources */,
+				5EBA78B00F96D6B900F79624 /* Mersenne.icns in Resources */,
+				5ED7E8930F99635600BC5767 /* About.xib in Resources */,
+				5ED7E91C0F9A5B3500BC5767 /* Window.xib in Resources */,
+				5ED7EA400F9C00C700BC5767 /* Continue.xib in Resources */,
+				5ED7EA620F9C16E100BC5767 /* Stop.xib in Resources */,
+				5ED7EBAA0FA21B6300BC5767 /* Test.xib in Resources */,
+				5ED7EBE00FA245B600BC5767 /* Pminus1.xib in Resources */,
+				5ED7EBF10FA25E1500BC5767 /* ECM.xib in Resources */,
+				5ED7EC3D0FA28A4200BC5767 /* PRP.xib in Resources */,
+				5ED7EC6A0FA2A72500BC5767 /* Time.xib in Resources */,
+				5ED7EC7E0FA2ACD400BC5767 /* Unreserve.xib in Resources */,
+				5ED7EC9C0FA32CE500BC5767 /* Status.xib in Resources */,
+				5ED7ECE70FA36CBB00BC5767 /* ManualCommunication.xib in Resources */,
+				5ED7ED050FA387D900BC5767 /* CPU.xib in Resources */,
+				5ED7ED730FA3ABAE00BC5767 /* TortureTest.xib in Resources */,
+				5ED7ED9E0FA402CA00BC5767 /* Preferences.xib in Resources */,
+				5ED7EE120FA4B8CB00BC5767 /* PrimeNet.xib in Resources */,
+				5ED7EE450FA4DDA800BC5767 /* Connection.xib in Resources */,
+				5ED7EE5D0FA552ED00BC5767 /* WorkerWindows.xib in Resources */,
+				5ED7EFFA0FAB895600BC5767 /* QuitGIMPS.xib in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		8D11072C0486CEB800E47090 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8D11072D0486CEB800E47090 /* main.m in Sources */,
+				5ED7E7F70F98F7CB00BC5767 /* AppController.m in Sources */,
+				5ED7E88F0F99620300BC5767 /* AboutController.m in Sources */,
+				5ED7E9240F9A5D7F00BC5767 /* WindowController.m in Sources */,
+				5ED7EA480F9C03B600BC5767 /* ContinueController.m in Sources */,
+				5ED7EA660F9C178600BC5767 /* StopController.m in Sources */,
+				5ED7EBAD0FA21B7800BC5767 /* TestController.m in Sources */,
+				5ED7EBDE0FA2459F00BC5767 /* Pminus1Controller.m in Sources */,
+				5ED7EBFF0FA261E500BC5767 /* ECMController.m in Sources */,
+				5ED7EC3B0FA28A3200BC5767 /* PRPController.m in Sources */,
+				5ED7EC680FA2A70C00BC5767 /* TimeController.m in Sources */,
+				5ED7EC7C0FA2ACC100BC5767 /* UnreserveController.m in Sources */,
+				5ED7EC9A0FA32CD100BC5767 /* StatusController.m in Sources */,
+				5ED7ECE50FA36C9E00BC5767 /* ManualCommunicationController.m in Sources */,
+				5ED7ED080FA387EA00BC5767 /* CPUController.m in Sources */,
+				5ED7ED710FA3AB9400BC5767 /* TortureTestController.m in Sources */,
+				5ED7ED9C0FA402B500BC5767 /* PreferencesController.m in Sources */,
+				5ED7EE100FA4B8B900BC5767 /* PrimeNetController.m in Sources */,
+				5ED7EE430FA4DD8F00BC5767 /* ConnectionController.m in Sources */,
+				5ED7EE5B0FA552DD00BC5767 /* WorkerWindowsController.m in Sources */,
+				5ED7EFF80FAB893E00BC5767 /* QuitGIMPSController.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXVariantGroup section */
+		089C165CFE840E0CC02AAC07 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				089C165DFE840E0CC02AAC07 /* English */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+		1DDD58140DA1D0A300B32029 /* MainMenu.xib */ = {
+			isa = PBXVariantGroup;
+			children = (
+				1DDD58150DA1D0A300B32029 /* English */,
+			);
+			name = MainMenu.xib;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		C01FCF4B08A954540054247B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				COPY_PHASE_STRIP = NO;
+				FRAMEWORK_SEARCH_PATHS = "";
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				"GCC_MODEL_PPC64[arch=i386]" = NO;
+				"GCC_MODEL_PPC64[arch=x86_64]" = YES;
+				GCC_MODEL_TUNING = G5;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PRECOMPILE_PREFIX_HEADER = YES;
+				GCC_PREFIX_HEADER = Prime95_Prefix.pch;
+				"GCC_PREPROCESSOR_DEFINITIONS[arch=x86_64]" = X86_64;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/../../gwnum",
+					"$(SRCROOT)/../..",
+					"$(SRCROOT)/../../linux",
+				);
+				INFOPLIST_FILE = Info.plist;
+				INSTALL_PATH = "$(HOME)/Applications";
+				LIBRARY_SEARCH_PATHS = "$(inherited)";
+				LINK_WITH_STANDARD_LIBRARIES = YES;
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = "";
+				"OTHER_LDFLAGS[arch=i386]" = (
+					../../prime95/macosx/factor32.o,
+					../../gwnum/debug/multutil.o,
+					../../gwnum/debug/gwnum.a,
+					"-lcurl",
+					"-lstdc++",
+				);
+				"OTHER_LDFLAGS[arch=x86_64]" = (
+					../../prime95/macosx64/factor64.o,
+					../../gwnum/amd64/debug/multutil.o,
+					../../gwnum/amd64/debug/gwnum.a,
+					"-lcurl",
+					"-lstdc++",
+				);
+				PRELINK_LIBS = "";
+				PRODUCT_NAME = Prime95;
+				USER_HEADER_SEARCH_PATHS = "";
+				VALID_ARCHS = "i386 x86_64";
+			};
+			name = Debug;
+		};
+		C01FCF4C08A954540054247B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				FRAMEWORK_SEARCH_PATHS = "";
+				"GCC_MODEL_PPC64[arch=i386]" = NO;
+				"GCC_MODEL_PPC64[arch=x86_64]" = YES;
+				GCC_MODEL_TUNING = G5;
+				GCC_PRECOMPILE_PREFIX_HEADER = YES;
+				GCC_PREFIX_HEADER = Prime95_Prefix.pch;
+				GCC_PREPROCESSOR_DEFINITIONS = NS_BLOCK_ASSERTIONS;
+				"GCC_PREPROCESSOR_DEFINITIONS[arch=x86_64]" = X86_64;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/../../gwnum",
+					"$(SRCROOT)/../..",
+					"$(SRCROOT)/../../linux",
+				);
+				INFOPLIST_FILE = Info.plist;
+				INSTALL_PATH = "$(HOME)/Applications";
+				LIBRARY_SEARCH_PATHS = "$(inherited)";
+				OTHER_LDFLAGS = "";
+				"OTHER_LDFLAGS[arch=i386]" = (
+					../../prime95/macosx/factor32.o,
+					../../gwnum/release/multutil.o,
+					../../gwnum/release/gwnum.a,
+					"-lcurl",
+				);
+				"OTHER_LDFLAGS[arch=x86_64]" = (
+					../../prime95/macosx64/factor64.o,
+					../../gwnum/amd64/release/multutil.o,
+					../../gwnum/amd64/release/gwnum.a,
+					"-lcurl",
+					"-lstdc++",
+				);
+				PRELINK_LIBS = "";
+				PRODUCT_NAME = Prime95;
+				USER_HEADER_SEARCH_PATHS = "";
+			};
+			name = Release;
+		};
+		C01FCF4F08A954540054247B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				GCC_C_LANGUAGE_STANDARD = c99;
+				"GCC_MODEL_PPC64[arch=i386]" = NO;
+				"GCC_MODEL_PPC64[arch=x86_64]" = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PREBINDING = NO;
+				SDKROOT = macosx10.5;
+				VALID_ARCHS = "i386 x86_64";
+			};
+			name = Debug;
+		};
+		C01FCF5008A954540054247B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_32_BIT)";
+				GCC_C_LANGUAGE_STANDARD = c99;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				PREBINDING = NO;
+				SDKROOT = macosx10.5;
+				VALID_ARCHS = "i386 x86_64";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		C01FCF4A08A954540054247B /* Build configuration list for PBXNativeTarget "Prime95" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C01FCF4B08A954540054247B /* Debug */,
+				C01FCF4C08A954540054247B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C01FCF4E08A954540054247B /* Build configuration list for PBXProject "Prime95" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C01FCF4F08A954540054247B /* Debug */,
+				C01FCF5008A954540054247B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 29B97313FDCFA39411CA2CEA /* Project object */;
+}

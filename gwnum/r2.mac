@@ -1,0 +1,147 @@
+; Copyright 2009-2010 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+
+;;
+;;
+;; All new macros for version 26 of gwnum where we do a very traditional, primarily
+;; radix-4, FFT.  These macros do a radix-2 step for FFTs with an odd number of levels.
+;; The forward FFT macros multiply by the sin/cos values at the end
+;; of the macro and the inverse FFTs multiply by the sin/cos values at the start of
+;; the macro.  We also implement the Daniel J. Bernstein (DJB) "exponent-1" idea to
+;; save sin/cos memory.
+;;
+;;
+
+;; Macro to operate on 2 64-byte cache lines.  It does 2 two_complex_ffts.
+;; That is, two radix-2 butterflies followed by a complex multiply using sin/cos data.
+
+r2_x2cl_two_complex_fft MACRO srcreg,srcinc,d1,screg
+	xload	xmm2, [srcreg]		;; R1
+	xload	xmm0, [srcreg+d1]	;; R2
+	xcopy	xmm1, xmm2		;; Copy R1
+	subpd	xmm2, xmm0		;; R1 = R1 - R2 (new R2)
+	addpd	xmm0, xmm1		;; R2 = R1 + R2 (new and final R1)
+
+	xload	xmm3, [srcreg+16]	;; R3 (I1)
+	xload	xmm1, [srcreg+d1+16]	;; R4 (I2)
+	xcopy	xmm4, xmm3		;; Copy I1
+	subpd	xmm3, xmm1		;; I1 = I1 - I2 (new I2)
+	addpd	xmm1, xmm4		;; I2 = I1 + I2 (new and final I1)
+
+	xload	xmm6, [srcreg+32]	;; R1_2
+	xload	xmm4, [srcreg+d1+32]	;; R2_2
+	xcopy	xmm7, xmm6		;; Copy R1_2
+	subpd	xmm6, xmm4		;; R1_2 = R1_2-R2_2 (new R2_2)
+	addpd	xmm4, xmm7		;; R2_2 = R1_2+R2_2 (new and final R1_2)
+
+	xstore	[srcreg], xmm0		;; Save R1
+	xstore	[srcreg+16], xmm1	;; Save R2
+
+	xprefetchw [srcreg+srcinc]
+
+	xload	xmm7, [srcreg+48]	;; R3_2
+	xload	xmm5, [srcreg+d1+48]	;; R4_2
+	xcopy	xmm0, xmm7		;; Copy I1_2
+	subpd	xmm7, xmm5		;; I1_2 = I1_2-I2_2 (new I2_2)
+	addpd	xmm5, xmm0		;; I2_2 = I1_2+I2_2 (new and final I1_2)
+
+	xload	xmm0, [screg+16]	;; cosine/sine
+	xcopy	xmm1, xmm0		;; cosine/sine
+	mulpd	xmm0, xmm2		;; A2 = R2 * cosine/sine
+	mulpd	xmm1, xmm3		;; B2 = I2 * cosine/sine
+
+	xstore	[srcreg+d1], xmm4	;; Save R1_2
+	xstore	[srcreg+d1+16], xmm5	;; Save R2_2
+
+	xload	xmm4, [screg+16]	;; cosine/sine
+	xcopy	xmm5, xmm4		;; cosine/sine
+	mulpd	xmm4, xmm6		;; A2_2 = R2_2 * cosine/sine
+	mulpd	xmm5, xmm7		;; B2_2 = I2_2 * cosine/sine
+
+	xprefetchw [srcreg+srcinc+d1]
+
+	subpd	xmm0, xmm3		;; A2 = A2 - I2
+	addpd	xmm1, xmm2		;; B2 = B2 + R2
+
+	subpd	xmm4, xmm7		;; A2_2 = A2_2 - I2_2
+	addpd	xmm5, xmm6		;; B2_2 = B2_2 + R2_2
+
+	xload	xmm3, [screg]		;; Load sine
+	mulpd	xmm0, xmm3		;; A2 = A2 * sine (final R2)
+	mulpd	xmm1, xmm3		;; B2 = B2 * sine (final I2)
+
+	mulpd	xmm4, xmm3		;; A2_2 = A2_2 * sine (final R2_2)
+	mulpd	xmm5, xmm3		;; B2_2 = B2_2 * sine (final I2_2)
+
+	xstore	[srcreg+32], xmm0	;; Save R3
+	xstore	[srcreg+48], xmm1	;; Save R4
+	xstore	[srcreg+d1+32], xmm4	;; Save R3_2
+	xstore	[srcreg+d1+48], xmm5	;; Save R4_2
+
+	bump	srcreg, srcinc
+	ENDM
+
+
+;; Macro to operate on 2 64-byte cache lines.  It does 2 two_complex_unffts
+;; That is, two complex multiplies using sin/cos data followed by radix-2 butterflies.
+
+r2_x2cl_two_complex_unfft MACRO srcreg,srcinc,d1,screg,scdist
+	xload	xmm2, [srcreg+d1]		;; R3 (R2)
+	xload	xmm3, [srcreg+d1+32]		;; R4 (I2)
+
+	xload	xmm4, [screg+16]		;; cosine/sine
+	mulpd	xmm4, xmm2			;; A2 = R2 * cosine/sine
+	addpd	xmm4, xmm3			;; A2 = A2 + I2
+	xload	xmm5, [screg+16]		;; cosine/sine
+	mulpd	xmm5, xmm3			;; B2 = I2 * cosine/sine
+	subpd	xmm5, xmm2			;; B2 = B2 - R2
+	xload	xmm3, [screg]			;; sine
+	mulpd	xmm4, xmm3			;; A2 = A2 * sine (new R2)
+	mulpd	xmm5, xmm3			;; B2 = B2 * sine (new I2)
+
+	xprefetchw [srcreg+srcinc]
+
+	xload	xmm6, [srcreg+d1+16]		;; R3 (R2_2)
+	xload	xmm7, [srcreg+d1+48]		;; R4 (I2_2)
+	xload	xmm2, [screg+scdist+16]		;; cosine/sine
+	mulpd	xmm2, xmm6			;; A2_2 = R2_2 * cosine/sine
+	addpd	xmm2, xmm7			;; A2_2 = A2_2 + I2_2
+	xload	xmm3, [screg+scdist+16]		;; cosine/sine
+	mulpd	xmm3, xmm7			;; B2_2 = I2_2 * cosine/sine
+	subpd	xmm3, xmm6			;; B2_2 = B2_2 - R2
+	xload	xmm7, [screg+scdist]		;; sine
+	mulpd	xmm2, xmm7			;; A2_2 = A2_2 * sine (new R2_2)
+	mulpd	xmm3, xmm7			;; B2_2 = B2_2 * sine (new I2_2)
+
+	xprefetchw [srcreg+srcinc+d1]
+
+	xload	xmm0, [srcreg]			;; R1 (R1)
+	subpd	xmm0, xmm4			;; final R2 = R1 - R2
+	addpd	xmm4, [srcreg]			;; final R1 = R1 + R2
+
+	xload	xmm1, [srcreg+32]		;; R2 (I1)
+	subpd	xmm1, xmm5			;; final I2 = I1 - I2
+	addpd	xmm5, [srcreg+32]		;; final I1 = I1 + I2
+
+	xload	xmm6, [srcreg+16]		;; R1 (R1_2)
+	subpd	xmm6, xmm2			;; final R2_2 = R1_2 - R2_2
+	addpd	xmm2, [srcreg+16]		;; final R1_2 = R1_2 + R2_2
+
+	xload	xmm7, [srcreg+48]		;; R2 (I1_2)
+	subpd	xmm7, xmm3			;; final I2_2 = I1_2 - I2_2
+	addpd	xmm3, [srcreg+48]		;; final I1_2 = I1_2 + I2_2
+
+	xstore	[srcreg], xmm4			;; Save R1
+	xstore	[srcreg+16], xmm0		;; Save R2
+	xstore	[srcreg+32], xmm5		;; Save R3
+	xstore	[srcreg+48], xmm1		;; Save R4
+
+	xstore	[srcreg+d1], xmm2		;; Save R1_2
+	xstore	[srcreg+d1+16], xmm6		;; Save R2_2
+	xstore	[srcreg+d1+32], xmm3		;; Save R3_2
+	xstore	[srcreg+d1+48], xmm7		;; Save R4_2
+	bump	srcreg, srcinc
+	ENDM
+

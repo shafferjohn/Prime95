@@ -1,0 +1,119 @@
+; Copyright 2001-2013 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+
+;
+; Expand the command line architecture definition into its names and features
+;
+
+IF @INSTR(,%ARCH,<BLEND>) NE 0
+	xarch	TEXTEQU	<BLEND>
+	PREFETCHING = 64
+	TLB_PRIMING = 0
+ELSEIF @INSTR(,%ARCH,<CORE>) NE 0
+	xarch	TEXTEQU	<CORE>
+	PREFETCHING = 64
+	TLB_PRIMING = 0
+ELSEIF @INSTR(,%ARCH,<FMA3>) NE 0		; Should only happen when assembling timeit.asm
+	xarch	TEXTEQU	<FMA3>
+	PREFETCHING = 64
+	TLB_PRIMING = 0
+ELSEIF @INSTR(,%ARCH,<P4TP>) NE 0
+	xarch	TEXTEQU	<P4>
+	PREFETCHING = 128
+	TLB_PRIMING = 1
+ELSEIF @INSTR(,%ARCH,<P4>) NE 0
+	xarch	TEXTEQU	<P4>
+	PREFETCHING = 128
+	TLB_PRIMING = 0
+ELSEIF @INSTR(,%ARCH,<K8>) NE 0
+	xarch	TEXTEQU	<K8>
+	PREFETCHING = 64
+	TLB_PRIMING = 0
+ELSEIF @INSTR(,%ARCH,<K10>) NE 0
+	xarch	TEXTEQU	<K10>
+	PREFETCHING = 64
+	TLB_PRIMING = 0
+ELSEIF @INSTR(,%ARCH,<BULL>) NE 0		; Should only happen when assembling timeit.asm
+	xarch	TEXTEQU	<BULL>
+	PREFETCHING = 64
+	TLB_PRIMING = 0
+ELSE
+	arch_not_given_on_command_line	
+ENDIF
+
+;
+; Macros used to conditionally eliminate some FFT implementations.
+; Using macros allows us change our minds and include these implementations
+; for a test build.
+;
+
+CORE	= 01h			; Assemble this FFT for CORE architecture
+P4	= 02h			; Assemble this FFT for P4 architecture
+P4TP	= 04h			; Assemble this FFT for early P4 architectures requiring TLB priming
+K8	= 08h			; Assemble this FFT for K8 architecture
+K10	= 10h			; Assemble this FFT for K10 architecture
+
+IFDEF X86_64
+	CORE_32	= 0
+	P4_32	= 0
+	K8_32	= 0
+	K10_32	= 0
+	CORE_64	= CORE
+	P4_64	= P4
+	K8_64	= K8
+	K10_64	= K10
+ELSE
+	CORE_32	= CORE
+	P4_32	= P4
+	K8_32	= K8
+	K10_32	= K10
+	CORE_64	= 0
+	P4_64	= 0
+	K8_64	= 0
+	K10_64	= 0
+ENDIF
+
+;; Used to conditionally assemble FFT implementations for various CPU architectures
+buildfor MACRO archs, ops:vararg
+	IFB <archs>
+		local_archs = 0
+	ELSE
+		local_archs = archs
+	ENDIF
+	;; Here is where we can force assembling all implementations.
+	;; Used when we are benchmarking to find the best FFT implementations.
+	IFDEF IMPL_ALL_CORE
+		local_archs = local_archs OR CORE
+	ENDIF
+	IFDEF IMPL_ALL_P4
+		local_archs = local_archs OR P4
+	ENDIF
+	IFDEF IMPL_ALL_P4TP
+		local_archs = local_archs OR P4TP
+	ENDIF
+	IFDEF IMPL_ALL_K8
+		local_archs = local_archs OR K8
+	ENDIF
+	IFDEF IMPL_ALL_K10
+		local_archs = local_archs OR K10
+	ENDIF
+	;; Conditionally assemble this FFT implementation
+	IF (@INSTR(,%xarch,<CORE>) NE 0) AND (local_archs AND CORE) NE 0
+	&ops
+	ENDIF
+	IF (@INSTR(,%xarch,<P4>) NE 0) AND TLB_PRIMING EQ 0 AND (local_archs AND P4) NE 0
+	&ops
+	ENDIF
+	IF (@INSTR(,%xarch,<P4>) NE 0) AND TLB_PRIMING NE 0 AND (local_archs AND P4TP) NE 0
+	&ops
+	ENDIF
+	IF (@INSTR(,%xarch,<K8>) NE 0) AND (local_archs AND K8) NE 0
+	&ops
+	ENDIF
+	IF (@INSTR(,%xarch,<K10>) NE 0) AND (local_archs AND K10) NE 0
+	&ops
+	ENDIF
+	ENDM
+

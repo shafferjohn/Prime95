@@ -1,0 +1,1292 @@
+; Copyright 1999-2004 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros implement Pentium Pro and Pentium II optimized versions
+; of macros found in lucas.mac
+
+
+; old code = 43.6
+; new code = 37.7
+
+eight_reals_fft_cmn MACRO R1,R2,R3,R4,R5,R6,R7,R8,off
+	fld	R4[off]			;; R4				;  1
+ 	fld	st			;; R4,R4			;2
+	fld	R8[off]			;; R8,R4,R4			;  2
+	fsub	st(1), st		;; new R8 = R4 - R8		;3-5
+	faddp	st(2), st		;; new R4 = R4 + R8		;4-6
+	fld	R2[off]			;; R2,R8,R4			;  3
+	fld	R6[off]			;; R6,R2,R8,R4			;  4
+	fsub	st(1), st		;; new R6 = R2 - R6		;5-7
+	 fld	SQRTHALF		;; square root of 1/2		;  5
+	 fmul	st(3), st		;; R8 = R8 * square root	;6-10
+	 fxch	st(1)			;; R6,ROOT,newR6,R8,R4
+	fadd	R2[off]			;; new R2 = R2 + R6		;7-9,6
+	fld	R1[off]			;; R1,R2,ROOT,R6,R8,R4		;  7
+	fxch	st(2)			;; ROOT,R2,R1,R6,R8,R4
+	 fmulp	st(3), st		;; R6 = R6 * square root	;8-12
+	fld	R5[off]			;; R5,R2,R1,R6,R8,R4		;  8
+	fsub	st(2), st		;; new R5 = R1 - R5		;9-11
+	fadd	R1[off]			;; new R1 = R1 + R5		;10-12
+	fld	R3[off]			;; R3,R1,R2,R5,R6,R8,R4		;  10
+	fld	R7[off]			;; R7,R3,R1,R2,R5,R6,R8,R4	;  11
+	fxch	st(7)			;; R4,R3,R1,R2,R5,R6,R8,R7
+	 fsub	st(3), st		;; R2 = R2 - R4 (final R4)	;11-13
+	 fadd	st, st			;; R4 = R4 * 2			;12-14
+	fxch	st(7)			;; R7,R3,R1,R2,R5,R6,R8,R4
+	fsub	st(1), st		;; new R7 = R3 - R7		;13-15
+	fadd	R3[off]			;; new R3 = R3 + R7		;14-16
+					;; R3,R7,R1,R2,R5,R6,R8,R4
+	fxch	st(6)			;; R8,R7,R1,R2,R5,R6,R3,R4
+	 fsub	st(5), st		;; R6 = R6 - R8 (Real part)	;15-17
+	 fadd	st, st			;; R8 = R8 * 2			;16-18
+	fxch	st(6)			;; R3,R7,R1,R2,R5,R6,R8,R4
+	 fsub	st(2), st		;; R1 = R1 - R3 (new R3)	;17-19
+	 fadd	st, st			;; R3 = R3 * 2			;18-20
+	fxch	st(5)			;; R6,R7,R1,R2,R5,R3,R8,R4
+	fadd	st(6), st		;; R8 = R6 + R8 (Imaginary part);19-21
+	fsub	st(4), st		;; R5 = R5 - R6 (final R7)	;20-22
+	fadd	st, st			;; R6 = R6 * 2			;21-23
+	fxch	st(7)			;; R4,R7,R1,R2,R5,R3,R8,R6
+	 fadd	st, st(3)		;; R4 = R2 + R4 (new R2)	;22-24
+	fxch	st(2)			;; R1,R7,R4,R2,R5,R3,R8,R6
+	 fadd	st(5), st		;; R3 = R1 + R3 (new R1)	;23-25
+					;; R3,R7,R2,R4,R5,R1,R8,R6
+	fxch	st(6)			;; R8,R7,R2,R4,R5,R1,R3,R6
+	fsub	st(1), st		;; R7 = R7 - R8 (final R8)	;24-26
+	fadd	st, st			;; R8 = R8 * 2			;25-27
+	fxch	st(2)			;; R2,R7,R8,R4,R5,R1,R3,R6
+	fsub	st(5), st		;; R1 = R1 - R2 (final R2)	;26-28
+	fadd	st, st			;; R2 = R2 * 2			;27-29
+	fxch	st(4)			;; R5,R7,R8,R4,R2,R1,R3,R6
+	fadd	st(7), st		;; R6 = R5 + R6 (final R5)	;28-30
+	fxch	st(1)			;; R7,R5,R8,R4,R2,R1,R3,R6
+	fadd	st(2), st		;; R8 = R7 + R8 (final R6)	;29-31
+	fxch	st(5)			;; R1,R5,R8,R4,R2,R7,R3,R6
+	fadd	st(4), st		;; R2 = R1 + R2 (final R1)	;30-32
+	  				;; Final - R2,R7,R6,R4,R1,R8,R3,R5
+	fstp	R5
+	fstp	R4
+	fstp	R7
+	fstp	R6
+	fstp	R1
+	fstp	R8
+	fstp	R2
+	fstp	R3
+	ENDM
+
+; old code = 44.5
+; new code = 40.0
+
+eight_reals_unfft MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R6			;; R6				;  1
+	fld	st			;; R6,R6			;2
+	fld	R8			;; R8,R6,R6			;  2
+	fsub	st(2), st		;; new R8 = R6 - R8		;3-5
+	faddp	st(1), st		;; new R7 = R6 + R8		;4-6
+	fld	R5			;; R5,R7,R8			;  3
+	fld	R7			;; R7,R5,newR7,R8		;  4
+	fsub	st(1), st		;; new R6 = R5 - R7		;5-7
+	fadd	R5			;; new R5 = R5 + R7		;6-8,5
+	fld	R1			;; R1,R5,R6,R7,R8		;  6
+	fld	st(4)			;; R8,R1,R5,R6,R7,R8		;7
+	fld	R2			;; R2,R8,R1,R5,R6,R7,R8		;  7
+	fsub	st(2), st		;; new R2 = R1 - R2		;8-10
+	fadd	R1			;; new R1 = R1 + R2		;9-11,8
+	fxch	st(4)			;; R6,R8,R2,R5,R1,R7,R8
+	fsub	st(1), st		;; R8 = R8 - R6			;10-12
+	faddp	st(6), st		;; R6 = R6 + R8			;11-13
+	fld	R4			;; R4,R8,R2,R5,R1,R7,R6
+	fsub	st(2), st		;; R2 = R2 - R4 (new R4)	;12-14
+	fld	SQRTHALF		;; ROOT,R4,R8,R2,R5,R1,R7,R6
+	fmul	st(2), st		;; R8 = R8 * square root of 1/2	;13-17
+	fxch	st(1)			;; R4,ROOT,R8,R2,R5,R1,R7,R6
+	fadd	st, st			;; R4 = R4 * 2			;14-16
+	fxch	st(1)			;; ROOT,R4,R8,R2,R5,R1,R7,R6
+	fmulp	st(7), st		;; R6 = R6 * square root of 1/2	;15-19
+	fld	R3			;; R3,R4,R8,R2,R5,R1,R7,R6
+	fsub	st(5), st		;; R1 = R1 - R3 (new R3)	;16-18
+	fadd	st, st			;; R3 = R3 * 2			;17-19
+	fxch	st(1)			;; R4,R3,R8,R2,R5,R1,R7,R6
+	fadd	st, st(3)		;; R4 = R2 + R4 (new R2)	;18-20
+	fxch	st(2)			;; R8,R3,R4,R2,R5,R1,R7,R6
+	fsub	st(3), st		;; newR4 = newR4 - newR8 (new R8);19-21
+	fadd	st, st			;; R8 = R8 * 2			;20-22
+	fxch	st(5)			;; R1,R3,R4,R2,R5,R8,R7,R6
+	fadd	st(1), st		;; R3 = R1 + R3 (new R1)	;21-23
+					;; R3,R1,R2,R4,R5,R8,R7,R6
+	fxch	st(6)			;; R7,R1,R2,R4,R5,R8,R3,R6
+	fsub	st(6), st		;; R3 = R3 - R7 (new R7)	;22-24
+	fadd	st, st			;; R7 = R7 * 2			;23-25
+	fxch	st(7)			;; R6,R1,R2,R4,R5,R8,R3,R7
+	fsub	st(2), st		;; R2 = R2 - R6 (new R6)	;24-26
+	fadd	st, st			;; R6 = R6 * 2			;25-27
+	fxch	st(4)			;; R5,R1,R2,R4,R6,R8,R3,R7
+	fsub	st(1), st		;; R1 = R1 - R5 (new R5)	;26-28
+	fadd	st, st			;; R5 = R5 * 2			;27-29
+	fxch	st(3)			;; R4,R1,R2,R5,R6,R8,R3,R7
+	fadd	st(5), st		;; R8 = R4 + R8 (new R4)	;28-30
+	fxch	st(6)			;; R3,R1,R2,R5,R6,R8,R4,R7
+	fadd	st(7), st		;; R7 = R3 + R7 (new R3)	;29-31
+	fxch	st(2)			;; R2,R1,R3,R5,R6,R8,R4,R7
+	fadd	st(4), st		;; R6 = R2 + R6 (new R2)	;30-32
+	fxch	st(1)			;; R1,R2,R3,R5,R6,R8,R4,R7
+	fadd	st(3), st		;; R5 = R1 + R5 (new R1)	;31-33
+					;; R5,R6,R7,R1,R2,R4,R8,R3
+	fstp	R2
+	fstp	R4
+	fstp	R6
+	fstp	R1
+	fstp	R3
+	fstp	R7
+	fstp	R8
+	fstp	R5
+	ENDM
+
+; old code = 55.0
+; new code = 51.7
+
+four_complex_fft_cmn MACRO R1,R2,R3,R4,R5,R6,R7,R8,D1,D2,D3,D4,D5,D6,D7,D8,off2,off3,off4
+	fld	R3			;; R3				;  1
+	fld	QWORD PTR [edi+off3+8]	;; A3,R3			;  2
+	fmul	st,st(1)		;; A3 = R3 * cosine/sine	;3-7
+	fld	R7			;; I3,A3,R3			;  3
+	fld	QWORD PTR [edi+off3+8]	;; B3,I3,A3,R3			;  4
+	fmul	st, st(1)		;; B3 = I3 * cosine/sine	;5-9
+	fld	R2			;; R2,B3,I3,A3,R3		;  5
+	fmul	QWORD PTR [edi+off2+8]	;; A2 = R2 * cosine/sine	;7-11,6
+	fxch	st(2)			;; I3,B3,A2,A3,R3
+	fsubp	st(3), st		;; A3 = A3 - I3			;8-10
+	fld	R4			;; R4,B3,A2,A3,R3		;  7
+	fmul	QWORD PTR [edi+off4+8]	;; A4 = R4 * cosine/sine	;9-13,8
+	fxch	st(4)			;; R3,B3,A2,A3,A4
+	faddp	st(1), st		;; B3 = B3 + R3			;10-12
+	fld	QWORD PTR [edi+off3]	;; sine,B3,A2,A3,A4		;  9
+	fmul	st(3), st		;; A3 = A3 * sine (new R3)	;11-15
+	fld	R6			;; I2,sine,B3,A2,A3,A4		;  10
+	fsub	st(3), st		;; A2 = A2 - I2			;12-14
+	fxch	st(1)			;; sine,I2,B3,A2,A3,A4
+	fmulp	st(2), st		;; B3 = B3 * sine (new I3)	;13-17
+	fld	R8			;; I4,I2,B3,A2,A3,A4		;  11
+	fsub	st(5), st		;; A4 = A4 - I4			;14-16
+	fxch	st(1)			;; I2,I4,B3,A2,A3,A4
+	fmul	QWORD PTR [edi+off2+8]	;; B2 = I2 * cosine/sine	;15-19
+	fld	R1			;; R1,B2,I4,newI3,A2,newR3,A4	;  13
+	fsub	st, st(5)		;; R1 = R1 - R3 (new R3)	;16-18
+	fxch	st(2)			;; I4,B2,R1,newI3,A2,newR3,A4
+	fmul	QWORD PTR [edi+off4+8]	;; B4 = I4 * cosine/sine	;17-21
+	fld	R5			;; I1,B4,B2,R1,newI3,A2,newR3,A4
+	fsub	st, st(4)		;; I1 = I1 - I3 (new I3)	;18-20
+	fxch	st(5)			;; A2,B4,B2,R1,newI3,I1,newR3,A4
+	fmul	QWORD PTR [edi+off2]	;; A2 = A2 * sine (new R2)	;19-23
+	fxch	st(2)			;; B2,B4,A2,R1,newI3,I1,newR3,A4
+	fadd	R2			;; B2 = B2 + R2			;20-22
+	fxch	st(7)			;; A4,B4,A2,R1,newI3,I1,newR3,B2
+	fmul	QWORD PTR [edi+off4]	;; A4 = A4 * sine (new R4)	;21-25
+	fxch	st(1)			;; B4,A4,A2,R1,newI3,I1,newR3,B2
+	fadd	R4			;; B4 = B4 + R4			;22-24
+	fxch	st(7)			;; B2,A4,A2,R1,newI3,I1,newR3,B4
+	fmul	QWORD PTR [edi+off2]	;; B2 = B2 * sine (new I2)	;23-27
+	fxch	st(6)			;; newR3,A4,A2,R1,newI3,I1,B2,B4
+	fadd	R1			;; R3 = R1 + R3 (new R1)	;24-26
+	fxch	st(7)			;; B4,A4,A2,R1,newI3,I1,B2,newR3
+	fmul	QWORD PTR [edi+off4]	;; B4 = B4 * sine (new I4)	;25-29
+					;; I4,R4,R2,R1,I3,I1,I2,R3
+	fxch	st(1)			;; R4,I4,R2,R1,I3,I1,I2,R3
+	fsub	st(2), st		;; R2 = R2 - R4 (new R4)	;26-28
+	fadd	st, st			;; R4 = R4 * 2			;27-29
+	fxch	st(4)			;; I3,I4,R2,R1,R4,I1,I2,R3
+	fadd	R5			;; I3 = I1 + I3 (new I1)	;28-30
+	fxch	st(2)			;; R2,I4,I3,R1,R4,I1,I2,R3
+	fsub	st(5), st		;; newI3 = newI3-newR4(final I4);29-31
+	fxch	st(1)			;; I4,R2,I3,R1,R4,I1,I2,R3
+	fsub	st(6), st		;; I2 = I2 - I4 (new I4)	;30-32
+	fadd	st, st			;; I4 = I4 * 2			;31-33
+	fxch	st(1)			;; R2,I4,I3,R1,R4,I1,I2,R3
+	fadd	st(4), st		;; R4 = R2 + R4 (new R2)	;32-34
+	fadd	st, st			;; newR4 = newR4 * 2		;33-35
+	fxch	st(6)			;; I2,I4,I3,R1,R4,I1,R2,R3
+	fsub	st(3), st		;; newR3 = newR3-newI4(final R3);34-36
+	fadd	st(1), st		;; I4 = I2 + I4 (new I2)	;35-37
+					;; I4,I2,I1,R3,R2,I3,R4,R1
+	fadd	st, st			;; I4 = I4 * 2			;36-38
+	fxch	st(4)			;; R2,I2,I1,R3,I4,I3,R4,R1
+	fsub	st(7), st		;; R1 = R1 - R2 (new R2)	;37-39
+	fadd	st, st			;; R2 = R2 * 2			;38-40
+	fxch	st(1)			;; I2,R2,I1,R3,I4,I3,R4,R1
+	fsub	st(2), st		;; I1 = I1 - I2 (new I2)	;39-41
+	fadd	st, st			;; I2 = I2 * 2			;40-42
+	fxch	st(3)			;; R3,R2,I1,I2,I4,I3,R4,R1
+	fadd	st(4), st		;; I4 = R3 + I4 (new R4)	;41-43
+	fxch	st(5)			;; I3,R2,I1,I2,I4,R3,R4,R1
+	fadd	st(6), st		;; R4 = I3 + R4 (new I3)	;42-44
+	fxch	st(7)			;; R1,R2,I1,I2,I4,R3,R4,I3
+	fadd	st(1), st		;; R2 = R1 + R2 (new R1)	;43-45
+	fxch	st(2)			;; I1,R2,R1,I2,I4,R3,R4,I3
+	fadd	st(3), st		;; I2 = I1 + I2 (new I1)	;44-46
+					;; I2,R1,R2,I1,R4,R3,I3,I4
+	fstp	D6
+	fstp	D1
+	fstp	D2
+	fstp	D5
+	fstp	D4
+	fstp	D3
+	fstp	D7
+	fstp	D8
+	ENDM
+
+; old code = 57.2
+; new code = 53.9
+
+four_complex_unfft_cmn MACRO R1,R2,R3,R4,R5,R6,R7,R8,D1,D2,D3,D4,D5,D6,D7,D8,off2,off3,off4
+	fld	R1			;; R1				;  1
+ 	fld	st			;; R1,R1			;2
+	fld	R3			;; R2,R1,R1			;  2
+	fsub	st(1), st		;; new R2 = R1 - R2		;3-5
+	faddp	st(2), st		;; new R1 = R1 + R2		;4-6
+	fld	R2			;; I1,R2,R1			;  3
+	fld	st			;; I1,I1,R2,R1			;5
+	fld	R4			;; I2,I1,I1,R2,R1		;  4
+	fsub	st(1), st		;; new I2 = I1 - I2		;6-8
+	faddp	st(2), st		;; new I1 = I1 + I2		;7-9
+	fld	R5			;; R3,I2,I1,R2,R1		;  5
+	fld	R7			;; R4,R3,I2,I1,R2,R1		;  6
+	fadd	st(1), st		;; new R3 = R3 + R4		;8-10
+	fsub	R5			;; new I4 = R4 - R3		;9-11,7
+	fld	R8			;; I4,I4,R3,I2,I1,R2,R1		;  8
+	fld	R6			;; I3,I4,I4,R3,I2,I1,R2,R1	;  9
+	fadd	st(1), st		;; new I3 = I3 + I4		;10-12
+	fsub	R8			;; new R4 = I3 - I4		;11-13
+					;; R4,I3,I4,R3,I2,I1,R2,R1
+	fxch	st(2)			;; I4,I3,R4,R3,I2,I1,R2,R1
+	fsub	st(4), st		;; I2 = I2 - I4 (new I4)	;12-14
+	fadd	st, st			;; I4 = I4 * 2			;13-15
+	fxch	st(2)			;; R4,I3,I4,R3,I2,I1,R2,R1
+	fsub	st(6), st		;; R2 = R2 - R4 (new R4)	;14-16
+	fadd	st, st			;; R4 = R4 * 2			;15-17
+	fxch	st(4)			;; I2,I3,I4,R3,R4,I1,R2,R1
+	fadd	st(2), st		;; I4 = I2 + I4 (new I2)	;16-18
+	fmul	QWORD PTR [edi+off4]	;; B4 = new I4 * sine		;17-21
+	fst	D4			;; Save B4
+	fxch	st(6)			;; R2,I3,newI2,R3,R4,I1,B4,R1
+	fadd	st(4), st		;; R4 = R2 + R4 (new R2)	;18-20
+	fxch	st(2)			;; newI2,I3,newR4,R3,newR2,I1,B4,R1
+	fmul	QWORD PTR [edi+off2]	;; B2 = new I2 * sine		;19-23
+	fst	D2			;; Save B2
+	fxch	st(1)			;; I3,B2,newR4,R3,newR2,I1,B4,R1
+	fsub	st(5), st		;; I1 = I1 - I3 (new I3)	;20-22
+	fxch	st(2)			;; newR4,B2,I3,R3,newR2,I1,B4,R1
+	fmul	QWORD PTR [edi+off4]	;; A4 = new R4 * sine		;21-25
+	fxch	st(2)			;; I3,B2,A4,R3,newR2,I1,B4,R1
+	fadd	st, st			;; I3 = I3 * 2			;22-24
+	fxch	st(6)			;; B4,B2,A4,R3,newR2,I1,I3,R1
+	fmul	QWORD PTR [edi+off4+8]	;; C4 = B4 * cosine/sine	;23-27
+	fxch	st(3)			;; R3,B2,A4,C4,newR2,I1,I3,R1
+	fsub	st(7), st		;; R1 = R1 - R3 (new R3)	;24-26
+	fxch	st(4)			;; newR2,B2,A4,C4,R3,I1,I3,R1
+	fmul	QWORD PTR [edi+off2]	;; A2 = new R2 * sine		;25-29
+	fxch	st(5)			;; I1,B2,A4,C4,R3,A2,I3,R1
+	fadd	st(6), st		;; I3 = I1 + I3 (new I1)	;26-28
+	fmul	QWORD PTR [edi+off3]	;; B3 = new I3 * sine		;27-31
+	fst	D3
+	fxch	st(4)			;; R3,B2,A4,C4,B3,A2,I1,R1
+	fadd	st, st			;; R3 = R3 * 2			;28-30
+	fxch	st(1)			;; B2,R3,A4,C4,B3,A2,I1,R1
+	fmul	QWORD PTR [edi+off2+8]	;; C2 = B2 * cosine/sine	;29-33
+	fxch	st(2)			;; A4,R3,C2,C4,B3,A2,I1,R1
+	fsub	st(3), st		;; C4 = C4 - A4 (new I4)	;30-32
+	fmul	QWORD PTR [edi+off4+8]	;; A4 = A4 * cosine/sine	;31-35
+	fxch	st(7)			;; R1,R3,C2,C4,B3,A2,I1,A4
+	fadd	st(1), st		;; R3 = R1 + R3 (new R1)	;32-34
+	fmul	QWORD PTR [edi+off3]	;; A3 = new R3 * sine		;33-37
+	fxch	st(5)			;; A2,R1,C2,C4,B3,A3,I1,A4
+	fsub	st(2), st		;; C2 = C2 - A2 (new I2)	;34-36
+	fxch	st(4)			;; B3,R1,C2,C4,A2,A3,I1,A4
+	fmul	QWORD PTR [edi+off3+8]	;; C3 = B3 * cosine/sine	;35-39
+	fxch	st(7)			;; A4,R1,C2,C4,A2,A3,I1,C3
+	fadd	D4			;; B4 = B4 + A4 (new R4)	;36-38
+	fxch	st(4)			;; A2,R1,C2,C4,A4,A3,I1,C3
+	fmul	QWORD PTR [edi+off2+8]	;; A2 = A2 * cosine/sine	;37-41
+	fxch	st(5)			;; A3,R1,C2,C4,A4,A2,I1,C3
+	fsub	st(7), st		;; C3 = C3 - A3 (new I3)	;38-40
+	fmul	QWORD PTR [edi+off3+8]	;; A3 = A3 * cosine/sine	;39-43
+	fxch	st(5)			;; A2,R1,C2,C4,A4,A3,I1,C3
+	fadd	D2			;; A2 = B2 + A2 (new R2)	;40-42
+	fxch	st(5)			;; A3,R1,C2,C4,A4,A2,I1,C3
+	fadd	D3			;; B3 = B3 + A3 (new R3)	;41-43
+					;; R3,R1,I2,I4,R4,R2,I1,I3
+	fstp	D5
+	fstp	D1
+	fstp	D4
+	fstp	D8
+	fstp	D7
+	fstp	D3
+	fstp	D2
+	fstp	D6
+	ENDM
+
+; old code = 142.3
+; new code = 124.6
+
+four_complex_with_square MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R3			;; R3				;  1
+	fld	QWORD PTR [edi+24]	;; A3,R3			;  2
+	fmul	st,st(1)		;; A3 = R3 * cosine/sine	;3-7
+	fld	R7			;; I3,A3,R3			;  3
+	fld	QWORD PTR [edi+24]	;; B3,I3,A3,R3			;  4
+	fmul	st, st(1)		;; B3 = I3 * cosine/sine	;5-9
+	fld	R2			;; R2,B3,I3,A3,R3		;  5
+	fmul	QWORD PTR [edi+8]	;; A2 = R2 * cosine/sine	;7-11,6
+	fxch	st(2)			;; I3,B3,A2,A3,R3
+	fsubp	st(3), st		;; A3 = A3 - I3			;8-10
+	fld	R4			;; R4,B3,A2,A3,R3		;  7
+	fmul	QWORD PTR [edi+40]	;; A4 = R4 * cosine/sine	;9-13,8
+	fxch	st(4)			;; R3,B3,A2,A3,A4
+	faddp	st(1), st		;; B3 = B3 + R3			;10-12
+	fld	QWORD PTR [edi+16]	;; sine,B3,A2,A3,A4
+	fmul	st(3), st		;; A3 = A3 * sine (new R3)	;11-15
+	fld	R6			;; I2,sine,B3,A2,A3,A4
+	fsub	st(3), st		;; A2 = A2 - I2			;12-14
+	fxch	st(1)			;; sine,I2,B3,A2,A3,A4
+	fmulp	st(2), st		;; B3 = B3 * sine (new I3)	;13-17
+	fld	R8			;; I4,I2,B3,A2,A3,A4
+	fsub	st(5), st		;; A4 = A4 - I4			;14-16
+	fxch	st(1)			;; I2,I4,B3,A2,A3,A4
+	fmul	QWORD PTR [edi+8]	;; B2 = I2 * cosine/sine	;15-19
+	fld	R1			;; R1,B2,I4,newI3,A2,newR3,A4
+	fsub	st, st(5)		;; R1 = R1 - R3 (new R3)	;16-18
+	fxch	st(2)			;; I4,B2,R1,newI3,A2,newR3,A4
+	fmul	QWORD PTR [edi+40]	;; B4 = I4 * cosine/sine	;17-21
+	fld	R5			;; I1,B4,B2,R1,newI3,A2,newR3,A4
+	fsub	st, st(4)		;; I1 = I1 - I3 (new I3)	;18-20
+	fxch	st(5)			;; A2,B4,B2,R1,newI3,I1,newR3,A4
+	fmul	QWORD PTR [edi]		;; A2 = A2 * sine (new R2)	;19-23
+	fxch	st(2)			;; B2,B4,A2,R1,newI3,I1,newR3,A4
+	fadd	R2			;; B2 = B2 + R2			;20-22
+	fxch	st(7)			;; A4,B4,A2,R1,newI3,I1,newR3,B2
+	fmul	QWORD PTR [edi+32]	;; A4 = A4 * sine (new R4)	;21-25
+	fxch	st(1)			;; B4,A4,A2,R1,newI3,I1,newR3,B2
+	fadd	R4			;; B4 = B4 + R4			;22-24
+	fxch	st(7)			;; B2,A4,A2,R1,newI3,I1,newR3,B4
+	fmul	QWORD PTR [edi]		;; B2 = B2 * sine (new I2)	;23-27
+	fxch	st(6)			;; newR3,A4,A2,R1,newI3,I1,B2,B4
+	fadd	R1			;; R3 = R1 + R3 (new R1)	;24-26
+	fxch	st(7)			;; B4,A4,A2,R1,newI3,I1,B2,newR3
+	fmul	QWORD PTR [edi+32]	;; B4 = B4 * sine (new I4)	;25-29
+					;; I4,R4,R2,R1,I3,I1,I2,R3
+	fxch	st(1)			;; R4,I4,R2,R1,I3,I1,I2,R3
+	fsub	st(2), st		;; R2 = R2 - R4 (new R4)	;26-28
+	fadd	st, st			;; R4 = R4 * 2			;27-29
+	fxch	st(4)			;; I3,I4,R2,R1,R4,I1,I2,R3
+	fadd	R5			;; I3 = I1 + I3 (new I1)	;28-30
+	fxch	st(5)			;; I1,I4,R2,R1,R4,I3,I2,R3
+	fsub	st, st(2)		;; newI3 = newI3-newR4(final I4);29-31
+	fst	R8			;; Save I4
+	fxch	st(1)			;; I4,I1,R2,R1,R4,I3,I2,R3
+	fsub	st(6), st		;; I2 = I2 - I4 (new I4)	;30-32
+	fadd	st, st			;; I4 = I4 * 2			;31-33
+	fxch	st(2)			;; R2,I1,I4,R1,R4,I3,I2,R3
+	fadd	st(4), st		;; R4 = R2 + R4 (new R2)	;32-34
+	fxch	st(3)			;; R1,I1,I4,R2,R4,I3,I2,R3
+	fsub	st, st(6)		;; newR3 = newR3-newI4(final R3);33-35
+	fst	R5			;; Save R3
+	fxch	st(6)			;; I2,I1,I4,R2,R4,I3,R1,R3
+	fadd	st(2), st		;; I4 = I2 + I4 (new I2)	;34-36
+					;; I4,I3,I2,R4,R2,I1,R3,R1
+	fadd	st, st			;; I4 = I4 * 2			;35-37
+	fxch	st(4)			;; R2,I3,I2,R4,I4,I1,R3,R1
+	fsub	st(7), st		;; R1 = R1 - R2 (final R2)	;36-38
+	fadd	st, st			;; R2 = R2 * 2			;37-39
+	fxch	st(2)			;; I2,I3,R2,R4,I4,I1,R3,R1
+	fsub	st(5), st		;; I1 = I1 - I2 (final I2)	;38-40
+	fadd	st, st			;; I2 = I2 * 2			;39-41
+	fxch	st(2)			;; R2,I3,I2,R4,I4,I1,R3,R1
+	fadd	st, st(7)		;; R2 = R1 + R2 (final R1)	;40-42
+	fst	R1			;; Save R1
+	fxch	st(7)			;; R1,I3,I2,R4,I4,I1,R3,R2
+	fst	R3			;; Save R2
+	fmul	st, st			;;  R2 = R2 * R2		;41-45
+	fxch	st(2)			;; I2,I3,R1,R4,I4,I1,R3,R2
+	fadd	st, st(5)		;; I2 = I1 + I2 (final I1)	;42-44
+	fst	R2			;; Save I1
+	fxch	st(5)			;; I1,I3,R1,R4,I4,I2,R3,R2
+	fst	R4			;; Save I2
+	fmul	st, st			;;  I2 = I2 * I2		;43-47
+	fxch	st(3)			;; R4,I3,R1,I1,I4,I2,R3,R2
+	fadd	st, st			;; R4 = R4 * 2			;44-46
+	fxch	st(7)			;; R2,I3,R1,I1,I4,I2,R3,R4
+	fmul	st, st			;;  R1 = R1 * R1		;45-49
+	fxch	st(4)			;; I4,I3,R1,I1,R2,I2,R3,R4
+	fadd	st, st(6)		;; I4 = R3 + I4 (final R4)	;46-48
+	fst	R7			;; Save R4
+	fxch	st(5)			;; I2,I3,R1,I1,R2,I4,R3,R4
+	fmul	st, st			;;  I1 = I1 * I1		;47-51
+	fxch	st(3)			;; I1,I3,R1,I2,R2,I4,R3,R4
+	fsubp	st(2), st		;;  R2 = R2 - I2 (new R2)	;48-50
+	fld	R4			;;  I2
+	fmul	R3			;;  I2 = R2 * I2		;49-53
+	fxch	st(7)			;; R4,I3,R1,I2,R2,I4,R3,I1
+	fadd	st, st(1)		;; R4 = I3 + R4 (final I3)	;50-52
+	fst	R6			;; Save I3
+					;; I3,I4,R2,I1,R1,R4,R3,I2
+	fxch	st(6)			;; R3,I4,R2,I1,R1,R4,I3,I2
+	fmul	st, st			;;  R3 = R3 * R3		;51-55
+	fxch	st(3)			;; I1,I4,R2,R3,R1,R4,I3,I2
+	fsubp	st(4), st		;;  R1 = R1 - I1 (new R1)	;52-54
+	fld	R2			;;  I1
+	fmul	R1			;;  I1 = R1 * I1		;53-57
+	fxch	st(7)			;; I2,I4,R2,R3,R1,R4,I3,I1
+	fadd	st, st			;;  I2 = 2 * I2 (new I2)	;54-56
+	fxch	st(6)			;; I3,I4,R2,R3,R1,R4,I2,I1
+	fmul	st, st			;;  I3 = I3 * I3		;55-59
+	fxch	st(2)			;; R2,I4,I3,R3,R1,R4,I2,I1
+	fsub	st(4), st		;; R1 = R1 - R2 (new R2)	;56-58
+	fadd	st, st			;; R2 = R2 * 2			;57-59
+	fxch	st(1)			;; I4,R2,I3,R3,R1,R4,I2,I1
+	fmul	st, st			;;  I4 = I4 * I4		;58-62
+	fxch	st(7)			;; I1,R2,I3,R3,R1,R4,I2,I4
+	fadd	st, st			;;  I1 = 2 * I1 (new I1)	;59-61
+	fxch	st(5)			;; R4,R2,I3,R3,R1,I1,I2,I4
+	fmul	st, st			;;  R4 = R4 * R4		;60-64
+	fxch	st(2)			;; I3,R2,R4,R3,R1,I1,I2,I4
+	fsubp	st(3), st		;;  R3 = R3 - I3 (new R3)	;61-63
+	fld	R6			;;  I3
+	fmul	R5			;;  I3 = R3 * I3		;62-66
+	fxch	st(6)			;; I2,R2,R4,R3,R1,I1,I3,I4
+	fsub	st(5), st		;; I1 = I1 - I2 (new I2)	;63-65
+	fadd	st, st			;; I2 = I2 * 2			;64-66
+	fxch	st(7)			;; I4,R2,R4,R3,R1,I1,I3,I2
+	fsubp	st(2), st		;;  R4 = R4 - I4 (new R4)	;65-67
+	fld	R8			;;  I4
+	fmul	R7			;;  I4 = R4 * I4		;66-70
+	fxch	st(6)			;; I3,R2,R4,R3,R1,I1,I4,I2
+	fadd	st, st			;;  I3 = 2 * I3 (new I3)	;67-69
+	fxch	st(4)			;; R1,R2,R4,R3,I3,I1,I4,I2
+	fadd	st(1), st		;; R2 = R1 + R2 (new R1)	;68-70
+	fxch	st(3)			;; R3,R2,R4,R1,I3,I1,I4,I2
+	fsub	st(2), st		;; R4 = R4 - R3 (new I4)	;69-71
+	fadd	st, st			;; R3 = R3 * 2			;70-72
+	fxch	st(6)			;; I4,R2,R4,R1,I3,I1,R3,I2
+	fadd	st, st			;;  I4 = 2 * I4 (new I4)	;71-73
+	fxch	st(5)			;; I1,R2,R4,R1,I3,I4,R3,I2
+	fadd	st(7), st		;; I2 = I1 + I2 (new I1)	;72-74
+	fxch	st(2)			;; R4,R2,I1,R1,I3,I4,R3,I2
+	fadd	st(6), st		;; R3 = R3 + R4 (new R3)	;73-75
+	fxch	st(5)			;; I4,R2,I1,R1,I3,R4,R3,I2
+	fsub	st(4), st		;; I3 = I3 - I4 (new R4)	;74-76
+	fadd	st, st			;; I4 = I4 * 2			;75-77
+	fxch	st(5)			;; R4,R2,I1,R1,I3,I4,R3,I2
+	fsub	st(2), st		;; newI2 = newI2-newI4 (new I4)	;76-78
+	fadd	st, st			;; newI4 = newI4 * 2		;77-79
+	fxch	st(4)			;; I3,R2,I1,R1,R4,I4,R3,I2
+	fadd	st(5), st		;; I4 = I3 + I4 (new I3)	;78-80
+					;; R4,R1,I2,R2,I4,I3,R3,I1
+	fsub	st(3), st		;; R2 = R2 - R4 (new R4)	;79-81
+	fadd	st, st			;; R4 = R4 * 2			;80-82
+	fxch	st(2)			;; I2,R1,R4,R2,I4,I3,R3,I1
+	fadd	st(4), st		;; I4 = I2 + I4 (new I2)	;81-83
+	fmul	QWORD PTR [edi+32]	;; B4 = new I4 * sine		;82-86
+	fst	R4			;; Save B4
+	fxch	st(3)			;; R2,R1,R4,B4,I4,I3,R3,I1
+	fadd	st(2), st		;; R4 = R2 + R4 (new R2)	;83-85
+	fxch	st(4)			;; I4,R1,R4,B4,R2,I3,R3,I1
+	fmul	QWORD PTR [edi]		;; B2 = new I2 * sine		;84-88
+	fst	R2			;; Save B2
+	fxch	st(5)			;; I3,R1,R4,B4,R2,B2,R3,I1
+	fsub	st(7), st		;; I1 = I1 - I3 (new I3)	;85-87
+	fxch	st(4)			;; R2,R1,R4,B4,I3,B2,R3,I1
+	fmul	QWORD PTR [edi+32]	;; A4 = new R4 * sine		;86-90
+	fxch	st(4)			;; I3,R1,R4,B4,A4,B2,R3,I1
+	fadd	st, st			;; I3 = I3 * 2			;87-89
+	fxch	st(3)			;; B4,R1,R4,I3,A4,B2,R3,I1
+	fmul	QWORD PTR [edi+40]	;; C4 = B4 * cosine/sine	;88-92
+	fxch	st(6)			;; R3,R1,R4,I3,A4,B2,C4,I1
+	fsub	st(1), st		;; R1 = R1 - R3 (new R3)	;89-91
+	fxch	st(2)			;; R4,R1,R3,I3,A4,B2,C4,I1
+	fmul	QWORD PTR [edi]		;; A2 = new R2 * sine		;90-94
+	fxch	st(7)			;; I1,R1,R3,I3,A4,B2,C4,A2
+	fadd	st(3), st		;; I3 = I1 + I3 (new I1)	;91-93
+	fmul	QWORD PTR [edi+16]	;; B3 = new I3 * sine		;92-96
+	fst	R3
+	fxch	st(2)			;; R3,R1,B3,I3,A4,B2,C4,A2
+	fadd	st, st			;; R3 = R3 * 2			;93-95
+	fxch	st(5)			;; B2,R1,B3,I3,A4,R3,C4,A2
+	fmul	QWORD PTR [edi+8]	;; C2 = B2 * cosine/sine	;94-98
+	fxch	st(4)			;; A4,R1,B3,I3,C2,R3,C4,A2
+	fsub	st(6), st		;; C4 = C4 - A4 (new I4)	;95-97
+	fmul	QWORD PTR [edi+40]	;; A4 = A4 * cosine/sine	;96-100
+	fxch	st(1)			;; R1,A4,B3,I3,C2,R3,C4,A2
+	fadd	st(5), st		;; R3 = R1 + R3 (new R1)	;97-99
+	fmul	QWORD PTR [edi+16]	;; A3 = new R3 * sine		;98-102
+	fxch	st(7)			;; A2,A4,B3,I3,C2,R3,C4,A3
+	fsub	st(4), st		;; C2 = C2 - A2 (new I2)	;99-101
+	fxch	st(2)			;; B3,A4,A2,I3,C2,R3,C4,A3
+	fmul	QWORD PTR [edi+24]	;; C3 = B3 * cosine/sine	;00-04
+	fxch	st(1)			;; A4,C3,A2,I3,C2,R3,C4,A3
+	fadd	R4			;; A4 = B4 + A4 (new R4)	;01-03
+	fxch	st(2)			;; A2,C3,A4,I3,C2,R3,C4,A3
+	fmul	QWORD PTR [edi+8]	;; A2 = A2 * cosine/sine	;02-06
+	fxch	st(7)			;; A3,C3,A4,I3,C2,R3,C4,A2
+	fsub	st(1), st		;; C3 = C3 - A3 (new I3)	;03-05
+	fmul	QWORD PTR [edi+24]	;; A3 = A3 * cosine/sine	;04-08
+	fxch	st(7)			;; A2,C3,A4,I3,C2,R3,C4,A3
+	fadd	R2			;; A2 = B2 + A2 (new R2)	;07-09
+	fxch	st(7)			;; A3,C3,A4,I3,C2,R3,C4,A2
+	fadd	R3			;; A3 = B3 + A3 (new R3)	;09-11
+					;; R3,I3,R4,I1,I2,R1,I4,R2
+					;; Scramble end results:
+					;; R3,R7,R4,R5,R6,R1,R8,R2
+	fstp	R3
+	fstp	R7
+	fstp	R4
+	fstp	R5
+	fstp	R6
+	fstp	R1
+	fstp	R8
+	fstp	R2
+	ENDM
+
+; old code = 64.6
+; new code = 60.3
+
+four_complex_fft4_cmn MACRO R1,R2,R3,R4,R5,R6,R7,R8,off,off1,off2,off3,off4
+	fld	R1[off]			;; R1				;  1
+	fld	st			;; R1,R1			;2
+	fld	QWORD PTR [edi+off1+8]	;; r/i1,R1,R1			;  2
+	fmul	st(1), st		;; A1 = R1 * r/i		;3-7
+	fld	R3[off]			;; R3,r/i1,A1,R1		;  3
+	fld	QWORD PTR [edi+off3+8]	;; r/i3,R3,r/i1,A1,R1		;  4
+	fmul	st(1), st		;; A3 = R3 * r/i		;5-9
+	fld	R5[off]			;; I1,r/i3,A3,r/i1,A1,R1	;  5
+	fmul	st(3), st		;; B1 = I1 * r/i		;7-11
+	fsubp	st(4), st		;; A1 = A1 - I1			;8-10
+	fld	R7[off]			;; I3,r/i3,A3,B1,A1,R1		;  6
+	fmul	st(1), st		;; B3 = I3 * r/i		;9-13
+	fsubp	st(2), st		;; A3 = A3 - I3			;10-12
+	fld	QWORD PTR [edi+off1]	;; i1,B3,A3,B1,A1,R1		;  7
+	fmul	st(4), st		;; A1 = A1 * i (new R1)		;11-15
+	fxch	st(5)			;; R1,B3,A3,B1,A1,i1
+	faddp	st(3), st		;; B1 = B1 + R1			;12-14
+	fld	QWORD PTR [edi+off3]	;; i3,B3,A3,B1,A1,i1		;  8
+	fmul	st(2), st		;; A3 = A3 * i (new R3)		;13-17
+	fld	R3[off]			;; R3,i3,B3,A3,B1,A1,i1		;  9
+	faddp	st(2), st		;; B3 = B3 + R3			;14-16
+	fxch	st(5)			;; i1,B3,A3,B1,A1,i3
+	fmulp	st(3), st		;; B1 = B1 * i (new I1)		;15-19
+	fld	st(3)			;; R1,B3,R3,B1,R1,i3		;16
+	fxch	st(5)			;; i3,B3,R3,B1,R1,R1
+	fmulp	st(1), st		;; B3 = B3 * i (new I3)		;17-21
+	fld	R2[off]			;; R2,I3,R3,I1,R1,R1		;  10
+	fld	QWORD PTR [edi+off2+8]	;; r/i2,R2,I3,R3,I1,R1,R1	;  11
+	fxch	st(5)			;; R1,R2,I3,R3,I1,r/i2,R1
+	fsub	st, st(3)		;; R1 = R1 - R3 (new R3)	;18-20
+	fstp	R3			;; R2,I3,R3,I1,r/i2,R1		; 21,22
+	fmul	st, st(4)		;; A2 = R2 * r/i		;19-23
+	fxch	st(2)			;; R3,I3,A2,I1,r/i2,R1
+	faddp	st(5), st		;; R1 = R1 + R3 (new R1)	;20-22
+	fld	R4[off]			;; R4,I3,A2,I1,r/i2,newR1	;  12
+	fld	QWORD PTR [edi+off4+8]	;; r/i4,R4,I3,A2,I1,r/i2,newR1	;  13
+	fxch	st(6)			;; newR1,R4,I3,A2,I1,r/i2,r/i4
+	fstp	R1			;; R4,I3,A2,I1,r/i2,r/i4	; 23,24
+	fmul	st, st(5)		;; A4 = R4 * r/i		;21-25
+	fld	R6[off]			;; I2,A4,I3,A2,I1,r/i2,r/i4	;  14
+	fxch	st(2)			;; I3,A4,I2,A2,I1,r/i2,r/i4
+	fsub	st(4), st		;; I1 = I1 - I3 (new I3)	;22-24
+	fxch	st(2)			;; I2,A4,I3,A2,I1,r/i2,r/i4
+	fmul	st(5), st		;; B2 = I2 * r/i		;23-27
+	fld	R8[off]			;; I4,I2,A4,I3,A2,I1,B2,r/i4	;  15
+	fxch	st(1)			;; I2,I4,A4,I3,A2,I1,B2,r/i4
+	fsubp	st(4), st		;; A2 = A2 - I2			;24-26
+	fmul	st(6), st		;; B4 = I4 * r/i		;25-29
+	fsubp	st(1), st		;; A4 = A4 - I4			;26-28
+	fld	QWORD PTR [edi+off2]	;; i2,A4,I3,A2,I1,B2,B4		;  16
+	fmul	st(3), st		;; A2 = A2 * i (new R2)		;27-31
+	fxch	st(5)			;; B2,A4,I3,A2,I1,i2,B4
+	fadd	R2[off]			;; B2 = B2 + R2			;28-30
+	fld	QWORD PTR [edi+off4]	;; i4,B2,A4,I3,A2,I1,i2,B4	;  18
+	fmul	st(2), st		;; A4 = A4 * i (new R4)		;29-33
+	fxch	st(7)			;; B4,B2,A4,I3,A2,I1,i2,i4
+	fadd	R4[off]			;; B4 = B4 + R4			;30-32
+	fxch	st(6)			;; i2,B2,A4,I3,A2,I1,B4,i4
+	fmulp	st(1), st		;; B2 = B2 * i (new I2)		;31-35
+	fxch	st(2)			;; I3,A4,B2,A2,I1,B4,i4
+	fadd	st, st			;; I3 = I3 * 2			;32-34
+	fxch	st(6)			;; i4,A4,B2,A2,I1,B4,I3
+	fmulp	st(5), st		;; B4 = B4 * i (new I4)		;33-37
+					;; R4,I2,R2,I1,I4,I3
+	fsub	st(2), st		;; R2 = R2 - R4 (new R4)	;34-36
+	fadd	st, st			;; R4 = R4 * 2			;35-37
+	fxch	st(3)			;; I1,I2,R2,R4,I4,I3
+	fadd	st(5), st		;; I3 = I1 + I3 (new I1)	;36-38
+	fsub	st, st(2)		;; newI3 = newI3-newR4(final I4);37-39
+	fxch	st(4)			;; I4,I2,R2,R4,I1,I3
+	fsub	st(1), st		;; I2 = I2 - I4 (new I4)	;38-40
+	fadd	st, st			;; I4 = I4 * 2			;39-41
+	fxch	st(2)			;; R2,I2,I4,R4,I1,I3
+	fadd	st(3), st		;; R4 = R2 + R4 (new R2)	;40-42
+	fadd	st, st			;; newR4 = newR4 * 2		;41-43
+	fxch	st(1)			;; I2,R2,I4,R4,I1,I3
+	fadd	st(2), st		;; I4 = I2 + I4 (new I2)	;42-44
+					;; I4,R4,I2,R2,I3,I1
+	fld	R3			;; R3,I4,R4,I2,R2,I3,I1
+	fsub	st, st(1)		;; R3 = R3 - I4 (new R3)	;43-45
+	fld	R1			;; R1,R3,I4,R4,I2,R2,I3,I1
+	fsub	st, st(5)		;; R1 = R1 - R2 (new R2)	;44-46
+	fxch	st(4)			;; I2,R3,I4,R4,R1,R2,I3,I1
+	fsub	st(7), st		;; I1 = I1 - I2 (new I2)	;45-47
+	fadd	st, st			;; I2 = I2 * 2			;46-48
+	fxch	st(6)			;; I3,R3,I4,R4,R1,R2,I2,I1
+	fadd	st(3), st		;; R4 = I3 + R4 (new I3)	;47-49
+	fxch	st(2)			;; I4,R3,I3,R4,R1,R2,I2,I1
+	fadd	R3			;; I4 = R3 + I4 (new R4)	;48-50
+	fxch	st(5)			;; R2,R3,I3,R4,R1,I4,I2,I1
+	fadd	R1			;; R2 = R1 + R2 (new R1)	;49-51
+	fxch	st(7)			;; I1,R3,I3,R4,R1,I4,I2,R2
+	fadd	st(6), st		;; I2 = I1 + I2 (new I1)	;50-52
+					;; I2,R3,I4,I3,R2,R4,I1,R1
+					;; Scramble end results:
+					;; R4,R5,R8,R6,R3,R7,R2,R1
+	fstp	R6
+	fstp	R3
+	fstp	R8
+	fstp	R7
+	fstp	R2
+	fstp	R4
+	fstp	R5
+	fstp	R1
+	ENDM
+
+; old code = 68.8
+; new code = 60.2
+
+four_complex_unfft4_cmn MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R6			;; I3				;  1
+ 	fld	st			;; I3,I3			;2
+	fld	R8			;; I4,I3,I3			;  2
+	fadd	st(1), st		;; new I3 = I3 + I4		;3-5
+	fsubp	st(2), st		;; new R4 = I3 - I4		;4-6
+	fld	R4			;; I2,I3,R4			;  3
+	fld	R2			;; I1,I2,I3,R4			;  4
+	fadd	st(1), st		;; new I1 = I1 + I2		;5-7
+	fsub	R4			;; new I2 = I1 - I2		;6-8,5
+	fld	st(2)			;; I3,I2,I1,I3,R4		;7
+	fadd	st, st(2)		;; I3 = I1 + I3 (new I1)	;8-10
+	fxch	st(3)			;; I3,I2,I1,newI1,R4
+	fsubp	st(2), st		;; I1 = I1 - I3 (new I3)	;9-11
+	fld	R7			;; R4,I2,newI3,newI1,R4
+	fld	R5			;; R3,R4,I2,newI3,newI1,R4
+	fsub	st(1),st		;; new I4 = R4 - R3		;10-12
+	fxch	st(4)			;; newI1,I4,I2,newI3,R3,R4
+	fmul	QWORD PTR [edi]		;; B1 = new I1 * premul_imag	;11-15
+	fst	R5			;; Save B1			; 16,17
+	fld	R1			;; R1,B1,I4,I2,newI3,R3,R4
+	fld	R3			;; R2,R1,B1,I4,I2,newI3,R3,R4
+	fsub	st(1), st		;; new R2 = R1 - R2		;12-14
+	fxch	st(5)			;; newI3,R1,B1,I4,I2,R2,R3,R4
+	fmul	QWORD PTR [edi+32]	;; B3 = new I3 * premul_imag	;13-17
+	fst	R3			;; Save B3			; 18,19
+	fxch	st(3)			;; I4,R1,B1,B3,I2,R2,R3,R4
+	fsub	st(4), st		;; I2 = I2 - I4 (new I4)	;14-16
+	fadd	st, st			;; I4 = I4 * 2			;15-17
+	fxch	st(5)			;; R2,R1,B1,B3,I2,I4,R3,R4
+	fadd	R1			;; new R1 = R1 + R2		;16-18
+	fxch	st(6)			;; R3,R2,B1,B3,I2,I4,R1,R4
+	fadd	R7			;; new R3 = R3 + R4		;17-19
+	fxch	st(4)			;; I2,R2,B1,B3,R3,I4,R1,R4
+	fadd	st(5), st		;; I4 = I2 + I4 (new I2)	;18-20
+	fmul	QWORD PTR [edi+48]	;; B4 = new I4 * premul_imag	;19-23
+	fst	R4			;; Save B4			; 24,25
+	fxch	st(4)			;; R3,R2,B1,B3,B4,I2,R1,R4
+	fsub	st(6), st		;; R1 = R1 - R3 (new R3)	;20-22
+	fxch	st(5)			;; I2,R2,B1,B3,B4,R3,R1,R4
+	fmul	QWORD PTR [edi+16]	;; B2 = new I2 * premul_imag	;21-25
+	fst	R2			;; Save B2			; 26,27
+	fxch	st(5)			;; R3,R2,B1,B3,B4,B2,R1,R4
+	fadd	st, st			;; R3 = R3 * 2			;22-24
+	fxch	st(3)			;; B3,R2,B1,R3,B4,B2,R1,R4
+	fmul	QWORD PTR [edi+40]	;; C3 = B3 * r/i		;23-27
+	fxch	st(7)			;; R4,R2,B1,R3,B4,B2,R1,C3
+	fsub	st(1), st		;; R2 = R2 - R4 (new R4)	;24-26
+	fxch	st(2)			;; B1,R2,R4,R3,B4,B2,R1,C3
+	fmul	QWORD PTR [edi+8]	;; C1 = B1 * r/i		;25-29
+	fxch	st(6)			;; R1,R2,R4,R3,B4,B2,C1,C3
+	fadd	st(3), st		;; R3 = R1 + R3 (new R1)	;26-28
+	fmul	QWORD PTR [edi+32]	;; A3 = new R3 * premul_imag	;27-31
+	fxch	st(2)			;; R4,R2,A3,R1,B4,B2,C1,C3
+	fadd	st, st			;; R4 = R4 * 2			;28-30
+	fxch	st(3)			;; R1,R2,A3,R4,B4,B2,C1,C3
+	fmul	QWORD PTR [edi]		;; A1 = new R1 * premul_imag	;29-31
+	fxch	st(4)			;; B4,R2,A3,R4,A1,B2,C1,C3
+					;; STALL
+	fmul	QWORD PTR [edi+56]	;; C4 = B4 * r/i		;31-35
+	fxch	st(2)			;; A3,R2,C4,R4,A1,B2,C1,C3
+	fsub	st(7), st		;; C3 = C3 - A3 (new I3)	;32-36
+	fmul	QWORD PTR [edi+40]	;; A3 = A3 * r/i		;33-37
+	fxch	st(1)			;; R2,A3,C4,R4,A1,B2,C1,C3
+	fadd	st(3), st		;; R4 = R2 + R4 (new R2)	;34-36
+	fmul	QWORD PTR [edi+48]	;; A4 = new R4 * premul_imag	;35-39
+	fxch	st(3)			;; R2,A3,C4,A4,A1,B2,C1,C3
+					;; STALL
+	fmul	QWORD PTR [edi+16]	;; A2 = new R2 * premul_imag	;37-41
+	fxch	st(1)			;; A3,A2,C4,A4,A1,B2,C1,C3
+	fadd	R3			;; A3 = B3 + A3 (new R3)	;38-40
+	fxch	st(5)			;; B2,A2,C4,A4,A1,A3,C1,C3
+	fmul	QWORD PTR [edi+24]	;; C2 = B2 * r/i		;39-43
+	fxch	st(4)			;; A1,A2,C4,A4,C2,A3,C1,C3
+	fsub	st(6), st		;; C1 = C1 - A1 (new I1)	;40-42
+	fmul	QWORD PTR [edi+8]	;; A1 = A1 * r/i		;41-45
+	fxch	st(3)			;; A4,A2,C4,A1,C2,A3,C1,C3
+	fsub	st(2), st		;; C4 = C4 - A4 (new I4)	;42-44
+	fmul	QWORD PTR [edi+56]	;; A4 = A4 * r/i		;43-47
+	fxch	st(1)			;; A2,A4,C4,A1,C2,A3,C1,C3
+	fsub	st(4), st		;; C2 = C2 - A2 (new I2)	;44-46
+	fmul	QWORD PTR [edi+24]	;; A2 = A2 * r/i		;45-49
+	fxch	st(3)			;; A1,A4,C4,A2,C2,A3,C1,C3
+	fadd	R5			;; A1 = B1 + A1 (new R1)	;46-48
+	fxch	st(1)			;; A4,A1,C4,A2,C2,A3,C1,C3
+					;; STALL
+	fadd	R4			;; A4 = B4 + A4 (new R4)	;48-50
+	fxch	st(3)			;; A2,A1,C4,A4,C2,A3,C1,C3
+					;; STALL
+	fadd	R2			;; A2 = B2 + A2 (new R2)	;50-52
+					;; R2,R1,I4,R4,I2,R3,I1,I3
+	fstp	R3
+	fstp	R1
+	fstp	R8
+	fstp	R7
+	fstp	R4
+	fstp	R5
+	fstp	R2
+	fstp	R6
+	ENDM
+
+; old code = 64.8
+; new code = 64.7
+
+four_complex_cpm_unfft_0 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1				;  1
+	fld	st			;; R1,R1			;2
+	fld	QWORD PTR [edi+8]	;; r/i,R1,R1			;  2
+	fmul	st(1), st		;; A1 = R1 * r/i		;3-7
+	fld	R3			;; R2,r/i,A1,R1			;  3
+	fld	st			;; R2,R2,r/i,A1,R1		;4
+	fmul	st, st(2)		;; A2 = R2 * r/i		;5-9
+	fld	R2			;; I1,A2,R2,r/i,A1,R1		;  4
+	fld	st			;; I1,I1,A2,R2,r/i,A1,R1	;6
+	fmul	st, st(4)		;; B1 = I1 * r/i		;7-11
+	fxch	st(1)			;; I1,B1,A2,R2,r/i,A1,R1
+	faddp	st(5), st		;; A1 = A1 + I1			;8-10
+	fld	R4			;; I2,B1,A2,R2,r/i,A1,R1
+	fmul	st(4), st		;; B2 = I2 * r/i		;9-13
+	faddp	st(2), st		;; A2 = A2 + I2			;10-12
+	fld	QWORD PTR [edi]		;; i,B1,A2,R2,B2,A1,R1
+	fmul	st(5), st		;; A1 = A1 * i (new R1)		;11-15
+	fxch	st(1)			;; B1,i,A2,R2,B2,A1,R1
+	fsubrp	st(6), st		;; B1 = B1 - R1			;12-14
+	fmul	st(1), st		;; A2 = A2 * i (new R2)		;13-17
+	fxch	st(2)			;; R2,A2,i,B2,A1,B1
+	fsubp	st(3), st		;; B2 = B2 - R2			;14-16
+	fxch	st(1)			;; i,A2,B2,A1,B1
+	fmul	st(4), st		;; B1 = B1 * i (new I1)		;15-17
+	fld	st(3)			;; R1,i,A2,B2,A1,B1		;16
+	fxch	st(1)			;; i,R1,A2,B2,A1,B1
+	fmulp	st(3), st		;; B2 = B2 * i (new I2)		;17-21
+	fsub	st, st(1)		;; R1 = R1 - R2 (new R2)	;18-20
+	fld	R5			;; R3,newR2,R2,I2,R1,I1
+	fld	QWORD PTR [edi+8]	;; r/i,R3,newR2,R2,I2,R1,I1
+	fmul	st(1), st		;; A3 = R3 * r/i		;19-23
+	fxch	st(3)			;; R2,A3,newR2,r/i,I2,R1,I1
+	faddp	st(5), st		;; R2 = R1 + R2 (new R1)	;20-22
+	fld	R7			;; R4,A3,R1,r/i,I2,R2,I1
+	fmul	st, st(3)		;; A4 = R4 * r/i		;21-25
+	fxch	st(4)			;; I2,A3,R1,r/i,A4,R2,I1
+	fsub	st(6), st		;; I1 = I1 - I2 (new I2)	;22-24
+	fld	R6			;; I3,I2,A3,R1,r/i,A4,R2,I1
+	fmul	st(4), st		;; B3 = I3 * r/i		;23-27
+	faddp	st(2), st		;; A3 = A3 + I3			;24-26
+	fld	R8			;; I4,I2,A3,R1,B3,A4,R2,I1
+	fmul	QWORD PTR [edi+8]	;; B4 = I4 * r/i		;25-29
+	fxch	st(5)			;; A4,I2,A3,R1,B3,B4,R2,I1
+	fadd	R8			;; A4 = A4 + I4			;26-28
+	fxch	st(2)			;; A3,I2,A4,R1,B3,B4,R2,I1
+	fmul	QWORD PTR [edi]		;; A3 = A3 * i (new R3)		;27-31
+	fxch	st(4)			;; B3,I2,A4,R1,A3,B4,R2,I1
+	fsub	R5			;; B3 = B3 - R3			;28-30
+	fxch	st(2)			;; A4,I2,B3,R1,A3,B4,R2,I1
+	fmul	QWORD PTR [edi]		;; A4 = A4 * i (new R4)		;29-33
+	fxch	st(5)			;; B4,I2,B3,R1,A3,A4,R2,I1
+	fsub	R7			;; B4 = B4 - R4			;30-32
+	fxch	st(2)			;; B3,I2,B4,R1,A3,A4,R2,I1
+	fmul	QWORD PTR [edi]		;; B3 = B3 * i (new I3)		;31-35
+	fxch	st(1)			;; I2,B3,B4,R1,A3,A4,R2,I1
+	fadd	st, st			;; I2 = I2 * 2			;32-34
+	fxch	st(2)			;; B4,B3,I2,R1,A3,A4,R2,I1
+	fmul	QWORD PTR [edi]		;; B4 = B4 * i (new I4)		;33-37
+					;; I4,I3,I2,R1,R3,R4,R2,I1
+	fxch	st(4)			;; R3,I3,I2,R1,I4,R4,R2,I1
+	fsub	st(5), st		;; R4 = R4 - R3 (new I4)	;34-36
+	fadd	st, st			;; R3 = R3 * 2			;35-37
+	fxch	st(7)			;; I1,I3,I2,R1,I4,R4,R2,R3
+	fadd	st(2), st		;; I2 = I1 + I2 (new I1)	;36-38
+	fsub	st, st(5)		;; newI2 = newI2-newI4 (new I4)	;37-39
+	fxch	st(4)			;; I4,I3,I2,R1,I1,R4,R2,R3
+	fsub	st(1), st		;; I3 = I3 - I4 (new R4)	;38-40
+	fadd	st, st			;; I4 = I4 * 2			;39-41
+	fxch	st(5)			;; R4,I3,I2,R1,I1,I4,R2,R3
+	fadd	st(7), st		;; R3 = R3 + R4 (new R3)	;40-42
+	fadd	st, st			;; newI4 = newI4 * 2		;41-43
+	fxch	st(1)			;; I3,R4,I2,R1,I1,I4,R2,R3
+	fadd	st(5), st		;; I4 = I3 + I4 (new I3)	;42-44
+					;; R4,I4,I1,R2,I2,I3,R1,R3
+	fsub	st(3), st		;; R2 = R2 - R4 (new R4)	;43-45
+	fadd	st, st			;; R4 = R4 * 2			;44-46
+	fxch	st(7)			;; R3,I4,I1,R2,I2,I3,R1,R4
+	fsub	st(6), st		;; R1 = R1 - R3 (new R3)	;45-47
+	fadd	st, st			;; R3 = R3 * 2			;46-48
+	fxch	st(5)			;; I3,I4,I1,R2,I2,R3,R1,R4
+	fsub	st(2), st		;; I1 = I1 - I3 (new I3)	;47-49
+	fadd	st, st			;; I3 = I3 * 2			;48-50
+	fxch	st(4)			;; I2,I4,I1,R2,I3,R3,R1,R4
+	fadd	st(1), st		;; I4 = I2 + I4 (new I2)	;49-51
+	fxch	st(3)			;; R2,I4,I1,I2,I3,R3,R1,R4
+	fadd	st(7), st		;; R4 = R2 + R4 (new R2)	;50-52
+	fxch	st(6)			;; R1,I4,I1,I2,I3,R3,R2,R4
+	fadd	st(5), st		;; R3 = R1 + R3 (new R1)	;51-53
+	fxch	st(2)			;; I1,I4,R1,I2,I3,R3,R2,R4
+	fadd	st(4), st		;; I3 = I1 + I3 (new I1)	;52-54
+					;; I3,I2,R3,I4,I1,R1,R4,R2
+					;; Scramble end results:
+					;; R7,R6,R3,R8,R5,R1,R4,R2
+	fstp	R6
+	fstp	R4
+	fstp	R5
+	fstp	R8
+	fstp	R2
+	fstp	R1
+	fstp	R7
+	fstp	R3
+	ENDM
+
+; old code = 65.1
+; new code = 64.9
+
+four_complex_cpm_fft_1 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1				;  1
+	fld	st			;; R1,R1			;2
+	fld	QWORD PTR [edi+8]	;; r/i,R1,R1			;  2
+	fmul	st(1), st		;; A1 = R1 * r/i		;3-7
+	fld	R7			;; I3,r/i,A1,R1			;  3
+	fld	st			;; I3,I3,r/i,A1,R1		;4
+	fmul	st, st(2)		;; B3 = I3 * r/i		;5-9
+	fld	R5			;; I1,B3,I3,r/i,A1,R1		;  4
+	fld	st			;; I1,I1,B3,I3,r/i,A1,R1	;6
+	fmul	st, st(4)		;; B1 = I1 * r/i		;7-11
+	fxch	st(1)			;; I1,B1,B3,I3,r/i,A1,R1
+	fsubp	st(5), st		;; A1 = A1 - I1			;8-10
+	fld	R3			;; R3,B1,B3,I3,r/i,A1,R1
+	fmul	st(4), st		;; A3 = R3 * r/i		;9-13
+	faddp	st(2), st		;; B3 = B3 + R3			;10-12
+	fld	QWORD PTR [edi]		;; i,B1,B3,I3,A3,A1,R1
+	fmul	st(5), st		;; A1 = A1 * i (new R1)		;11-15
+	fxch	st(1)			;; B1,i,B3,I3,A3,A1,R1
+	faddp	st(6), st		;; B1 = B1 + R1			;12-14
+	fmul	st(1), st		;; B3 = B3 * i (new negR3)	;13-17
+	fxch	st(2)			;; I3,B3,i,A3,A1,B1
+	fsubp	st(3), st		;; A3 = A3 - I3			;14-16
+	fxch	st(1)			;; i,B3,A3,A1,B1
+	fmul	st(4), st		;; B1 = B1 * i (new I1)		;15-19
+	fld	st(3)			;; R1,i,B3,A3,A1,B1		;16
+	fxch	st(1)			;; i,R1,B3,A3,A1,B1
+	fmulp	st(3), st		;; A3 = A3 * i (new I3)		;17-21
+	fadd	st, st(1)		;; R1 = R1 - R3 (new R3)	;18-20
+	fld	R2			;; R2,newR3,negR3,I3,R1,I1
+	fld	QWORD PTR [edi+40]	;; r/i,R2,newR3,negR3,I3,R1,I1
+	fmul	st(1), st		;; A2 = R2 * r/i		;19-23
+	fxch	st(3)			;; negR3,A2,newR3,r/i,I3,R1,I1
+	fsubp	st(5), st		;; R3 = R1 + R3 (new R1)	;20-22
+	fld	R8			;; I4,A2,R1,r/i,I3,R3,I1
+	fmul	st, st(3)		;; B4 = I4 * r/i		;21-25
+	fxch	st(4)			;; I3,A2,R1,r/i,B4,R3,I1
+	fsub	st(6), st		;; I1 = I1 - I3 (new I3)	;22-24
+	fld	R6			;; I2,I3,A2,R1,r/i,B4,R3,I1
+	fmul	st(4), st		;; B2 = I2 * r/i		;23-27
+	fsubp	st(2), st		;; A2 = A2 - I2			;24-26
+	fld	R4			;; R4,I3,A2,R1,B2,B4,R3,I1
+	fmul	QWORD PTR [edi+40]	;; A4 = R4 * r/i		;25-29
+	fxch	st(5)			;; B4,I3,A2,R1,B2,A4,R3,I1
+	fadd	R4			;; B4 = B4 + R4			;26-28
+	fxch	st(2)			;; A2,I3,B4,R1,B2,A4,R3,I1
+	fmul	QWORD PTR [edi+32]	;; A2 = A2 * i (new R2)		;27-31
+	fxch	st(4)			;; B2,I3,B4,R1,A2,A4,R3,I1
+	fadd	R2			;; B2 = B2 + R2			;28-30
+	fxch	st(2)			;; B4,I3,B2,R1,A2,A4,R3,I1
+	fmul	QWORD PTR [edi+32]	;; B4 = B4 * i (new negR4)	;29-33
+	fxch	st(5)			;; A4,I3,B2,R1,A2,B4,R3,I1
+	fsub	R8			;; A4 = A4 - I4			;30-32
+	fxch	st(2)			;; B2,I3,A4,R1,A2,B4,R3,I1
+	fmul	QWORD PTR [edi+32]	;; B2 = B2 * i (new I2)		;31-35
+	fxch	st(1)			;; I3,B2,A4,R1,A2,B4,R3,I1
+	fadd	st, st			;; I3 = I3 * 2			;32-34
+	fxch	st(2)			;; A4,B2,I3,R1,A2,B4,R3,I1
+	fmul	QWORD PTR [edi+32]	;; A4 = A4 * i (new I4)		;33-37
+					;; I4,I2,I3,R1,R2,negR4,R3,I1
+	fxch	st(5)			;; negR4,I2,I3,R1,R2,I4,R3,I1
+	fsub	st(4), st		;; R2 = R2 + R4 (new R2)	;34-36
+	fadd	st, st			;; negR4 = negR4 * 2		;35-37
+	fxch	st(7)			;; I1,I2,I3,R1,R2,I4,R3,negR4
+	fadd	st(2), st		;; I3 = I1 + I3 (new I1)	;36-38
+	fxch	st(4)			;; R2,I2,I3,R1,I1,I4,R3,negR4
+	fsub	st(6), st		;; newR1 = newR1-newR2(final R2);37-39
+	fadd	st(7), st		;; negR4 = R2 - R4 (new R4)	;38-40
+	fxch	st(5)			;; I4,I2,I3,R1,I1,R2,R3,negR4
+	fsub	st(1), st		;; I2 = I2 - I4 (new I4)	;39-41
+	fadd	st, st			;; I4 = I4 * 2			;40-42
+	fxch	st(5)			;; R2,I2,I3,R1,I1,I4,R3,negR4
+	fadd	st, st			;; newR2 = newR2 * 2		;41-43
+	fxch	st(1)			;; I2,R2,I3,R1,I1,I4,R3,negR4
+	fsub	st(3), st		;; newR3 = newR3-newI4(final R3);42-44
+	fadd	st(5), st		;; I4 = I2 + I4 (new I2)	;43-45
+					;; I4,R2,I1,R3,I3,I2,R1,R4
+	fadd	st, st			;; I4 = I4 * 2			;44-46
+	fxch	st(7)			;; R4,R2,I1,R3,I3,I2,R1,I4
+	fsub	st(4), st		;; I3 = I3 - R4 (final I4)	;45-47
+	fadd	st, st			;; R4 = R4 * 2			;46-48
+	fxch	st(5)			;; I2,R2,I1,R3,I3,R4,R1,I4
+	fsub	st(2), st		;; I1 = I1 - I2 (new I2)	;47-49
+	fadd	st, st			;; I2 = I2 * 2			;48-50
+	fxch	st(6)			;; R1,R2,I1,R3,I3,R4,I2,I4
+	fadd	st(1), st		;; R2 = R1 + R2 (new R1)	;49-51
+	fxch	st(3)			;; R3,R2,I1,R1,I3,R4,I2,I4
+	fadd	st(7), st		;; I4 = R3 + I4 (new R4)	;50-52
+	fxch	st(4)			;; I3,R2,I1,R1,R3,R4,I2,I4
+	fadd	st(5), st		;; R4 = I3 + R4 (new I3)	;51-53
+	fxch	st(2)			;; I1,R2,I3,R1,R3,R4,I2,I4
+	fadd	st(6), st		;; I2 = I1 + I2 (new I1)	;52-54
+					;; I2,R1,I4,R2,R3,I3,I1,R4
+					;; Scramble end results:
+					;; R4,R1,R8,R3,R5,R6,R2,R7
+	fstp	R6
+	fstp	R1
+	fstp	R8
+	fstp	R2
+	fstp	R3
+	fstp	R7
+	fstp	R5
+	fstp	R4
+	ENDM
+
+; old code = 68.6
+; new code = 62.5
+
+four_complex_cpm_unfft_1 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R6			;; I3				;  1
+ 	fld	st			;; I3,I3			;2
+	fld	R8			;; I4,I3,I3			;  2
+	fadd	st(1), st		;; new I3 = I3 + I4		;3-5
+	fsubp	st(2), st		;; new R4 = I3 - I4		;4-6
+	fld	R4			;; I2,I3,R4			;  3
+	fld	R2			;; I1,I2,I3,R4			;  4
+	fadd	st(1), st		;; new I1 = I1 + I2		;5-7
+	fsub	R4			;; new I2 = I1 - I2		;6-8,5
+	fld	st(2)			;; I3,I2,I1,I3,R4		;7
+	fadd	st, st(2)		;; I3 = I1 + I3 (new I1)	;8-10
+	fxch	st(3)			;; I3,I2,I1,newI1,R4
+	fsubp	st(2), st		;; I1 = I1 - I3 (new I3)	;9-11
+	fld	R7			;; R4,I2,newI3,newI1,R4
+	fld	R5			;; R3,R4,I2,newI3,newI1,R4
+	fsub	st(1),st		;; new I4 = R4 - R3		;10-12
+	fxch	st(4)			;; newI1,I4,I2,newI3,R3,R4
+	fmul	QWORD PTR [edi]		;; B1 = new I1 * premul_imag	;11-15
+	fst	R5			;; Save B1			; 16,17
+	fld	R1			;; R1,B1,I4,I2,newI3,R3,R4
+	fld	R3			;; R2,R1,B1,I4,I2,newI3,R3,R4
+	fsub	st(1), st		;; new R2 = R1 - R2		;12-14
+	fxch	st(5)			;; newI3,R1,B1,I4,I2,R2,R3,R4
+	fmul	QWORD PTR [edi]		;; B3 = new I3 * premul_imag	;13-17
+	fst	R3			;; Save B3			; 18,19
+	fxch	st(3)			;; I4,R1,B1,B3,I2,R2,R3,R4
+	fsub	st(4), st		;; I2 = I2 - I4 (new I4)	;14-16
+	fadd	st, st			;; I4 = I4 * 2			;15-17
+	fxch	st(5)			;; R2,R1,B1,B3,I2,I4,R3,R4
+	fadd	R1			;; new R1 = R1 + R2		;16-18
+	fxch	st(6)			;; R3,R2,B1,B3,I2,I4,R1,R4
+	fadd	R7			;; new R3 = R3 + R4		;17-19
+	fxch	st(4)			;; I2,R2,B1,B3,R3,I4,R1,R4
+	fadd	st(5), st		;; I4 = I2 + I4 (new I2)	;18-20
+	fmul	QWORD PTR [edi+32]	;; B4 = new I4 * premul_imag	;19-23
+	fst	R4			;; Save B4			; 24,25
+	fxch	st(4)			;; R3,R2,B1,B3,B4,I2,R1,R4
+	fsub	st, st(6)		;; R3 = R3 - R1 (new negR3)	;20-22
+	fxch	st(5)			;; I2,R2,B1,B3,B4,R3,R1,R4
+	fmul	QWORD PTR [edi+32]	;; B2 = new I2 * premul_imag	;21-25
+	fst	R2			;; Save B2			; 26,27
+	fxch	st(6)			;; R1,R2,B1,B3,B4,R3,B2,R4
+	fadd	st, st			;; R1 = R1 * 2			;22-24
+	fxch	st(3)			;; B3,R2,B1,R1,B4,R3,B2,R4
+	fmul	QWORD PTR [edi+8]	;; C3 = B3 * r/i		;23-27
+	fxch	st(7)			;; R4,R2,B1,R1,B4,R3,B2,C3
+	fsub	st, st(1)		;; R4 = R4 - R2 (new negR4)	;24-26
+	fxch	st(2)			;; B1,R2,R4,R1,B4,R3,B2,C3
+	fmul	QWORD PTR [edi+8]	;; C1 = B1 * r/i		;25-29
+	fxch	st(5)			;; R3,R2,R4,R1,B4,C1,B2,C3
+	fadd	st(3), st		;; R1 = R1 + R3 (new R1)	;26-28
+	fmul	QWORD PTR [edi]		;; A3 = new negR3 * premul_imag	;27-31
+	fxch	st(1)			;; R2,A3,R4,R1,B4,C1,B2,C3
+	fadd	st, st			;; R2 = R2 * 2			;28-30
+	fxch	st(3)			;; R1,A3,R4,R2,B4,C1,B2,C3
+	fmul	QWORD PTR [edi]		;; A1 = new R1 * premul_imag	;29-31
+	fxch	st(4)			;; B4,A3,R4,R2,A1,C1,B2,C3
+					;; STALL
+	fmul	QWORD PTR [edi+40]	;; C4 = B4 * r/i		;31-35
+	fxch	st(1)			;; A3,C4,R4,R2,A1,C1,B2,C3
+	fadd	st(7), st		;; C3 = C3 + A3 (new R3)	;32-36
+	fmul	QWORD PTR [edi+8]	;; A3 = A3 * r/i		;33-37
+	fxch	st(2)			;; R4,C4,A3,R2,A1,C1,B2,C3
+	fadd	st(3), st		;; R2 = R2 + R4 (new R2)	;34-36
+	fmul	QWORD PTR [edi+32]	;; A4 = new negR4 * premul_imag	;35-39
+	fxch	st(3)			;; R2,C4,A3,A4,A1,C1,B2,C3
+					;; STALL
+	fmul	QWORD PTR [edi+32]	;; A2 = new R2 * premul_imag	;37-41
+	fxch	st(2)			;; A3,C4,A2,A4,A1,C1,B2,C3
+	fsub	R3			;; A3 = A3 - B3 (new I3)	;38-40
+	fxch	st(6)			;; B2,C4,A2,A4,A1,C1,A3,C3
+	fmul	QWORD PTR [edi+40]	;; C2 = B2 * r/i		;39-43
+	fxch	st(4)			;; A1,C4,A2,A4,C2,C1,A3,C3
+	fsub	st(5), st		;; C1 = C1 - A1 (new I1)	;40-42
+	fmul	QWORD PTR [edi+8]	;; A1 = A1 * r/i		;41-45
+	fxch	st(3)			;; A4,C4,A2,A1,C2,C1,A3,C3
+	fadd	st(1), st		;; C4 = C4 + A4 (new R4)	;42-44
+	fmul	QWORD PTR [edi+40]	;; A4 = A4 * r/i		;43-47
+	fxch	st(2)			;; A2,C4,A4,A1,C2,C1,A3,C3
+	fsub	st(4), st		;; C2 = C2 - A2 (new I2)	;44-46
+	fmul	QWORD PTR [edi+40]	;; A2 = A2 * r/i		;45-49
+	fxch	st(3)			;; A1,C4,A4,A2,C2,C1,A3,C3
+	fadd	R5			;; A1 = B1 + A1 (new R1)	;46-48
+	fxch	st(2)			;; A4,C4,A1,A2,C2,C1,A3,C3
+					;; STALL
+	fsub	R4			;; A4 = A4 - B4 (new I4)	;48-50
+	fxch	st(3)			;; A2,C4,A1,A4,C2,C1,A3,C3
+					;; STALL
+	fadd	R2			;; A2 = B2 + A2 (new R2)	;50-52
+					;; R2,R4,R1,I4,I2,I1,I3,R3
+	fstp	R3
+	fstp	R7
+	fstp	R1
+	fstp	R8
+	fstp	R4
+	fstp	R2
+	fstp	R6
+	fstp	R5
+	ENDM
+
+; old code = 64.9
+; new code = 62.7
+
+four_complex_cpm_fft_3 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R1			;; R1				;  1
+	fld	st			;; R1,R1			;2
+	fld	QWORD PTR [edi+8]	;; r/i,R1,R1			;  2
+	fmul	st(1), st		;; A1 = R1 * r/i		;3-7
+	fld	R7			;; I3,r/i,A1,R1			;  3
+	fld	QWORD PTR [edi+40]	;; r/i3,I3,r/i1,A1,R1		;  4
+	fmul	st(1), st		;; B3 = I3 * r/i		;5-9
+	fld	R5			;; I1,r/i3,B3,r/i1,A1,R1	;  5
+	fmul	st(3), st		;; B1 = I1 * r/i		;7-11
+	fsubp	st(4), st		;; A1 = A1 - I1			;8-10
+	fld	R3			;; R3,r/i,B3,B1,A1,R1		;  6
+	fmul	st(1), st		;; A3 = R3 * r/i		;9-13
+	faddp	st(2), st		;; B3 = B3 + R3			;10-12
+	fld	QWORD PTR [edi]		;; i,A3,B3,B1,A1,R1		;  7
+	fmul	st(4), st		;; A1 = A1 * i (new R1)		;11-15
+	fxch	st(5)			;; R1,A3,B3,B1,A1,i
+	faddp	st(3), st		;; B1 = B1 + R1			;12-14
+	fld	QWORD PTR [edi+32]	;; i3,A3,B3,B1,A1,i1		;  8
+	fmul	st(2), st		;; B3 = B3 * i (new negR3)	;13-17
+	fld	R7			;; I3,i3,A3,B3,B1,A1,i1		;  9
+	fsubp	st(2), st		;; A3 = A3 - I3			;14-16
+	fxch	st(5)			;; i1,A3,B3,B1,A1,i3
+	fmulp	st(3), st		;; B1 = B1 * i (new I1)		;15-19
+	fld	st(3)			;; R1,A3,negR3,B1,R1,i3		;16
+	fxch	st(5)			;; i3,A3,negR3,B1,R1,R1
+	fmulp	st(1), st		;; A3 = A3 * i (new I3)		;17-21
+	fxch	st(1)			;; negR3,I3,I1,R1,R1
+	fadd	st(3), st		;; new R3 = R1 - R3		;18-20
+	fld	R2			;; R2,negR3,I3,I1,newR3,R1
+	fld	QWORD PTR [edi+56]	;; r/i,R2,negR3,I3,I1,newR3,R1
+	fmul	st(1), st		;; A2 = R2 * r/i		;19-23
+	fxch	st(2)			;; negR3,A2,r/i,I3,I1,newR3,R1
+	fsubp	st(6), st		;; new R1 = R1 + R3		;20-22
+	fld	R4			;; R4,A2,r/i,I3,I1,R3,R1
+	fmul	QWORD PTR [edi+24]	;; A4 = R4 * r/i		;21-25
+	fxch	st(3)			;; I3,A2,r/i,A4,I1,R3,R1
+	fsub	st(4), st		;; I1 = I1 - I3 (new I3)	;22-24
+	fld	R6			;; I2,I3,A2,r/i,A4,I1,R3,R1
+	fmul	st(3), st		;; B2 = I2 * r/i		;23-27
+	fsubp	st(2), st		;; A2 = A2 - I2			;24-26
+	fld	R8			;; I4,I3,A2,B2,A4,I1,R3,R1
+	fmul	QWORD PTR [edi+24]	;; B4 = I4 * r/i		;25-29
+	fxch	st(4)			;; A4,I3,A2,B2,B4,I1,R3,R1
+	fsub	R8			;; A4 = A4 - I4			;26-28
+	fxch	st(2)			;; A2,I3,A4,B2,B4,I1,R3,R1
+	fmul	QWORD PTR [edi+48]	;; A2 = A2 * i (new R2)		;27-31
+	fxch	st(3)			;; B2,I3,A4,A2,B4,I1,R3,R1
+	fadd	R2			;; B2 = B2 + R2			;28-30
+	fxch	st(2)			;; A4,I3,B2,A2,B4,I1,R3,R1
+	fmul	QWORD PTR [edi+16]	;; A4 = A4 * i (new negR4)	;29-33
+	fxch	st(4)			;; B4,I3,B2,A2,A4,I1,R3,R1
+	fadd	R4			;; B4 = B4 + R4			;30-32
+	fxch	st(2)			;; B2,I3,B4,A2,A4,I1,R3,R1
+	fmul	QWORD PTR [edi+48]	;; B2 = B2 * i (new I2)		;31-35
+	fxch	st(1)			;; I3,B2,B4,A2,A4,I1,R3,R1
+	fadd	st, st			;; I3 = I3 * 2			;32-34
+	fxch	st(2)			;; B4,B2,I3,A2,A4,I1,R3,R1
+	fmul	QWORD PTR [edi+16]	;; B4 = B4 * i (new negI4)	;33-37
+					;; negI4,I2,I3,R2,negR4,I1,R3,R1
+	fxch	st(4)			;; negR4,I2,I3,R2,negI4,I1,R3,R1
+	fsub	st(3), st		;; R2 = R2 + R4 (new R2)	;34-36
+	fadd	st, st			;; negR4 = negR4 * 2		;35-37
+	fxch	st(5)			;; I1,I2,I3,R2,negI4,negR4,R3,R1
+	fadd	st(2), st		;; I3 = I1 + I3 (new I1)	;36-38
+	fxch	st(3)			;; R2,I2,I3,I1,negI4,negR4,R3,R1
+	fsub	st(7), st		;; newR1 = newR1-newR2(final R2);37-39
+	fxch	st(4)			;; negI4,I2,I3,I1,R2,negR4,R3,R1
+	fsub	st(1), st		;; I2 = I2 + I4 (new I2)	;38-40
+	fadd	st, st			;; negI4 = negI4 * 2		;39-41
+	fxch	st(4)			;; R2,I2,I3,I1,negI4,negR4,R3,R1
+	fadd	st(5), st		;; negR4 = R2 - R4 (new R4)	;40-42
+	fadd	st, st			;; newR2 = newR2 * 2		;41-43
+	fxch	st(1)			;; I2,R2,I3,I1,negI4,negR4,R3,R1
+	fadd	st(4), st		;; negI4 = I2 - I4 (new I4)	;42-44
+					;; I2,R2,I1,I3,I4,R4,R3,R1
+	fsub	st(2), st		;; I1 = I1 - I2 (new I2)	;43-45
+	fadd	st, st			;; I2 = I2 * 2			;44-46
+	fxch	st(5)			;; R4,R2,I1,I3,I4,I2,R3,R1
+	fsub	st(3), st		;; I3 = I3 - R4 (new I4)	;45-47
+	fadd	st, st			;; R4 = R4 * 2			;46-48
+	fxch	st(4)			;; I4,R2,I1,I3,R4,I2,R3,R1
+	fsub	st(6), st		;; R3 = R3 - I4 (new R3)	;47-49
+	fadd	st, st			;; I4 = I4 * 2			;48-50
+	fxch	st(7)			;; R1,R2,I1,I3,R4,I2,R3,I4
+	fadd	st(1), st		;; R2 = R1 + R2 (new R1)	;49-51
+	fxch	st(2)			;; I1,R2,R1,I3,R4,I2,R3,I4
+	fadd	st(5), st		;; I2 = I1 + I2 (new I1)	;50-52
+	fxch	st(3)			;; I3,R2,R1,I1,R4,I2,R3,I4
+	fadd	st(4), st		;; R4 = I3 + R4 (new I3)	;51-53
+	fxch	st(6)			;; R3,R2,R1,I1,R4,I2,I3,I4
+	fadd	st(7), st		;; I4 = R3 + I4 (new R4)	;52-54
+					;; R3,R1,R2,I2,I3,I1,I4,R4
+					;; Scramble end results:
+					;; R5,R1,R3,R4,R6,R2,R8,R7
+	fstp	R3
+	fstp	R1
+	fstp	R2
+	fstp	R6
+	fstp	R7
+	fstp	R5
+	fstp	R8
+	fstp	R4
+	ENDM
+
+; old code = 69.8
+; new code = 61.8
+
+four_complex_cpm_unfft_3 MACRO R1,R2,R3,R4,R5,R6,R7,R8
+	fld	R6			;; I3				;  1
+ 	fld	st			;; I3,I3			;2
+	fld	R8			;; I4,I3,I3			;  2
+	fadd	st(1), st		;; new I3 = I3 + I4		;3-5
+	fsubp	st(2), st		;; new R4 = I3 - I4		;4-6
+	fld	R4			;; I2,I3,R4			;  3
+	fld	R2			;; I1,I2,I3,R4			;  4
+	fadd	st(1), st		;; new I1 = I1 + I2		;5-7
+	fsub	R4			;; new I2 = I1 - I2		;6-8,5
+	fld	st(2)			;; I3,I2,I1,I3,R4		;7
+	fadd	st, st(2)		;; I3 = I1 + I3 (new I1)	;8-10
+	fxch	st(3)			;; I3,I2,I1,newI1,R4
+	fsubp	st(2), st		;; I1 = I1 - I3 (new I3)	;9-11
+	fld	R7			;; R4,I2,newI3,newI1,R4
+	fld	R5			;; R3,R4,I2,newI3,newI1,R4
+	fsub	st(1),st		;; new I4 = R4 - R3		;10-12
+	fxch	st(4)			;; newI1,I4,I2,newI3,R3,R4
+	fmul	QWORD PTR [edi]		;; B1 = new I1 * premul_imag	;11-15
+	fst	R5			;; Save B1			; 16,17
+	fld	R1			;; R1,B1,I4,I2,newI3,R3,R4
+	fld	R3			;; R2,R1,B1,I4,I2,newI3,R3,R4
+	fsub	st(1), st		;; new R2 = R1 - R2		;12-14
+	fxch	st(5)			;; newI3,R1,B1,I4,I2,R2,R3,R4
+	fmul	QWORD PTR [edi+32]	;; B3 = new I3 * premul_imag	;13-17
+	fst	R3			;; Save B3			; 18,19
+	fxch	st(4)			;; I2,R1,B1,I4,B3,R2,R3,R4
+	fsub	st(3), st		;; I4 = I4 - I2 (new negI4)	;14-16
+	fadd	st, st			;; I2 = I2 * 2			;15-17
+	fxch	st(5)			;; R2,R1,B1,I4,B3,I2,R3,R4
+	fadd	R1			;; new R1 = R1 + R2		;16-18
+	fxch	st(6)			;; R3,R2,B1,I4,B3,I2,R1,R4
+	fadd	R7			;; new R3 = R3 + R4		;17-19
+	fxch	st(3)			;; I4,R2,B1,R3,B3,I2,R1,R4
+	fadd	st(5), st		;; I2 = I2 + I4 (new I2)	;18-20
+	fmul	QWORD PTR [edi+16]	;; B4 = new negI4 * premul_imag	;19-23
+	fst	R4			;; Save B4			; 24,25
+	fxch	st(3)			;; R3,R2,B1,B4,B3,I2,R1,R4
+	fsub	st, st(6)		;; R3 = R3 - R1 (new negR3)	;20-22
+	fxch	st(5)			;; I2,R2,B1,B4,B3,R3,R1,R4
+	fmul	QWORD PTR [edi+48]	;; B2 = new I2 * premul_imag	;21-25
+	fst	R2			;; Save B2			; 26,27
+	fxch	st(6)			;; R1,R2,B1,B4,B3,R3,B2,R4
+	fadd	st, st			;; R1 = R1 * 2			;22-24
+	fxch	st(4)			;; B3,R2,B1,B4,R1,R3,B2,R4
+	fmul	QWORD PTR [edi+40]	;; C3 = B3 * r/i		;23-27
+	fxch	st(7)			;; R4,R2,B1,B4,R1,R3,B2,C3
+	fsub	st, st(1)		;; R4 = R4 - R2 (new negR4)	;24-26
+	fxch	st(2)			;; B1,R2,R4,B4,R1,R3,B2,C3
+	fmul	QWORD PTR [edi+8]	;; C1 = B1 * r/i		;25-29
+	fxch	st(5)			;; R3,R2,R4,B4,R1,C1,B2,C3
+	fadd	st(4), st		;; R1 = R1 + R3 (new R1)	;26-28
+	fmul	QWORD PTR [edi+32]	;; A3 = new negR3 * premul_imag	;27-31
+	fxch	st(1)			;; R2,A3,R4,B4,R1,C1,B2,C3
+	fadd	st, st			;; R2 = R2 * 2			;28-30
+	fxch	st(4)			;; R1,A3,R4,B4,R2,C1,B2,C3
+	fmul	QWORD PTR [edi]		;; A1 = new R1 * premul_imag	;29-31
+	fxch	st(3)			;; B4,A3,R4,A1,R2,C1,B2,C3
+					;; STALL
+	fmul	QWORD PTR [edi+24]	;; C4 = B4 * r/i		;31-35
+	fxch	st(1)			;; A3,C4,R4,A1,R2,C1,B2,C3
+	fadd	st(7), st		;; C3 = C3 + A3 (new R3)	;32-36
+	fmul	QWORD PTR [edi+40]	;; A3 = A3 * r/i		;33-37
+	fxch	st(2)			;; R4,C4,A3,A1,R2,C1,B2,C3
+	fadd	st(4), st		;; R2 = R2 + R4 (new R2)	;34-36
+	fmul	QWORD PTR [edi+16]	;; A4 = new negR4 * premul_imag	;35-39
+	fxch	st(4)			;; R2,C4,A3,A1,A4,C1,B2,C3
+					;; STALL
+	fmul	QWORD PTR [edi+48]	;; A2 = new R2 * premul_imag	;37-41
+	fxch	st(2)			;; A3,C4,A2,A1,A4,C1,B2,C3
+	fsub	R3			;; A3 = A3 - B3 (new I3)	;38-40
+	fxch	st(6)			;; B2,C4,A2,A1,A4,C1,A3,C3
+	fmul	QWORD PTR [edi+56]	;; C2 = B2 * r/i		;39-43
+	fxch	st(3)			;; A1,C4,A2,C2,A4,C1,A3,C3
+	fsub	st(5), st		;; C1 = C1 - A1 (new I1)	;40-42
+	fmul	QWORD PTR [edi+8]	;; A1 = A1 * r/i		;41-45
+	fxch	st(4)			;; A4,C4,A2,C2,A1,C1,A3,C3
+	fsub	st(1), st		;; C4 = C4 - A4 (new I4)	;42-44
+	fmul	QWORD PTR [edi+24]	;; A4 = A4 * r/i		;43-47
+	fxch	st(2)			;; A2,C4,A4,C2,A1,C1,A3,C3
+	fsub	st(3), st		;; C2 = C2 - A2 (new I2)	;44-46
+	fmul	QWORD PTR [edi+56]	;; A2 = A2 * r/i		;45-49
+	fxch	st(4)			;; A1,C4,A4,C2,A2,C1,A3,C3
+	fadd	R5			;; A1 = B1 + A1 (new R1)	;46-48
+	fxch	st(2)			;; A4,C4,A1,C2,A2,C1,A3,C3
+					;; STALL
+	fadd	R4			;; A4 = A4 + B4 (new R4)	;48-50
+	fxch	st(4)			;; A2,C4,A1,C2,A4,C1,A3,C3
+					;; STALL
+	fadd	R2			;; A2 = B2 + A2 (new R2)	;50-52
+					;; R2,I4,R1,I2,R4,I1,I3,R3
+	fstp	R3
+	fstp	R8
+	fstp	R1
+	fstp	R4
+	fstp	R7
+	fstp	R2
+	fstp	R6
+	fstp	R5
+	ENDM

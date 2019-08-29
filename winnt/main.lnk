@@ -1,0 +1,2 @@
+/incremental:no /largeaddressaware /out:ntprime.exe service main prime ..\prime95\factor32 ..\gwnum\gwnum.lib \libcurl\curllib.lib c:\hwloc-win32-build-2.0.4\lib\libhwloc.lib c:\gmp\libgmp-10.lib libcmt.lib kernel32.lib user32.lib gdi32.lib ws2_32.lib advapi32.lib wininet.lib winmm.lib
+

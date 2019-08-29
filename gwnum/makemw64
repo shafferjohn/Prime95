@@ -1,0 +1,85 @@
+# Makefile for gwnum library for Windows 64-bit/MingW64 in MSys
+#
+
+CC = gcc
+CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -DX86_64 -DWINDOWS64 -O2
+#CFLAGS = -I.. -DX86_64 -DWINDOWS64 -g -O2
+
+CPP = g++
+CPPFLAGS = -I.. -I../qd -DX86_64 -DWINDOWS64 -O2
+#CPPFLAGS = -I.. -I../qd -DX86_64 -DWINDOWS64 -g -O2
+
+AR = ar
+
+WIN64O = mw64/cpuid.o mw64/gwnum.o mw64/gwtables.o mw64/gwthread.o mw64/gwini.o mw64/gwbench.o mw64/gwutil.o mw64/gwdbldbl.o mw64/giants.o mw64/ecmstag1.o
+
+WIN64OBJS = amd64/xmult1ax.obj amd64/xmult2.obj amd64/xmult2a_core.obj amd64/xmult2a_k8.obj amd64/xmult2ax.obj \
+		 amd64/xmult3.obj amd64/xmult3a_core.obj amd64/xmult3a_k8.obj amd64/xmult3ax.obj \
+		 amd64/hg_blend.obj amd64/hg_core.obj amd64/hg_p4.obj amd64/hg_k8.obj amd64/hg_k10.obj \
+		 amd64/r4_core.obj amd64/r4_p4.obj amd64/r4_k8.obj amd64/r4_k10.obj \
+		 amd64/r4delay_core.obj amd64/r4delay_p4.obj amd64/r4delay_k8.obj amd64/r4delay_k10.obj \
+		 amd64/r4delay3_core.obj amd64/r4delay3_p4.obj amd64/r4delay3_k8.obj amd64/r4delay3_k10.obj \
+		 amd64/r4delay5_core.obj amd64/r4delay5_p4.obj amd64/r4delay5_k8.obj amd64/r4delay5_k10.obj \
+		 amd64/r4dwpn_core.obj amd64/r4dwpn_p4.obj amd64/r4dwpn_k8.obj amd64/r4dwpn_k10.obj \
+		 amd64/r4dwpn3_core.obj amd64/r4dwpn3_p4.obj amd64/r4dwpn3_k8.obj amd64/r4dwpn3_k10.obj \
+		 amd64/r4dwpn5_core.obj amd64/r4dwpn5_p4.obj amd64/r4dwpn5_k8.obj amd64/r4dwpn5_k10.obj \
+		 amd64/ymult1ax.obj amd64/yr4_blend.obj \
+		 amd64/ymult3.obj amd64/ymult3a_core.obj amd64/ymult3ax.obj \
+		 amd64/yr4dwpn_core.obj amd64/yr4dwpn3_core.obj amd64/yr4dwpn5_core.obj \
+		 amd64/cpuidhlp.obj amd64/mult.obj amd64/gianthlp.obj amd64/timeit.obj
+
+LIB = gwnum.a
+WIN64LIB = mw64/gwnum.a
+OBJDIR = mw64
+
+#########################################################################
+
+all: $(WIN64LIB) $(LIB)
+
+clean:
+	rm -f $(WIN64O) $(WIN64LIB)
+
+distclean: clean
+	rm -f $(LIB)
+
+$(LIB): $(WIN64O)
+	cp $(WIN64LIB) .
+	$(AR) -rs $(LIB) $(WIN64O)
+
+$(WIN64LIB): $(WIN64OBJS)
+	# make sure our destination directory exists
+	test -d $(OBJDIR) || mkdir $(OBJDIR)
+	rm -f $(WIN64LIB)
+	$(AR) -rs $(WIN64LIB) $(WIN64OBJS)
+
+# Compile C code for 64-bit
+
+mw64/cpuid.o: cpuid.c cpuid.h
+	$(CC) $(CFLAGS) -o mw64/cpuid.o -c cpuid.c
+
+mw64/gwnum.o: gwnum.c gwnum.h
+	$(CC) $(CFLAGS) -o mw64/gwnum.o -c gwnum.c
+
+mw64/gwtables.o: gwtables.c gwtables.h
+	$(CC) $(CFLAGS) -o mw64/gwtables.o -c gwtables.c
+
+mw64/gwthread.o: gwthread.c gwthread.h
+	$(CC) $(CFLAGS) -o mw64/gwthread.o -c gwthread.c
+
+mw64/gwini.o: gwini.c gwini.h
+	$(CC) $(CFLAGS) -o mw64/gwini.o -c gwini.c
+
+mw64/gwbench.o: gwbench.c gwbench.h
+	$(CC) $(CFLAGS) -o mw64/gwbench.o -c gwbench.c
+
+mw64/gwutil.o: gwutil.c gwutil.h
+	$(CC) $(CFLAGS) -o mw64/gwutil.o -c gwutil.c
+
+mw64/gwdbldbl.o: gwdbldbl.cpp gwdbldbl.h
+	$(CPP) $(CPPFLAGS) -o mw64/gwdbldbl.o -c gwdbldbl.cpp
+
+mw64/giants.o: giants.c giants.h
+	$(CC) $(CFLAGS) -o mw64/giants.o -c giants.c
+
+mw64/ecmstag1.o: ecmstag1.c gwnum.h
+	$(CC) $(CFLAGS) -o mw64/ecmstag1.o -c ecmstag1.c

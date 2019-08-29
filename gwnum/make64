@@ -1,0 +1,32 @@
+# Makefile for Linux and FreeBSD (pre 10.0) 64-bit gwnum library
+#
+
+CC = gcc
+CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -I/usr/local/include -DX86_64 -Wno-unused-result -O2
+
+CPP = g++
+CPPFLAGS = -I.. -I../qd -DX86_64 -O2
+
+AR = ar
+
+LINUXOBJS = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o ecmstag1.o
+
+LIB = gwnum.a
+
+#########################################################################
+
+$(LIB): $(LINUXOBJS)
+	cp linux64/gwnum.a .
+	$(AR) -rs $(LIB) $(LINUXOBJS)
+
+clean:
+	rm -f $(LINUXOBJS)
+
+distclean: clean
+	rm -f $(LIB)
+
+.c.o:
+	$(CC) $(CFLAGS) -c $<
+
+.cpp.o:
+	$(CPP) $(CPPFLAGS) -c $<

@@ -1,0 +1,748 @@
+; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros implement basic AVX-512 building blocks that will be used by
+; all FFT types.
+;
+
+;;
+;; Store a 512-bit zmm register in memory.  In older (AMD?) architectures there was a difference
+;; between using vmovaps and vmovapd.  We continue to use a store macro for those historical reasons. 
+;;
+
+zstore MACRO address, reg
+	vmovapd address, reg
+	ENDM
+
+;; Macros that try to make it easier to write code that works best on both Bulldozer 
+;; which supports the superior FMA4 instruction and Intel which only supports the
+;; more clumsy FMA3 instructions.
+
+zfmaddpd MACRO dest, mulval1, mulval2, addval
+	LOCAL	destreglen
+	destreglen = @SIZESTR(<&dest>)
+	IF @INSTR(,@substr(<&dest>, 1, destreglen),<{>) NE 0
+		destreglen = @INSTR(,@substr(<&dest>, 1, destreglen),<{>) - 1
+	ENDIF
+	IF @INSTR(,@substr(<&dest>, 1, destreglen),< >) NE 0
+		destreglen = @INSTR(,@substr(<&dest>, 1, destreglen),< >) - 1
+	ENDIF
+	IFIDNI @substr(<&dest>, 1, destreglen), <&addval>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmadd231pd dest, mulval1, mulval2
+		ELSE
+			vfmadd231pd dest, mulval2, mulval1
+		ENDIF
+	ELSE
+	IFIDNI @substr(<&dest>, 1, destreglen), <&mulval1>
+		IF (OPATTR (mulval2)) AND 10000b
+			vfmadd213pd dest, mulval2, addval
+		ELSE
+			vfmadd132pd dest, addval, mulval2
+		ENDIF
+	ELSE
+	IFIDNI @substr(<&dest>, 1, destreglen), <&mulval2>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmadd213pd dest, mulval1, addval
+		ELSE
+			vfmadd132pd dest, addval, mulval1
+		ENDIF
+	ELSE
+	IF (OPATTR (mulval2)) AND 10000b
+		vmovapd dest, mulval2
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmadd213pd dest, mulval1, addval
+		ELSE
+			vfmadd132pd dest, addval, mulval1
+		ENDIF
+	ELSE
+		vmovapd dest, mulval1
+		vfmadd132pd dest, addval, mulval2
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDM
+
+zfmsubpd MACRO dest, mulval1, mulval2, addval
+	LOCAL	destreglen
+	destreglen = @SIZESTR(<&dest>)
+	IF @INSTR(,@substr(<&dest>, 1, destreglen),<{>) NE 0
+		destreglen = @INSTR(,@substr(<&dest>, 1, destreglen),<{>) - 1
+	ENDIF
+	IF @INSTR(,@substr(<&dest>, 1, destreglen),< >) NE 0
+		destreglen = @INSTR(,@substr(<&dest>, 1, destreglen),< >) - 1
+	ENDIF
+	IFIDNI @substr(<&dest>, 1, destreglen), <&addval>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmsub231pd dest, mulval1, mulval2
+		ELSE
+			vfmsub231pd dest, mulval2, mulval1
+		ENDIF
+	ELSE
+	IFIDNI @substr(<&dest>, 1, destreglen), <&mulval1>
+		IF (OPATTR (mulval2)) AND 10000b
+			vfmsub213pd dest, mulval2, addval
+		ELSE
+			vfmsub132pd dest, addval, mulval2
+		ENDIF
+	ELSE
+	IFIDNI @substr(<&dest>, 1, destreglen), <&mulval2>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmsub213pd dest, mulval1, addval
+		ELSE
+			vfmsub132pd dest, addval, mulval1
+		ENDIF
+	ELSE
+	IF (OPATTR (mulval2)) AND 10000b
+		vmovapd dest, mulval2
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmsub213pd dest, mulval1, addval
+		ELSE
+			vfmsub132pd dest, addval, mulval1
+		ENDIF
+	ELSE
+		vmovapd dest, mulval1
+		vfmsub132pd dest, addval, mulval2
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDM
+
+zfnmaddpd MACRO dest, mulval1, mulval2, addval
+	LOCAL	destreglen
+	destreglen = @SIZESTR(<&dest>)
+	IF @INSTR(,@substr(<&dest>, 1, destreglen),<{>) NE 0
+		destreglen = @INSTR(,@substr(<&dest>, 1, destreglen),<{>) - 1
+	ENDIF
+	IF @INSTR(,@substr(<&dest>, 1, destreglen),< >) NE 0
+		destreglen = @INSTR(,@substr(<&dest>, 1, destreglen),< >) - 1
+	ENDIF
+	IFIDNI @substr(<&dest>, 1, destreglen), <&addval>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmadd231pd dest, mulval1, mulval2
+		ELSE
+			vfnmadd231pd dest, mulval2, mulval1
+		ENDIF
+	ELSE
+	IFIDNI @substr(<&dest>, 1, destreglen), <&mulval1>
+		IF (OPATTR (mulval2)) AND 10000b
+			vfnmadd213pd dest, mulval2, addval
+		ELSE
+			vfnmadd132pd dest, addval, mulval2
+		ENDIF
+	ELSE
+	IFIDNI @substr(<&dest>, 1, destreglen), <&mulval2>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmadd213pd dest, mulval1, addval
+		ELSE
+			vfnmadd132pd dest, addval, mulval1
+		ENDIF
+	ELSE
+	IF (OPATTR (mulval2)) AND 10000b
+		vmovapd dest, mulval2
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmadd213pd dest, mulval1, addval
+		ELSE
+			vfnmadd132pd dest, addval, mulval1
+		ENDIF
+	ELSE
+		vmovapd dest, mulval1
+		vfnmadd132pd dest, addval, mulval2
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDM
+
+zfnmsubpd MACRO dest, mulval1, mulval2, addval
+	LOCAL	destreglen
+	destreglen = @SIZESTR(<&dest>)
+	IF @INSTR(,@substr(<&dest>, 1, destreglen),<{>) NE 0
+		destreglen = @INSTR(,@substr(<&dest>, 1, destreglen),<{>) - 1
+	ENDIF
+	IF @INSTR(,@substr(<&dest>, 1, destreglen),< >) NE 0
+		destreglen = @INSTR(,@substr(<&dest>, 1, destreglen),< >) - 1
+	ENDIF
+	IFIDNI @substr(<&dest>, 1, destreglen), <&addval>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmsub231pd dest, mulval1, mulval2
+		ELSE
+			vfnmsub231pd dest, mulval2, mulval1
+		ENDIF
+	ELSE
+	IFIDNI @substr(<&dest>, 1, destreglen), <&mulval1>
+		IF (OPATTR (mulval2)) AND 10000b
+			vfnmsub213pd dest, mulval2, addval
+		ELSE
+			vfnmsub132pd dest, addval, mulval2
+		ENDIF
+	ELSE
+	IFIDNI @substr(<&dest>, 1, destreglen), <&mulval2>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmsub213pd dest, mulval1, addval
+		ELSE
+			vfnmsub132pd dest, addval, mulval1
+		ENDIF
+	ELSE
+	IF (OPATTR (mulval2)) AND 10000b
+		vmovapd dest, mulval2
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmsub213pd dest, mulval1, addval
+		ELSE
+			vfnmsub132pd dest, addval, mulval1
+		ENDIF
+	ELSE
+		vmovapd dest, mulval1
+		vfnmsub132pd dest, addval, mulval2
+	ENDIF
+	ENDIF 
+	ENDIF 
+	ENDIF
+	ENDM
+
+
+zfmaddsd MACRO dest, mulval1, mulval2, addval
+	IFIDNI <&dest>, <&addval>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmadd231sd addval, mulval1, mulval2
+		ELSE
+			vfmadd231sd addval, mulval2, mulval1
+		ENDIF
+	ELSE
+	IFIDNI <&dest>, <&mulval1>
+		IF (OPATTR (mulval2)) AND 10000b
+			vfmadd213sd mulval1, mulval2, addval
+		ELSE
+			vfmadd132sd mulval1, addval, mulval2
+		ENDIF
+	ELSE
+	IFIDNI <&dest>, <&mulval2>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmadd213sd mulval2, mulval1, addval
+		ELSE
+			vfmadd132sd mulval2, addval, mulval1
+		ENDIF
+	ELSE
+	IF (OPATTR (mulval2)) AND 10000b
+		vmovsd	dest, mulval2, mulval2
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmadd213sd dest, mulval1, addval
+		ELSE
+			vfmadd132sd dest, addval, mulval1
+		ENDIF
+	ELSE
+		vmovsd	dest, mulval1, mulval1
+		vfmadd132sd dest, addval, mulval2
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDM
+
+zfmsubsd MACRO dest, mulval1, mulval2, addval
+	IFIDNI <&dest>, <&addval>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmsub231sd addval, mulval1, mulval2
+		ELSE
+			vfmsub231sd addval, mulval2, mulval1
+		ENDIF
+	ELSE
+	IFIDNI <&dest>, <&mulval1>
+		IF (OPATTR (mulval2)) AND 10000b
+			vfmsub213sd mulval1, mulval2, addval
+		ELSE
+			vfmsub132sd mulval1, addval, mulval2
+		ENDIF
+	ELSE
+	IFIDNI <&dest>, <&mulval2>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmsub213sd mulval2, mulval1, addval
+		ELSE
+			vfmsub132sd mulval2, addval, mulval1
+		ENDIF
+	ELSE
+	IF (OPATTR (mulval2)) AND 10000b
+		vmovsd	dest, mulval2, mulval2
+		IF (OPATTR (mulval1)) AND 10000b
+			vfmsub213sd dest, mulval1, addval
+		ELSE
+			vfmsub132sd dest, addval, mulval1
+		ENDIF
+	ELSE
+		vmovsd	dest, mulval1, mulval1
+		vfmsub132sd dest, addval, mulval2
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDM
+
+zfnmaddsd MACRO dest, mulval1, mulval2, addval
+	IFIDNI <&dest>, <&addval>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmadd231sd addval, mulval1, mulval2
+		ELSE
+			vfnmadd231sd addval, mulval2, mulval1
+		ENDIF
+	ELSE
+	IFIDNI <&dest>, <&mulval1>
+		IF (OPATTR (mulval2)) AND 10000b
+			vfnmadd213sd mulval1, mulval2, addval
+		ELSE
+			vfnmadd132sd mulval1, addval, mulval2
+		ENDIF
+	ELSE
+	IFIDNI <&dest>, <&mulval2>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmadd213sd mulval2, mulval1, addval
+		ELSE
+			vfnmadd132sd mulval2, addval, mulval1
+		ENDIF
+	ELSE
+	IF (OPATTR (mulval2)) AND 10000b
+		vmovsd	dest, mulval2, mulval2
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmadd213sd dest, mulval1, addval
+		ELSE
+			vfnmadd132sd dest, addval, mulval1
+		ENDIF
+	ELSE
+		vmovsd	dest, mulval1, mulval1
+		vfnmadd132sd dest, addval, mulval2
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDM
+
+zfnmsubsd MACRO dest, mulval1, mulval2, addval
+	IFIDNI <&dest>, <&addval>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmsub231sd addval, mulval1, mulval2
+		ELSE
+			vfnmsub231sd addval, mulval2, mulval1
+		ENDIF
+	ELSE
+	IFIDNI <&dest>, <&mulval1>
+		IF (OPATTR (mulval2)) AND 10000b
+			vfnmsub213sd mulval1, mulval2, addval
+		ELSE
+			vfnmsub132sd mulval1, addval, mulval2
+		ENDIF
+	ELSE
+	IFIDNI <&dest>, <&mulval2>
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmsub213sd mulval2, mulval1, addval
+		ELSE
+			vfnmsub132sd mulval2, addval, mulval1
+		ENDIF
+	ELSE
+	IF (OPATTR (mulval2)) AND 10000b
+		vmovsd	dest, mulval2, mulval2
+		IF (OPATTR (mulval1)) AND 10000b
+			vfnmsub213sd dest, mulval1, addval
+		ELSE
+			vfnmsub132sd dest, addval, mulval1
+		ENDIF
+	ELSE
+		vmovsd	dest, mulval1, mulval1
+		vfnmsub132sd dest, addval, mulval2
+	ENDIF
+	ENDIF 
+	ENDIF 
+	ENDIF
+	ENDM
+
+;;
+;; Macros to gather load or scatter store 8 registers with an 8x8 transpose
+;;
+
+;; For SkylakeX, it is faster to load and shuffle rather than using the gather instruction
+
+zgather_preload MACRO unused
+	ENDM
+zgather MACRO srcreg,d1,d2,d4,r1,r2,r3,r4,r5,r6,r7,r8, r9
+	vmovapd	r4, [srcreg]		;; d0_7	d0_6 d0_5 d0_4 d0_3 d0_2 d0_1 d0_0
+	vmovapd	r5, [srcreg+d1]		;; d1_7	d1_6 d1_5 d1_4 d1_3 d1_2 d1_1 d1_0
+	vmovapd	r6, [srcreg+d2]		;; d2_7	d2_6 d2_5 d2_4 d2_3 d2_2 d2_1 d2_0
+	vmovapd	r9, [srcreg+d2+d1]	;; d3_7	d3_6 d3_5 d3_4 d3_3 d3_2 d3_1 d3_0
+	vmovapd	r7, [srcreg+d4]		;; d4_7	d4_6 d4_5 d4_4 d4_3 d4_2 d4_1 d4_0
+	vmovapd	r1, [srcreg+d4+d1]	;; d5_7	d5_6 d5_5 d5_4 d5_3 d5_2 d5_1 d5_0
+	vmovapd	r2, [srcreg+d4+d2]	;; d6_7	d6_6 d6_5 d6_4 d6_3 d6_2 d6_1 d6_0
+	vmovapd	r8, [srcreg+d4+d2+d1]	;; d7_7	d7_6 d7_5 d7_4 d7_3 d7_2 d7_1 d7_0
+
+	vshufpd	r3, r4, r5, 00000000b	;; d1_6 d0_6 d1_4 d0_4 d1_2 d0_2 d1_0 d0_0
+	vshufpd	r5, r4, r5, 11111111b	;; d1_7 d0_7 d1_5 d0_5 d1_3 d0_3 d1_1 d0_1
+	vshufpd	r4, r6, r9, 00000000b	;; d3_6 d2_6 d3_4 d2_4 d3_2 d2_2 d3_0 d2_0
+	vshufpd	r9, r6, r9, 11111111b	;; d3_7 d2_7 d3_5 d2_5 d3_3 d2_3 d3_1 d2_1
+	vshufpd	r6, r7, r1, 00000000b	;; d5_6 d4_6 d5_4 d4_4 d5_2 d4_2 d5_0 d4_0
+	vshufpd	r1, r7, r1, 11111111b	;; d5_7 d4_7 d5_5 d4_5 d5_3 d4_3 d5_1 d4_1
+	vshufpd	r7, r2, r8, 00000000b	;; d7_6 d6_6 d7_4 d6_4 d7_2 d6_2 d7_0 d6_0
+	vshufpd	r8, r2, r8, 11111111b	;; d7_7 d6_7 d7_5 d6_5 d7_3 d6_3 d7_1 d6_1
+
+	vshuff64x2 r2, r3, r4, 10001000b ;; d3_4 d2_4 d3_0 d2_0 d1_4 d0_4 d1_0 d0_0
+	vshuff64x2 r4, r3, r4, 11011101b ;; d3_6 d2_6 d3_2 d2_2 d1_6 d0_6 d1_2 d0_2
+	vshuff64x2 r3, r5, r9, 10001000b ;; d3_5 d2_5 d3_1 d2_1 d1_5 d0_5 d1_1 d0_1
+	vshuff64x2 r9, r5, r9, 11011101b ;; d3_7 d2_7 d3_3 d2_3 d1_7 d0_7 d1_3 d0_3
+	vshuff64x2 r5, r6, r7, 10001000b ;; d7_4 d6_4 d7_0 d6_0 d5_4 d4_4 d5_0 d4_0
+	vshuff64x2 r7, r6, r7, 11011101b ;; d7_6 d6_6 d7_2 d6_2 d5_6 d4_6 d5_2 d4_2
+	vshuff64x2 r6, r1, r8, 10001000b ;; d7_5 d6_5 d7_1 d6_1 d5_5 d4_5 d5_1 d4_1
+	vshuff64x2 r8, r1, r8, 11011101b ;; d7_7 d6_7 d7_3 d6_3 d5_7 d4_7 d5_3 d4_3
+
+	vshuff64x2 r1, r2, r5, 10001000b ;; d7_0 d6_0 d5_0 d4_0 d3_0 d2_0 d1_0 d0_0
+	vshuff64x2 r5, r2, r5, 11011101b ;; d7_4 d6_4 d5_4 d4_4 d3_4 d2_4 d1_4 d0_4
+	vshuff64x2 r2, r3, r6, 10001000b ;; d7_1 d6_1 d5_1 d4_1 d3_1 d2_1 d1_1 d0_1
+	vshuff64x2 r6, r3, r6, 11011101b ;; d7_5 d6_5 d5_5 d4_5 d3_5 d2_5 d1_5 d0_5
+	vshuff64x2 r3, r4, r7, 10001000b ;; d7_2 d6_2 d5_2 d4_2 d3_2 d2_2 d1_2 d0_2
+	vshuff64x2 r7, r4, r7, 11011101b ;; d7_6 d6_6 d5_6 d4_6 d3_6 d2_6 d1_6 d0_6
+	vshuff64x2 r4, r9, r8, 10001000b ;; d7_3 d6_3 d5_3 d4_3 d3_3 d2_3 d1_3 d0_3
+	vshuff64x2 r8, r9, r8, 11011101b ;; d7_7 d6_7 d5_7 d4_7 d3_7 d2_7 d1_7 d0_7
+	ENDM
+
+;;; New better swizzle (for Skylake-X)!!!!!  Uses vblendmpd instructions that run on port 0 and 5
+
+zgather_preload MACRO unused
+	set	k6 = 00110011b			;; Constant for vblendmpd instructions
+						;; Constant for vpermt2pd instructions
+						;; 0=src2,1=dest-is-src   xxx = double#
+	set	zmm30 = 0+4 8+4 0+6 8+6 0+0 8+0 0+2 8+2
+	set	zmm29 = 0+5 8+5 0+7 8+7 0+1 8+1 0+3 8+3
+	ENDM
+zgather MACRO srcreg,d1,d2,d4,r1,r2,r3,r4,r5,r6,r7,r8, r9
+	;; Further possible optimization include using unaligned vmovupd and/or vbroadcastf64 instructions
+	vmovapd	zmm0, [srcreg+64]		;; d0_7	d0_6 d0_5 d0_4 d0_3 d0_2 d0_1 d0_0
+	vmovapd	zmm1, [srcreg+d1+64]		;; d1_7	d1_6 d1_5 d1_4 d1_3 d1_2 d1_1 d1_0
+	vmovapd	zmm2, [srcreg+d2+64]		;; d2_7	d2_6 d2_5 d2_4 d2_3 d2_2 d2_1 d2_0
+	vmovapd	zmm3, [srcreg+d2+d1+64]		;; d3_7	d3_6 d3_5 d3_4 d3_3 d3_2 d3_1 d3_0
+	vmovapd	zmm4, [srcreg+d4+64]		;; d4_7	d4_6 d4_5 d4_4 d4_3 d4_2 d4_1 d4_0
+	vmovapd	zmm5, [srcreg+d4+d1+64]		;; d5_7	d5_6 d5_5 d5_4 d5_3 d5_2 d5_1 d5_0
+	vmovapd	zmm6, [srcreg+d4+d2+64]		;; d6_7	d6_6 d6_5 d6_4 d6_3 d6_2 d6_1 d6_0
+	vmovapd	zmm7, [srcreg+d4+d2+d1+64]	;; d7_7	d7_6 d7_5 d7_4 d7_3 d7_2 d7_1 d7_0
+
+	;; Shuffle the 4-aparts
+	vshuff64x2 zmm8, zmm0, zmm4, 01000100b	;; d4_3 d4_2 d4_1 d4_0 d0_3 d0_2 d0_1 d0_0
+	vshuff64x2 zmm9, zmm0, zmm4, 11101110b	;; d4_7	d4_6 d4_5 d4_4 d0_7 d0_6 d0_5 d0_4
+	vshuff64x2 zmm10, zmm1, zmm5, 01000100b ;; d5_3 d5_2 d5_1 d5_0 d1_3 d1_2 d1_1 d1_0
+	vshuff64x2 zmm11, zmm1, zmm5, 11101110b ;; d5_7	d5_6 d5_5 d5_4 d1_7 d1_6 d1_5 d1_4
+	vshuff64x2 zmm12, zmm2, zmm6, 00010001b ;; d6_1 d6_0 d6_3 d6_2 d2_1 d2_0 d2_3 d2_2
+	vshuff64x2 zmm13, zmm2, zmm6, 10111011b ;; d6_5	d6_4 d6_7 d6_6 d2_5 d2_4 d2_7 d2_6
+	vshuff64x2 zmm14, zmm3, zmm7, 00010001b ;; d7_1 d7_0 d7_3 d7_2 d3_1 d3_0 d3_3 d3_2
+	vshuff64x2 zmm15, zmm3, zmm7, 10111011b ;; d7_5	d7_4 d7_7 d7_6 d3_5 d3_4 d3_7 d3_6
+
+	;; Blend in the 2-aparts
+	vblendmpd zmm16 {k6}, zmm12, zmm8	;; d6_1 d6_0 d4_1 d4_0 d2_1 d2_0 d0_1 d0_0
+	vblendmpd zmm17 {k6}, zmm8, zmm12	;; d4_3 d4_2 d6_3 d6_2 d0_3 d0_2 d2_3 d2_2
+	vblendmpd zmm18 {k6}, zmm13, zmm9	;; d6_5 d6_4 d4_5 d4_4 d2_5 d2_4 d0_5 d0_4
+	vblendmpd zmm19 {k6}, zmm9, zmm13	;; d4_7 d4_6 d6_7 d6_6 d0_7 d0_6 d2_7 d2_6
+	vblendmpd zmm20 {k6}, zmm14, zmm10	;; d7_1 d7_0 d5_1 d5_0 d3_1 d3_0 d1_1 d1_0
+	vblendmpd zmm21 {k6}, zmm10, zmm14	;; d5_3 d5_2 d7_3 d7_2 d1_3 d1_2 d3_3 d3_2
+	vblendmpd zmm22 {k6}, zmm15, zmm11	;; d7_5 d7_4 d5_5 d5_4 d3_5 d3_4 d1_5 d1_4
+	vblendmpd zmm23 {k6}, zmm11, zmm15	;; d5_7 d5_6 d7_7 d7_6 d1_7 d1_6 d3_7 d3_6
+
+	;; Shufffle or permute in the 1-aparts
+	vshufpd	zmm0, zmm16, zmm20, 00000000b	;; d7_0 d6_0 d5_0 d4_0 d3_0 d2_0 d1_0 d0_0
+	vshufpd	zmm1, zmm16, zmm20, 11111111b	;; d7_1 d6_1 d5_1 d4_1 d3_1 d2_1 d1_1 d0_1
+	vmovapd zmm2, zmm17
+	vpermt2pd zmm2, zmm30, zmm21		;; d7_2 d6_2 d5_2 d4_2 d3_2 d2_2 d1_2 d0_2
+	vpermt2pd zmm17, zmm29, zmm21		;; d7_3 d6_3 d5_3 d4_3 d3_3 d2_3 d1_3 d0_3
+	vshufpd	zmm4, zmm18, zmm22, 00000000b 	;; d7_4 d6_4 d5_4 d4_4 d3_4 d2_4 d1_4 d0_4
+	vshufpd	zmm5, zmm18, zmm22, 11111111b	;; d7_5 d6_5 d5_5 d4_5 d3_5 d2_5 d1_5 d0_5
+	vmovapd zmm6, zmm19
+	vpermt2pd zmm6, zmm30, zmm23		;; d7_6 d6_6 d5_6 d4_6 d3_6 d2_6 d1_6 d0_6
+	vpermt2pd zmm19, zmm29, zmm23		;; d7_7 d6_7 d5_7 d4_7 d3_7 d2_7 d1_7 d0_7
+	ENDM
+
+;;; And an even better swizzle (for Skylake-X), but it uses more constants in registers
+
+zgather_preload MACRO unused
+	set	k6 = 00110011b			;; Constant for vblendmpd instructions
+	set	k7 = 11110000b			;; Constant for vblendmpd instructions
+						;; Constants for vpermt2pd instructions
+						;; 0=src2,1=dest-is-src   xxx = double#
+	set	zmm30 = 0+4 8+4 0+6 8+6 0+0 8+0 0+2 8+2
+	set	zmm29 = 0+5 8+5 0+7 8+7 0+1 8+1 0+3 8+3
+	set	zmm28 = 0+2 8+2 0+0 8+0 0+6 8+6 0+4 8+4
+	set	zmm27 = 0+3 8+3 0+1 8+1 0+7 8+7 0+5 8+5
+	set	zmm26 = 0+0 8+0 0+2 8+2 0+4 8+4 0+6 8+6
+	set	zmm25 = 0+1 8+1 0+3 8+3 0+5 8+5 0+7 8+7
+	ENDM
+
+zgather MACRO srcreg,d1,d2,d4,r1,r2,r3,r4,r5,r6,r7,r8, r9
+	;; Further possible optimization include using unaligned vmovupd and/or vbroadcastf64 instructions?
+	vmovapd	zmm0, [srcreg+64]		;; d0_7	d0_6 d0_5 d0_4 d0_3 d0_2 d0_1 d0_0
+	vmovapd	zmm1, [srcreg+d1+64]		;; d1_7	d1_6 d1_5 d1_4 d1_3 d1_2 d1_1 d1_0
+	vmovapd	zmm2, [srcreg+d2+64]		;; d2_7	d2_6 d2_5 d2_4 d2_3 d2_2 d2_1 d2_0
+	vmovapd	zmm3, [srcreg+d2+d1+64]		;; d3_7	d3_6 d3_5 d3_4 d3_3 d3_2 d3_1 d3_0
+	vmovapd	zmm4, [srcreg+d4+64]		;; d4_7	d4_6 d4_5 d4_4 d4_3 d4_2 d4_1 d4_0
+	vmovapd	zmm5, [srcreg+d4+d1+64]		;; d5_7	d5_6 d5_5 d5_4 d5_3 d5_2 d5_1 d5_0
+	vmovapd	zmm6, [srcreg+d4+d2+64]		;; d6_7	d6_6 d6_5 d6_4 d6_3 d6_2 d6_1 d6_0
+	vmovapd	zmm7, [srcreg+d4+d2+d1+64]	;; d7_7	d7_6 d7_5 d7_4 d7_3 d7_2 d7_1 d7_0
+
+	;; Shufffle or permute in the 1-aparts
+	vshufpd	zmm8, zmm0, zmm1, 00000000b	;; d1_6	d0_6 d1_4 d0_4 d1_2 d0_2 d1_0 d0_0
+	vshufpd	zmm9, zmm0, zmm1, 11111111b	;; d1_7	d0_7 d1_5 d0_5 d1_3 d0_3 d1_1 d0_1
+	vmovapd zmm10, zmm2
+	vpermt2pd zmm10, zmm30, zmm3		;; d3_4 d2_4 d3_6 d2_6 d3_0 d2_0 d3_2 d2_2
+	vpermt2pd zmm2, zmm29, zmm3		;; d3_5 d2_5 d3_7 d2_7 d3_1 d2_1 d3_3 d2_3
+	vmovapd zmm12, zmm4
+	vpermt2pd zmm12, zmm28, zmm5	 	;; d5_2 d4_2 d5_0 d4_0 d5_6 d4_6 d5_4 d4_4
+	vpermt2pd zmm4, zmm27, zmm5		;; d5_3 d4_3 d5_1 d4_1 d5_7 d4_7 d5_5 d4_5
+	vmovapd zmm14, zmm19
+	vpermt2pd zmm14, zmm26, zmm7		;; d7_0 d6_0 d7_2 d6_2 d7_4 d6_4 d7_6 d6_6
+	vpermt2pd zmm6, zmm25, zmm7		;; d7_1 d6_1 d7_3 d6_3 d7_5 d6_5 d7_7 d6_7
+
+	;; Blend the 2-aparts
+	vblendmpd zmm16 {k6}, zmm10, zmm8	;; d3_4 d2_4 d1_4 d0_4 d3_0 d2_0 d1_0 d0_0
+	vblendmpd zmm17 {k6}, zmm8, zmm10	;; d1_6	d0_6 d3_6 d2_6 d1_2 d0_2 d3_2 d2_2
+	vblendmpd zmm18 {k6}, zmm2, zmm9	;; d3_5 d2_5 d1_5 d0_5 d3_1 d2_1 d1_1 d0_1
+	vblendmpd zmm19 {k6}, zmm9, zmm2	;; d1_7	d0_7 d3_7 d2_7 d1_3 d0_3 d3_3 d2_3
+	vblendmpd zmm20 {k6}, zmm14, zmm12	;; d7_0 d6_0 d5_0 d4_0 d7_4 d6_4 d5_4 d4_4
+	vblendmpd zmm21 {k6}, zmm12, zmm14	;; d5_2 d4_2 d7_2 d6_2 d5_6 d4_6 d7_6 d6_6
+	vblendmpd zmm22 {k6}, zmm6, zmm4	;; d7_1 d6_1 d5_1 d4_1 d7_5 d6_5 d5_5 d4_5
+	vblendmpd zmm23 {k6}, zmm4, zmm6	;; d5_3 d4_3 d7_3 d6_3 d5_7 d4_7 d7_7 d6_7
+
+	;; Shuffle/blend the 4-aparts
+	vblendmpd zmm0 {k7}, zmm16, zmm20	;; d7_0 d6_0 d5_0 d4_0 d3_0 d2_0 d1_0 d0_0
+	vshuff64x2 zmm1, zmm16, zmm20, 10011110b;; d7_4 d6_4 d5_4 d4_4 d3_4 d2_4 d1_4 d0_4
+	vshuff64x2 zmm2, zmm17, zmm21, 10110001b;; d7_2 d6_2 d5_2 d4_2 d3_2 d2_2 d1_2 d0_2
+	vshuff64x2 zmm3, zmm17, zmm21, 00011011b;; d7_6 d6_6 d5_6 d4_6 d3_6 d2_6 d1_6 d0_6
+	vblendmpd zmm4 {k7}, zmm18, zmm22	;; d7_1 d6_1 d5_1 d4_1 d3_1 d2_1 d1_1 d0_1
+	vshuff64x2 zmm5, zmm18, zmm22, 01001110b;; d7_5 d6_5 d5_5 d4_5 d3_5 d2_5 d1_5 d0_5
+	vshuff64x2 zmm6, zmm19, zmm23, 10110001b;; d7_3 d6_3 d5_3 d4_3 d3_3 d2_3 d1_3 d0_3
+	vshuff64x2 zmm7, zmm19, zmm23, 00011011b;; d7_7 d6_7 d5_7 d4_7 d3_7 d2_7 d1_7 d0_7
+	ENDM
+
+zscatter_preload MACRO unused
+	ENDM
+zscatter MACRO srcreg,d1,d2,d4,r1,r2,r3,r4,r5,r6,r7,r8,     r9
+	;; BUG - use new swizzle code from zgather above
+	vshufpd	r9, r1, r2, 00000000b	;; d1_6 d0_6 d1_4 d0_4 d1_2 d0_2 d1_0 d0_0
+	vshufpd	r1, r1, r2, 11111111b	;; d1_7 d0_7 d1_5 d0_5 d1_3 d0_3 d1_1 d0_1
+	vshufpd	r2, r3, r4, 00000000b	;; d3_6 d2_6 d3_4 d2_4 d3_2 d2_2 d3_0 d2_0
+	vshufpd	r3, r3, r4, 11111111b	;; d3_7 d2_7 d3_5 d2_5 d3_3 d2_3 d3_1 d2_1
+	vshufpd	r4, r5, r6, 00000000b	;; d5_6 d4_6 d5_4 d4_4 d5_2 d4_2 d5_0 d4_0
+	vshufpd	r5, r5, r6, 11111111b	;; d5_7 d4_7 d5_5 d4_5 d5_3 d4_3 d5_1 d4_1
+	vshufpd	r6, r7, r8, 00000000b	;; d7_6 d6_6 d7_4 d6_4 d7_2 d6_2 d7_0 d6_0
+	vshufpd	r7, r7, r8, 11111111b	;; d7_7 d6_7 d7_5 d6_5 d7_3 d6_3 d7_1 d6_1
+
+	vshuff64x2 r8, r9, r2, 10001000b ;; d3_4 d2_4 d3_0 d2_0 d1_4 d0_4 d1_0 d0_0
+	vshuff64x2 r9, r9, r2, 11011101b ;; d3_6 d2_6 d3_2 d2_2 d1_6 d0_6 d1_2 d0_2
+	vshuff64x2 r2, r1, r3, 10001000b ;; d3_5 d2_5 d3_1 d2_1 d1_5 d0_5 d1_1 d0_1
+	vshuff64x2 r1, r1, r3, 11011101b ;; d3_7 d2_7 d3_3 d2_3 d1_7 d0_7 d1_3 d0_3
+	vshuff64x2 r3, r4, r6, 10001000b ;; d7_4 d6_4 d7_0 d6_0 d5_4 d4_4 d5_0 d4_0
+	vshuff64x2 r4, r4, r6, 11011101b ;; d7_6 d6_6 d7_2 d6_2 d5_6 d4_6 d5_2 d4_2
+	vshuff64x2 r6, r5, r7, 10001000b ;; d7_5 d6_5 d7_1 d6_1 d5_5 d4_5 d5_1 d4_1
+	vshuff64x2 r5, r5, r7, 11011101b ;; d7_7 d6_7 d7_3 d6_3 d5_7 d4_7 d5_3 d4_3
+
+	vshuff64x2 r7, r8, r3, 10001000b ;; d7_0 d6_0 d5_0 d4_0 d3_0 d2_0 d1_0 d0_0
+	vshuff64x2 r8, r8, r3, 11011101b ;; d7_4 d6_4 d5_4 d4_4 d3_4 d2_4 d1_4 d0_4
+	vshuff64x2 r3, r9, r4, 10001000b ;; d7_2 d6_2 d5_2 d4_2 d3_2 d2_2 d1_2 d0_2
+	vshuff64x2 r9, r9, r4, 11011101b ;; d7_6 d6_6 d5_6 d4_6 d3_6 d2_6 d1_6 d0_6
+	vshuff64x2 r4, r2, r6, 10001000b ;; d7_1 d6_1 d5_1 d4_1 d3_1 d2_1 d1_1 d0_1
+	vshuff64x2 r2, r2, r6, 11011101b ;; d7_5 d6_5 d5_5 d4_5 d3_5 d2_5 d1_5 d0_5
+	vshuff64x2 r6, r1, r5, 10001000b ;; d7_3 d6_3 d5_3 d4_3 d3_3 d2_3 d1_3 d0_3
+	vshuff64x2 r1, r1, r5, 11011101b ;; d7_7 d6_7 d5_7 d4_7 d3_7 d2_7 d1_7 d0_7
+
+	zstore	[srcreg], r7
+	zstore	[srcreg+d4], r8
+	zstore	[srcreg+d2], r3
+	zstore	[srcreg+d4+d2], r9
+	zstore	[srcreg+d1], r4
+	zstore	[srcreg+d4+d1], r2
+	zstore	[srcreg+d2+d1], r6
+	zstore	[srcreg+d4+d2+d1], r1
+	ENDM
+
+;;
+;; Prefetching macros
+;;
+
+; Macros to prefetch a 64-byte line into the L1 cache
+
+L1PREFETCH_NONE		EQU	0		; No L1 prefetching
+L1PREFETCH_ALL		EQU	3		; L1 prefetching on
+L1PREFETCH_DEST_NONE	EQU	1000		; No L1 prefetching for destination
+L1PREFETCH_DEST_ALL	EQU	1003		; L1 prefetching on for destination
+
+L1prefetch MACRO addr, type
+	IFNB <type>
+	IF (type EQ L1PREFETCH_ALL)
+	prefetcht0 [addr]
+	ENDIF
+	ENDIF
+	ENDM
+L1prefetchw MACRO addr, type
+	IFNB <type>
+	IF (type EQ L1PREFETCH_ALL)
+	prefetcht0 [addr]
+	ENDIF
+	ENDIF
+	ENDM
+
+;;
+;; Macros that do a complex squaring or multiplication
+;;
+
+zp_complex_square MACRO real, imag, tmp
+	vmulpd	tmp, imag, real		;; imag * real
+	vmulpd	real, real, real	;; real * real
+	vmulpd	imag, imag, imag	;; imag * imag
+	vsubpd	real, real, imag	;; real^2 - imag^2 (new real)
+	vaddpd	imag, tmp, tmp		;; imag * real * 2 (new imag)
+	ENDM
+
+zp_complex_mult MACRO real1, imag1, real2, imag2, tmp1, tmp2
+	vmulpd	tmp1, real1, real2	;; real1 * real2
+	vmulpd	tmp2, imag1, imag2	;; imag1 * imag2
+	vmulpd	real1, real1, imag2	;; real1 * imag2
+	vmulpd	imag1, imag1, real2	;; imag1 * real2
+	vaddpd	imag1, real1, imag1	;; real1*imag2+real2*imag1 (new imag)
+	vsubpd	real1, tmp1, tmp2	;; real1*real2-imag1*imag2 (new real)
+	ENDM
+
+zs_complex_square MACRO real, imag, tmp
+	vmulsd	tmp, imag, real		;; imag * real
+	vmulsd	real, real, real	;; real * real
+	vmulsd	imag, imag, imag	;; imag * imag
+	vsubsd	real, real, imag	;; real^2 - imag^2 (new real)
+	vaddsd	imag, tmp, tmp		;; imag * real * 2 (new imag)
+	ENDM
+
+zs_complex_mult MACRO real1, imag1, real2, imag2, tmp1, tmp2
+	vmulsd	tmp1, real1, real2	;; real1 * real2
+	vmulsd	tmp2, imag1, imag2	;; imag1 * imag2
+	vmulsd	real1, real1, imag2	;; real1 * imag2
+	vmulsd	imag1, imag1, real2	;; imag1 * real2
+	vaddsd	imag1, real1, imag1	;; real1*imag2+real2*imag1 (new imag)
+	vsubsd	real1, tmp1, tmp2	;; real1*real2-imag1*imag2 (new real)
+	ENDM
+
+;; Do the brute-force multiplication of the 7 words near the half-way point.
+;; These seven words were copied to an area 33-96 bytes before the FFT data.
+;; This is done for zero-padded FFTs only.
+
+zsquare7 MACRO	src1
+	LOCAL	nozpad
+	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
+	je	nozpad			;; No, skip 7 word multiply
+	vmovsd	xmm1, Q [src1-88]	;; Load copy of input FFT word at halfway - 3
+	vmovsd	xmm2, Q [src1-80]	;; Load copy of input FFT word at halfway - 2
+	vmovsd	xmm3, Q [src1-72]	;; Load copy of input FFT word at halfway - 1
+	vmovsd	xmm4, Q [src1-64]	;; Load copy of input FFT word at halfway + 0
+	vmovsd	xmm5, Q [src1-56]	;; Load copy of input FFT word at halfway + 1
+	vmovsd	xmm6, Q [src1-48]	;; Load copy of input FFT word at halfway + 2
+	vmovsd	xmm7, Q [src1-40]	;; Load copy of input FFT word at halfway + 3
+
+	vmulsd	xmm0, xmm1, xmm7	;; Result0 = word-3 * word3
+	zfmaddsd xmm0, xmm2, xmm6, xmm0	;;	   + word-2 * word2
+	zfmaddsd xmm0, xmm3, xmm5, xmm0	;;	   + word-1 * word1
+	vaddsd	xmm0, xmm0, xmm0	;;	   + word1 * word-1
+					;;	   + word2 * word-2
+					;;	   + word3 * word-3
+	zfmaddsd xmm0, xmm4, xmm4, xmm0	;;	   + word0 * word0
+	vmovsd	ZPAD0, xmm0
+
+	vmulsd	xmm0, xmm2, xmm7	;; Result1 = word-2 * word3
+	zfmaddsd xmm0, xmm3, xmm6, xmm0	;;	   + word-1 * word2
+	zfmaddsd xmm0, xmm4, xmm5, xmm0	;;	   + word0 * word1
+	vaddsd	xmm0, xmm0, xmm0	;;	   + word1 * word0
+					;;	   + word2 * word-1
+					;;	   + word3 * word-2
+	vmovsd	ZPAD1, xmm0
+
+	vmulsd	xmm0, xmm3, xmm7	;; Result2 = word-1 * word3
+	zfmaddsd xmm0, xmm4, xmm6, xmm0	;;	   + word0 * word2
+	vaddsd	xmm0, xmm0, xmm0	;;	   + word2 * word0
+					;;	   + word3 * word-1
+	zfmaddsd xmm0, xmm5, xmm5, xmm0	;;	   + word1 * word1
+	vmovsd	ZPAD2, xmm0
+
+	vmulsd	xmm0, xmm4, xmm7	;; Result3 = word0 * word3
+	zfmaddsd xmm0, xmm5, xmm6, xmm0	;;	   + word1 * word2
+	vaddsd	xmm0, xmm0, xmm0	;;	   + word2 * word1
+					;;	   + word3 * word0
+	vmovsd	ZPAD3, xmm0
+
+	vmulsd	xmm0, xmm5, xmm7	;; Result4 = word1 * word3
+	vaddsd	xmm0, xmm0, xmm0	;;	   + word3 * word1
+	zfmaddsd xmm0, xmm6, xmm6, xmm0	;;	   + word2 * word2
+	vmovsd	ZPAD4, xmm0
+
+	vmulsd	xmm0, xmm6, xmm7	;; Result5 = word2 * word3
+	vaddsd	xmm0, xmm0, xmm0	;;	   + word3 * word2
+	vmovsd	ZPAD5, xmm0
+
+	vmulsd	xmm0, xmm7, xmm7	;; Result6 = word3 * word3
+	vmovsd	ZPAD6, xmm0
+nozpad:
+	ENDM
+
+zmult7	MACRO	src1, src2
+	LOCAL	nozpad
+	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
+	je	nozpad			;; No, skip 7 word multiply
+
+	vmovsd	xmm1, Q [src1-88]	;; Load copy of input FFT word at halfway - 3
+	vmovsd	xmm2, Q [src1-80]	;; Load copy of input FFT word at halfway - 2
+	vmovsd	xmm3, Q [src1-72]	;; Load copy of input FFT word at halfway - 1
+	vmovsd	xmm4, Q [src1-64]	;; Load copy of input FFT word at halfway + 0
+	vmovsd	xmm5, Q [src1-56]	;; Load copy of input FFT word at halfway + 1
+	vmovsd	xmm6, Q [src1-48]	;; Load copy of input FFT word at halfway + 2
+	vmovsd	xmm7, Q [src1-40]	;; Load copy of input FFT word at halfway + 3
+
+	vmovsd	xmm8, Q [src2-88]	;; Load copy of input FFT word at halfway - 3
+	vmovsd	xmm9, Q [src2-80]	;; Load copy of input FFT word at halfway - 2
+	vmovsd	xmm10, Q [src2-72]	;; Load copy of input FFT word at halfway - 1
+	vmovsd	xmm11, Q [src2-64]	;; Load copy of input FFT word at halfway + 0
+	vmovsd	xmm12, Q [src2-56]	;; Load copy of input FFT word at halfway + 1
+	vmovsd	xmm13, Q [src2-48]	;; Load copy of input FFT word at halfway + 2
+	vmovsd	xmm14, Q [src2-40]	;; Load copy of input FFT word at halfway + 3
+
+	vmulsd	xmm0, xmm1, xmm14	;; Result0 = word-3 * word3
+	zfmaddsd xmm0, xmm2, xmm13, xmm0 ;;	   + word-2 * word2
+	zfmaddsd xmm0, xmm3, xmm12, xmm0 ;;	   + word-1 * word1
+	zfmaddsd xmm0, xmm4, xmm11, xmm0 ;;	   + word0 * word0
+	zfmaddsd xmm0, xmm5, xmm10, xmm0 ;;	   + word1 * word-1
+	zfmaddsd xmm0, xmm6, xmm9, xmm0	;;	   + word2 * word-2
+	zfmaddsd xmm0, xmm7, xmm8, xmm0	;;	   + word3 * word-3
+	vmovsd	ZPAD0, xmm0
+
+	vmulsd	xmm0, xmm2, xmm14	;; Result1 = word-2 * word3
+	zfmaddsd xmm0, xmm3, xmm13, xmm0 ;;	   + word-1 * word2
+	zfmaddsd xmm0, xmm4, xmm12, xmm0 ;;	   + word0 * word1
+	zfmaddsd xmm0, xmm5, xmm11, xmm0 ;;	   + word1 * word0
+	zfmaddsd xmm0, xmm6, xmm10, xmm0 ;;	   + word2 * word-1
+	zfmaddsd xmm0, xmm7, xmm9, xmm0	;;	   + word3 * word-2
+	vmovsd	ZPAD1, xmm0
+
+	vmulsd	xmm0, xmm3, xmm14	;; Result2 = word-1 * word3
+	zfmaddsd xmm0, xmm4, xmm13, xmm0 ;;	   + word0 * word2
+	zfmaddsd xmm0, xmm5, xmm12, xmm0 ;;	   + word1 * word1
+	zfmaddsd xmm0, xmm6, xmm11, xmm0 ;;	   + word2 * word0
+	zfmaddsd xmm0, xmm7, xmm10, xmm0 ;;	   + word3 * word-1
+	vmovsd	ZPAD2, xmm0
+
+	vmulsd	xmm0, xmm4, xmm14	;; Result3 = word0 * word3
+	zfmaddsd xmm0, xmm5, xmm13, xmm0 ;;	   + word1 * word2
+	zfmaddsd xmm0, xmm6, xmm12, xmm0 ;;	   + word2 * word1
+	zfmaddsd xmm0, xmm7, xmm11, xmm0 ;;	   + word3 * word0
+	vmovsd	ZPAD3, xmm0
+
+	vmulsd	xmm0, xmm5, xmm14	;; Result4 = word1 * word3
+	zfmaddsd xmm0, xmm6, xmm13, xmm0 ;;	   + word2 * word2
+	zfmaddsd xmm0, xmm7, xmm12, xmm0 ;;	   + word3 * word1
+	vmovsd	ZPAD4, xmm0
+
+	vmulsd	xmm0, xmm6, xmm14	;; Result5 = word2 * word3
+	zfmaddsd xmm0, xmm7, xmm13, xmm0 ;;	   + word3 * word2
+	vmovsd	ZPAD5, xmm0
+
+	vmulsd	xmm0, xmm7, xmm14	;; Result6 = word3 * word3
+	vmovsd	ZPAD6, xmm0
+
+nozpad:
+	ENDM
+

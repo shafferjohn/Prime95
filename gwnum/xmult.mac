@@ -1,0 +1,825 @@
+; Copyright 2001-2014 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+
+; Return from a type 1 FFT - return to caller
+
+xfft_1_ret MACRO
+	ad_epilog 0,1,rbx,rbp,rsi,rdi,xmm6,xmm7,xmm8,xmm9,xmm10,xmm11,xmm12,xmm13,xmm14,xmm15
+	ENDM
+
+; Return from a type 2,3, or 4 FFT - call the common normalization code
+; used in one-pass FFTs only.
+
+xfft_3_ret MACRO
+	mov	rax, NORMRTN
+	call	rax
+	ad_epilog 0,1,rbx,rbp,rsi,rdi,xmm6,xmm7,xmm8,xmm9,xmm10,xmm11,xmm12,xmm13,xmm14,xmm15
+	ENDM
+
+;;
+;; Common definitions in SSE2 FFTs
+;;
+
+;; Used in "hg" (home-grown) FFTs
+XMM_SCD	= 96			;; Sizeof an SSE2 sin/cos table entry
+XMM_PMD = 128			;; Sizeof an entry in premultiplier table
+
+;; Used in r4 (traditional radix-4) FFTs
+XMM_SCD1 = 32			;; Sizeof an SSE2 small sin/cos table entry
+XMM_SCD2 = 64			;; Sizeof an SSE2 DJB sin/cos table entry
+XMM_SCD3 = 96			;; Sizeof an eight_reals sin/cos table entry
+XMM_SCD4 = 128			;; Sizeof an entry in premultiplier table
+XMM_SCD8 = 256			;; Sizeof an radix-8 with premultipliers table entry
+XMM_SCD9 = 288			;; Sizeof a real radix-20 with premultipliers table entry
+XMM_SCD13 = 416			;; Sizeof a real radix-28 with premultipliers table entry
+XMM_HSCD1 = 16			;; Sizeof a half sin/cos table entry used in real FFTs in pass 2
+XMM_HSCD2 = 32			;; Sizeof a half sin/cos table entry used in real FFTs in pass 2
+
+;; Used in r4dwpn (radix-4 delay with partial normalization) FFTs
+XMM_SCND2 = 128			;; Sizeof a complex radix-4 or radix-5 sin/cos/normalization table entry
+XMM_SCND2R = 96			;; Sizeof a real radix-4 or radix-5 sin/cos/normalization table entry
+XMM_GMD = 160			;; Sizeof a grp two-to-phi/two-to-minus-phi multiplier block in a r4dwpn FFT
+
+; **********************************************************
+; **********************************************************
+; ******************  ONE PASS MACROS  *********************
+; **********************************************************
+; **********************************************************
+
+;
+; Generate the code for a small FFT computed in just one pass.
+;
+; FFT routines are named using this scheme:
+;
+;	xfft xfft_type fft_size options xarch
+;
+; where xfft_type is (only the first 4 are implemented):
+;	hg = home-grown (my radix-4 with delayed sin/cos multipliers)
+;	r4 = radix-4 DJB
+;	r4delay = radix-4/8 DJB with first levels of pass 1 using common sin/cos values and last levels
+;		  of pass 1 fixing the discrepancy.  Less sin/cos memory, a few more complex multiplies.
+;	r4dwpn = r4delay with partial normalization.
+;	rolle = rolle patented
+;	exp = experimental
+;	sr = split-radix
+; options are:
+;	_op for one-pass FFTs
+;	_ac for all_complex
+;
+; xarch indicates FFT is optimized for one of these architectures:
+;	P4		Pentium 4
+;	CORE		Core 2 / Core i7, default for unrecognized Intel CPUs
+;	K8		first generation AMD64 chips
+;	K10		second generation AMD64 chips (Phenom), default for unrecognized AMD CPUs
+;
+; Examples:
+;	xfft_hg_512_op_K8
+;	xfft_r4_4096_op_ac_CORE
+
+xonepass MACRO fftname, all_complex
+	LOCAL	xprocname, xmacroname
+
+;; Generate the procedure name
+
+	xprocname CATSTR <xfft_>,xfft_type,<_>,<&fftname>,<_op>
+	IF all_complex EQ 1
+	xprocname CATSTR xprocname,<_ac>
+	ENDIF
+	xprocname CATSTR xprocname,<_>,xarch
+
+;; Generate the pass 2 routine name
+
+	xmacroname CATSTR <xfft>,<&fftname>
+	IF all_complex EQ 1
+	xmacroname CATSTR xmacroname,<p>
+	ENDIF
+
+; Header for the FFT routine
+
+	PROCF	xprocname
+	ad_prolog 0,1,rbx,rbp,rsi,rdi,xmm6,xmm7,xmm8,xmm9,xmm10,xmm11,xmm12,xmm13,xmm14,xmm15
+	mov	rsi, DESTARG
+	mov	rbx, DIST_TO_FFTSRCARG
+
+;; Call the macro containing the guts of the FFT
+
+	clear_timers
+	xmacroname
+
+;; Footer for the routine
+
+	xprocname ENDP	
+	ENDM
+
+
+; ********************************************************
+; ********************************************************
+; ******************  PASS 1 MACROS  *********************
+; ********************************************************
+; ********************************************************
+
+;
+; Macros used in pass 1 of a two pass FFT.
+;
+
+;
+; Set various constants used in the FFT.  Also generate the proper FFT routine name.
+;
+; FFT routines are named using this scheme:
+;
+;	xfft xfft_type fft_size options xpass2_levels clm xarch
+;
+; where xfft_type is (only the first 2 are implemented):
+;	hg = home-grown (my radix-4 with delayed sin/cos multipliers and Bailey pre-multipliers)
+;	r4 = radix-4 DJB
+;	r4delay = radix-4/8 DJB with delayed application of the first pass 1 levels sin/cos data
+;	r4dwpn = r4delay with partial normalization.
+;	rolle = rolle patented
+;	exp = experimental
+;	sr = split-radix
+; options are:
+;	_ac for all_complex
+;	_ip for two-pass in-place (no scratch area)
+;	_np for no_prefetch
+; xpass2_levels is:
+;	number of complex values handled in pass 2 -- if not a power of 2
+;	log2(number of complex values in pass 2) -- if a power of 2
+;
+; xarch indicates FFT is optimized for one of these architectures:
+;	P4		Pentium 4
+;	P4TP		Pentium 4's requiring TLB priming
+;	CORE		Core 2 / Core i7, default for unrecognized Intel CPUs
+;	K8		first generation AMD64 chips
+;	K10		second generation AMD64 chips (Phenom), default for unrecognized AMD CPUs
+;
+; Examples:
+;	xfft_hg_1024K_10_4_K8
+;	xfft_r4_4096K_ac_10_4_CORE
+
+set_FFT_constants MACRO fftname, in_place, all_complex, p2_levels, clmarg
+
+;; Copy some of the args 
+
+	xpass2_levels = p2_levels
+	clm = clmarg
+
+;; Generate the procedure name
+
+	xprocname CATSTR <xfft_>,xfft_type,<_>,<&fftname>
+	IF all_complex EQ 1
+	xprocname CATSTR xprocname,<_ac>
+	ENDIF
+	IF in_place EQ 1
+	xprocname CATSTR xprocname,<_ip>
+	ENDIF
+	IF PREFETCHING EQ 0
+	xprocname CATSTR xprocname,<_np>
+	ENDIF
+	xprocname CATSTR xprocname,<_>,%xpass2_levels,<_>,%clm,<_>,xarch
+	IF TLB_PRIMING EQ 1
+	xprocname CATSTR xprocname,<TP>
+	ENDIF
+
+;; Generate the pass 2 routine name
+
+	xpass2name CATSTR <xpass2_>,xfft_type
+	IF PREFETCHING EQ 0
+	xpass2name CATSTR xpass2name,<_np>
+	ENDIF
+	xpass2name CATSTR xpass2name,<_>,%xpass2_levels,<_levels_>,xarch
+	IF TLB_PRIMING EQ 1
+	xpass2name CATSTR xpass2name,<TP>
+	ENDIF
+
+;; Compute the number of 128-byte cache lines in pass 2
+
+	IF xpass2_levels EQ 8
+	p2cl = 64
+	ENDIF
+	IF xpass2_levels EQ 10
+	p2cl = 256
+	ENDIF
+	IF xpass2_levels EQ 11
+	p2cl = 512
+	ENDIF
+	IF xpass2_levels EQ 12
+	p2cl = 1024
+	ENDIF
+	IF xpass2_levels EQ 13
+	p2cl = 2048
+	ENDIF
+	IF xpass2_levels EQ 14
+	p2cl = 4096
+	ENDIF
+	IF xpass2_levels GE 64
+	p2cl = xpass2_levels / 4
+	ENDIF
+
+;; Compute the needed distances
+
+	blkdst = (p2cl*128+p2cl/64*128)
+	clmblkdst = (clm*128)
+	clmblkdst8 = (clmblkdst*8+128)
+
+;; Make sure the distance between two blocks is an odd multiple of 128.  This
+;; ensures a good scattering of FFT data in the L2 cache during pass 1.
+
+	IF blkdst MOD 256 EQ 0
+	blkdst = blkdst - 128
+	ENDIF
+	ENDM
+
+; Header and footers for each FFT routine
+
+xfft_header MACRO pass1
+	PROCF	xprocname
+	ad_prolog 0,1,rbx,rbp,rsi,rdi,r12,r13,r14,r15,xmm6,xmm7,xmm8,xmm9,xmm10,xmm11,xmm12,xmm13,xmm14,xmm15
+	mov	rsi, DESTARG
+	mov	rbx, DIST_TO_FFTSRCARG
+	clear_timers
+
+	;; Jump to pass 1 forward FFT code unless the FFT has already been started
+
+	cmp	DWORD PTR [rsi-28][rbx], 0 ;; Test FFT-started flag
+	je	pass1			;; Jump if FFT not started
+
+	;; Fall through to start pass 2
+
+	ENDM
+
+xfft_footer MACRO
+	ad_epilog 0,1,rbx,rbp,rsi,rdi,r12,r13,r14,r15,xmm6,xmm7,xmm8,xmm9,xmm10,xmm11,xmm12,xmm13,xmm14,xmm15
+	xprocname ENDP	
+	ENDM
+
+;; Wake up auxiliary threads to help with the forward FFT
+
+pass1_forward_fft_setup MACRO loopaddr
+	mov	NEXT_BLOCK, 0		;; Flag indicating forward fft setup
+	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
+	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
+	ENDM
+
+;; Wake up auxiliary threads to help with the inverse FFT
+
+pass1_inverse_fft_setup MACRO loopaddr
+	start_timer 1
+	mov	NEXT_BLOCK, 1		;; Flag indicating inverse fft setup
+	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
+	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
+	ENDM
+
+;; Do a normalization and carry propagation.
+
+pass1_normalize MACRO scratch, do_forward_fft
+
+	c_call	PASS1_PRE_CARRIES	;; Make pre-normalization callback
+
+	start_timer 28
+	IF scratch EQ 1
+	mov	rsi, scratch_area	;; Load source address
+	ELSE
+	mov	rsi, DATA_ADDR		;; Load source address
+	ENDIF
+	mov	rax, NORMRTN		;; Addr of normalization routine
+	call	rax
+	end_timer 28
+
+	c_call	PASS1_POST_CARRIES	;; Make post-normalization callback
+
+	and	al, al			;; Test returned flag
+	jne	do_forward_fft		;; Do forward FFT if flag set
+	;; Fall through to optionally copy data from scratch area back to FFT data area
+	;; and then jump to loop end to get next block to process
+
+	ENDM
+
+;; Get next block at end of pass 1 loop
+
+xpass1_get_next_block MACRO pass2, c0b, b0b, suffix
+	LOCAL	again, done
+
+again:	c_call	PASS1_GET_NEXT_BLOCK	;; C callback routine
+
+	cmp	al, 1			;; Test return code
+	jl	c0b			;; Do another inverse FFT/norm/FFT
+	je	b0b			;; Do another forward FFT
+	cmp	al, 4
+	jl	short done		;; Pass 1 main thread done or pass 1 auxiliary thread done
+	je	pass2			;; Start pass 2
+
+;; Split the carries into high and low carries (so they do not exceed the
+;; desired number of bits per FFT word.  Then add the carries back to the
+;; FFT data.
+
+	start_timer 29
+	call	xgw_carries&suffix
+	end_timer 29
+	jmp	short again
+
+;; All done, end timer and fall through to exit code
+
+done:	end_timer 1
+	ENDM
+
+;;
+;; Macros to copy data to and from scratch area
+;;
+
+copy_scratch_data_to_fft MACRO cachelines
+	LOCAL	a0b
+	start_timer 30
+	mov	rsi, scratch_area	;; Get address of scratch area
+	mov	rcx, DATA_ADDR		;; Load source address
+	mov	eax, cachelines/8*65536	;; Load counter
+a0b:	xload	xmm0, [rsi]		;; Copy a cache line
+	xload	xmm1, [rsi+16]
+	xload	xmm2, [rsi+32]
+	xload	xmm3, [rsi+48]
+	xstore	[rcx], xmm0
+	xstore	[rcx+16], xmm1
+	xstore	[rcx+32], xmm2
+	xstore	[rcx+48], xmm3
+	bump	rsi, 64			;; Next source pointer
+	bump	rcx, 64			;; Next dest pointer
+	add	al, 256/2/clm		;; Test loop counter
+	jnc	short a0b		;; Iterate if necessary
+	bump	rsi, -2*clm*64+clmblkdst;; Next source pointer
+	bump	rcx, -2*clm*64+blkdst	;; Next dest pointer
+	add	ah, 256/8
+	jnc	short a0b
+	bump	rsi, -8*clmblkdst+clmblkdst8
+	sub	eax, 65536		;; Test loop counter
+	jnz	short a0b		;; Iterate if necessary
+	end_timer 30
+	ENDM
+
+copy_scratch_no_pad_data_to_fft MACRO cachelines
+	LOCAL	a0b
+	start_timer 30
+	mov	rsi, scratch_area	;; Get address of scratch area
+	mov	rcx, DATA_ADDR		;; Load source address
+	mov	eax, cachelines*65536	;; Load counter
+a0b:	xload	xmm0, [rsi]		;; Copy a cache line
+	xload	xmm1, [rsi+16]
+	xload	xmm2, [rsi+32]
+	xload	xmm3, [rsi+48]
+	xstore	[rcx], xmm0
+	xstore	[rcx+16], xmm1
+	xstore	[rcx+32], xmm2
+	xstore	[rcx+48], xmm3
+	bump	rsi, 64			;; Next source pointer
+	bump	rcx, 64			;; Next dest pointer
+	add	al, 256/2/clm		;; Test loop counter
+	jnc	short a0b		;; Iterate if necessary
+	bump	rsi, -2*clm*64+clmblkdst;; Next source pointer
+	bump	rcx, -2*clm*64+blkdst	;; Next dest pointer
+	sub	eax, 65536		;; Test loop counter
+	jnz	short a0b		;; Iterate if necessary
+	end_timer 30
+	ENDM
+
+copy_fft_data_to_scratch MACRO cachelines
+	LOCAL	a0b
+	start_timer 31
+	mov	rsi, DATA_ADDR		;; Load source address
+	add	rsi, DIST_TO_FFTSRCARG
+	mov	rcx, scratch_area	;; Get address of scratch area
+	mov	eax, cachelines/8*65536	;; Load counter
+a0b:	xload	xmm0, [rsi]		;; Copy a cache line
+	xload	xmm1, [rsi+16]
+	xload	xmm2, [rsi+32]
+	xload	xmm3, [rsi+48]
+	xstore	[rcx], xmm0
+	xstore	[rcx+16], xmm1
+	xstore	[rcx+32], xmm2
+	xstore	[rcx+48], xmm3
+	bump	rsi, 64			;; Next source pointer
+	bump	rcx, 64			;; Next dest pointer
+	add	al, 256/2/clm		;; Test loop counter
+	jnc	short a0b		;; Iterate if necessary
+	bump	rsi, -2*clm*64+blkdst	;; Next source pointer
+	bump	rcx, -2*clm*64+clmblkdst;; Next dest pointer
+	add	ah, 256/8
+	jnc	short a0b
+	bump	rcx, -8*clmblkdst+clmblkdst8
+	sub	eax, 65536		;; Test loop counter
+	jnz	short a0b		;; Iterate if necessary
+	end_timer 31
+	ENDM
+
+copy_fft_data_to_scratch_no_pad MACRO cachelines
+	LOCAL	a0b
+	start_timer 31
+	mov	rsi, DATA_ADDR		;; Load source address
+	add	rsi, DIST_TO_FFTSRCARG
+	mov	rcx, scratch_area	;; Get address of scratch area
+	mov	eax, cachelines*65536	;; Load counter
+a0b:	xload	xmm0, [rsi]		;; Copy a cache line
+	xload	xmm1, [rsi+16]
+	xload	xmm2, [rsi+32]
+	xload	xmm3, [rsi+48]
+	xstore	[rcx], xmm0
+	xstore	[rcx+16], xmm1
+	xstore	[rcx+32], xmm2
+	xstore	[rcx+48], xmm3
+	bump	rsi, 64			;; Next source pointer
+	bump	rcx, 64			;; Next dest pointer
+	add	al, 256/2/clm		;; Test loop counter
+	jnc	short a0b		;; Iterate if necessary
+	bump	rsi, -2*clm*64+blkdst	;; Next source pointer
+	bump	rcx, -2*clm*64+clmblkdst;; Next dest pointer
+	sub	eax, 65536		;; Test loop counter
+	jnz	short a0b		;; Iterate if necessary
+	end_timer 31
+	ENDM
+
+;; This macro sets the prefetch pointers needed by the newxloop macros
+
+set_data_prefetch_ptrs MACRO
+	IF PREFETCHING NE 0
+	mov	rcx, DATA_PREFETCH	;; Load source address for prefetching
+	IF TLB_PRIMING NE 0
+	mov	rbp, DATA_ADDR		;; Set xtouch distance
+	sub	rbp, rcx
+	ENDIF
+	ENDIF
+	ENDM
+
+;; This macro loops 2*clm times, prefetching four 64-byte cache lines for
+;; every building block macro called.  This macro will have problems
+;; preloading TLBs using touch macros if clm is 1.
+
+newxloop1quadpre MACRO label2, label1, incr_rsi, pm_incr_reg, pm_incr_amt, sc_incr_reg, sc_incr_amt
+	IF PREFETCHING EQ 0
+
+	loops	2*clm, label2		;; Test inner loop counter
+
+	ELSEIF PREFETCHING EQ 64
+
+	prefetcht1 [rcx]
+	prefetcht1 [rcx+64]
+	IF clm EQ 1
+	  prefetcht1 [rcx+blkdst]
+	  prefetcht1 [rcx+blkdst+64]
+	  bump	rcx, 2*blkdst		;; Next prefetch pointer
+	  loops	2, label1
+	ELSEIF clm EQ 2
+	  prefetcht1 [rcx+128]
+	  prefetcht1 [rcx+192]
+	  bump rcx, blkdst		;; Next prefetch pointer
+	  loops 2*clm, label1		;; Test loop counter
+	ELSE
+	  prefetcht1 [rcx+128]
+	  prefetcht1 [rcx+192]
+	  bump	rcx, 256		;; Next prefetch pointer
+	  loops clm/2, label2		;; Test inner loop counter
+	  bump	rcx, -clm/2*256+blkdst	;; Next prefetch pointer
+	  loops 4, label1		;; Test outer loop counter
+	ENDIF
+
+	ELSEIF PREFETCHING EQ 128
+
+	prefetcht1 [rcx]
+	IF clm EQ 1
+	  prefetcht1 [rcx+blkdst]
+	  bump	rcx, 2*blkdst		;; Next prefetch pointer
+	  loops	2, label1
+	ELSEIF clm EQ 2
+	  prefetcht1 [rcx+128]
+	  bump rcx, blkdst		;; Next prefetch pointer
+	  loops 2*clm, label1		;; Test loop counter
+	ELSE
+	  prefetcht1 [rcx+128]
+	  bump	rcx, 256		;; Next prefetch pointer
+	  loops clm/2, label2		;; Test inner loop counter
+	  bump	rcx, -clm/2*256+blkdst	;; Next prefetch pointer
+	  loops 4, label1		;; Test outer loop counter
+	ENDIF
+
+	ENDIF
+
+	bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+
+	ENDM
+
+;; This macro loops 2*clm times, prefetching two 64-byte cache lines for
+;; every building block macro called.
+
+newxloop1doublepre MACRO label2, label1, incr_rsi, pm_incr_reg, pm_incr_amt, sc_incr_reg, sc_incr_amt
+	IF PREFETCHING EQ 0
+
+	loops	2*clm, label2		;; Test inner loop counter
+
+	ELSEIF PREFETCHING EQ 64
+
+	prefetcht1 [rcx]
+	prefetcht1 [rcx+64]
+	IF clm EQ 1
+	  bump	rcx, blkdst		;; Next prefetch pointer
+	ELSE
+	  bump	rcx, 128		;; Next prefetch pointer
+	  loops	clm, label2		;; Test inner loop counter
+	  bump	rcx, -clm*128+blkdst	;; Next prefetch pointer
+	ENDIF
+	loops	2, label1
+
+	ELSEIF PREFETCHING EQ 128
+
+	prefetcht1 [rcx]
+	IF clm EQ 1
+	  bump	rcx, blkdst		;; Next prefetch pointer
+	ELSE
+	  bump	rcx, 128		;; Next prefetch pointer
+	  loops	clm, label2		;; Test inner loop counter
+	  bump	rcx, -clm*128+blkdst	;; Next prefetch pointer
+	ENDIF
+	loops	2, label1
+
+	ENDIF
+
+	bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+
+	ENDM
+
+;; This macro loops 2*clm times, prefetching one 64-byte cache line for
+;; every building block macro called.
+
+newxloop1 MACRO	label2, incr_rsi, pm_incr_reg, pm_incr_amt, sc_incr_reg, sc_incr_amt
+	IF PREFETCHING EQ 0
+
+	loops	2*clm, label2		;; Test inner loop counter
+	bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+
+	ELSEIF PREFETCHING EQ 64
+
+	prefetcht1 [rcx]
+	bump	rcx, 64			;; Next prefetch pointer
+	loops	2*clm, label2		;; Test inner loop counter
+	bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	bump	rcx, -2*clm*64+blkdst	;; Next prefetch pointer
+
+	ELSEIF PREFETCHING EQ 128
+
+	loops	2, label2		;; Test inner loop counter
+	prefetcht1 [rcx]
+	IF clm EQ 1
+	  bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	  bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	  bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	  bump	rcx, blkdst		;; Next prefetch pointer
+	ELSE
+	  bump	rcx, 128
+	  loops	clm, label2
+	  bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	  bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	  bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	  bump	rcx, -clm*128+blkdst	;; Next prefetch pointer
+	ENDIF
+
+	ENDIF
+
+	ENDM
+
+;; This macro loops 2*2*clm times, prefetching one 64-byte cache line for
+;; every 2 building block macros called.
+newxloop2 MACRO label2, incr_rsi, pm_incr_reg, pm_incr_amt, sc_incr_reg, sc_incr_amt
+	IF PREFETCHING EQ 0
+
+	loops	2*clm, label2		;; Test inner loop counter
+	bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	loops	2, label2		;; Test outer loop counter
+
+	ELSEIF PREFETCHING EQ 64
+
+	loops	2, label2		;; Test inner loop counter
+	prefetcht1 [rcx]
+	bump	rcx, 64			;; Next prefetch pointer
+	loops	clm, label2		;; Test middle loop counter
+	bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	loops	2, label2		;; Test middle loop counter
+	bump	rcx, -2*clm*64+blkdst	;; Next prefetch pointer
+
+	ELSEIF PREFETCHING EQ 128
+
+	IF clm EQ 1
+	  loops	2*clm, label2		;; Test inner loop counter
+	  bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	  bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	  bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	  loops	2, label2		;; Test outer loop counter
+	  prefetcht1 [rcx]
+	  bump	rcx, blkdst		;; Next prefetch pointer
+	ELSE
+	  loops	4, label2		;; Test inner loop counter
+	  prefetcht1 [rcx]
+	  bump	rcx, 128		;; Next prefetch pointer
+	  loops	2*clm/4, label2		;; Test middle loop counter
+	  bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	  bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	  bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	  loops	2, label2		;; Test outer loop counter
+	  bump	rcx, -2*clm*64+blkdst	;; Next prefetch pointer
+	ENDIF
+
+	ENDIF
+
+	ENDM
+
+;; This macro loops 4*2*clm times, prefetching one 64-byte cache line for
+;; every 4 building block macros called.
+newxloop4 MACRO	label2, incr_rsi, pm_incr_reg, pm_incr_amt, sc_incr_reg, sc_incr_amt
+	IF PREFETCHING EQ 0
+
+	loops	2*clm, label2		;; Test inner loop counter
+	bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	loops	4, label2		;; Test outer loop counter
+
+	ELSEIF PREFETCHING EQ 64
+
+	IF clm EQ 1
+	  loops	2*clm, label2		;; Test inner loop counter
+	  bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	  bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	  bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	  loops	2, label2		;; Test middle loop counter
+	  prefetcht1 [rcx]
+	  bump	rcx, 64			;; Next prefetch pointer
+	  loops	2, label2		;; Test outer loop counter
+	  bump	rcx, -2*clm*64+blkdst	;; Next prefetch pointer
+	ELSE
+	  loops	4, label2		;; Test inner loop counter
+	  prefetcht1 [rcx]
+	  bump	rcx, 64			;; Next prefetch pointer
+	  loops	2*clm/4, label2		;; Test middle loop counter
+	  bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	  bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	  bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	  loops	4, label2		;; Test outer loop counter
+	  bump	rcx, -2*clm*64+blkdst	;; Next prefetch pointer
+	ENDIF
+
+	ELSEIF PREFETCHING EQ 128
+
+	IF clm EQ 1
+	  loops	2*clm, label2		;; Test inner loop counter
+	  bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	  bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	  bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	  loops	8/(2*clm), label2	;; Test middle loop counter
+	  prefetcht1 [rcx]
+	  bump	rcx, blkdst		;; Next prefetch pointer
+	ELSEIF clm EQ 2
+	  loops	2*clm, label2		;; Test inner loop counter
+	  bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	  bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	  bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	  loops	8/(2*clm), label2	;; Test middle loop counter
+	  prefetcht1 [rcx]
+	  bump	rcx, 128		;; Next prefetch pointer
+	  loops	4*2*clm/8, label2	;; Test outer loop counter
+	  bump	rcx, -clm*128+blkdst	;; Next prefetch pointer
+	ELSE
+	  loops	8, label2		;; Test inner loop counter
+	  prefetcht1 [rcx]
+	  bump	rcx, 128		;; Next prefetch pointer
+	  loops	2*clm/8, label2		;; Test middle loop counter
+	  bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	  bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	  bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	  loops	4, label2		;; Test outer loop counter
+	  bump	rcx, -clm*128+blkdst	;; Next prefetch pointer
+	ENDIF
+
+	ENDIF
+
+	ENDM
+
+;; This macro loops 2*clm times, with no prefetching of 64-byte cache lines for
+;; every building block macro called.
+
+newxloop1nopre MACRO label2, incr_rsi, pm_incr_reg, pm_incr_amt, sc_incr_reg, sc_incr_amt
+	loops	2*clm, label2		;; Test inner loop counter
+	bump	rsi, -2*clm*64+incr_rsi	;; Next source pointer
+	bump	pm_incr_reg, pm_incr_amt ;; Next premultiplier pointer
+	bump	sc_incr_reg, sc_incr_amt ;; Next sin/cos pointer
+	ENDM
+
+
+; ********************************************************
+; ********************************************************
+; ******************  PASS 2 MACROS  *********************
+; ********************************************************
+; ********************************************************
+
+;
+; Macros used in pass 2 of a two pass FFT.
+;
+
+; Pass 2s are named using this scheme:
+;
+;	xpass2 xfft_type options xpass2_levels xarch
+;
+; where xfft_type is (only the first 2 are implemented):
+;	<blank> = historic (my radix-4 with delayed sin/cos multipliers and Bailey pre-multipliers)
+;	r4 = radix-4 DJB
+;	r4delay = radix-4/8 DJB with delayed application of the first pass 1 levels sin/cos data
+;	r4dwpn = r4delay with partial normalization.
+;	rolle = rolle patented
+;	exp = experimental
+;	sr = split-radix
+; options are:
+;	_np for no_prefetch
+; xpass2_levels is:
+;	number of complex values handled in pass 2 -- if not a power of 2
+;	log2(number of complex values in pass 2) -- if a power of 2
+;
+; xarch indicates FFT is optimized for one of these architectures:
+;	P4		Pentium 4
+;	P4TP		Pentium 4's requiring TLB priming
+;	CORE		Core 2 / Core i7, default for unrecognized Intel CPUs
+;	K8		first generation AMD64 chips
+;	K10		second generation AMD64 chips (Phenom), default for unrecognized AMD CPUs
+;
+; Examples:
+;	xpass2_r4_12_levels_CORE
+;	xpass2_r4_np_12_levels_P4
+
+;; Create a for this fft type, pass 2 levels, and architecture combination
+
+xpass2gen MACRO levels
+	LOCAL	complex_loop, get_next, procname, procname
+	LOCAL	realmacro, complexmacro
+
+;; Generate the procedure name
+
+	procname CATSTR <xpass2_>,xfft_type
+	IF PREFETCHING EQ 0
+	procname CATSTR procname,<_np>
+	ENDIF
+	procname CATSTR procname,<_>,%levels,<_levels_>,xarch
+	IF TLB_PRIMING EQ 1
+	procname CATSTR procname,<TP>
+	ENDIF
+
+;; Generate the macro names
+
+	realmacro CATSTR xfft_type,<_>,<pass2_>,%levels,<_levels_real>
+	complexmacro CATSTR xfft_type,<_>,<pass2_>,%levels,<_levels_complex>
+
+;; Define pass 2 constants
+
+	dist128 = (128*64+128)			; Distance between 128 cache lines
+
+;; Generate the procedure
+
+	PROCF	procname
+	int_prolog 0,0,1
+
+;; Entry point for real FFTs: do one real and count1 complex blocks, also
+;; entry point for all-complex FFTs: do count1 complex blocks
+
+	mov	rax, OFFSET complex_loop ;; Auxiliary thread entry point
+	mov	THREAD_WORK_ROUTINE, rax ;; Save addr for C code to call
+	c_call	PASS2_WAKE_UP_THREADS	;; C callback routine
+	cmp	ALL_COMPLEX_FFT, 1	;; Test if there is a real-data block
+	je	complex_loop		;; Jump to process all-complex blocks
+
+	realmacro			; Do the real data block
+	jmp	get_next		; Go process complex blocks
+
+complex_loop:
+	complexmacro
+
+;; GET_NEXT_BLOCK returns TRUE if we are done.  Otherwise, it calculates
+;; the next blocks to process and prefetch.
+
+get_next:
+	c_call	PASS2_GET_NEXT_BLOCK	;; C callback routine
+	and	rax, rax		;; Test return code
+	jz	complex_loop		;; If false, process another block
+
+;; All done
+
+	int_epilog 0,0,1
+	procname ENDP	
+	ENDM
+

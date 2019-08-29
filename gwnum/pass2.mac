@@ -1,0 +1,2705 @@
+; Copyright 1998-2007 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros take the basic FFT building blocks and build even
+; larger building blocks used in the final pass of a multi-pass FFT.
+;
+
+; ********************************************************
+; ********************************************************
+; *******************  PASS 2 MACROS  ********************
+; ********************************************************
+; ********************************************************
+
+; The goal of this pass is to perform the last 8, 10, or 12 FFT levels
+; (8 levels will fit in 4KB of the L1 data cache).  Ideally, we process
+; an even number of levels to reduce load and store operations.
+;
+; To reduce the amount of sine-cosine data we read in from
+; main memory, we pre-multiply each set of values by a different
+; set of sine-cosine values and then perform a standard 8-level
+; FFT on each set of 256 complex values.  The root of this idea
+; comes from articles by David Bailey available on the web.
+; 
+
+; *************** pass2-eight-levels-real macro ******************
+; This macro takes 256 real and 256 semi-real values and performs the final
+; eight levels of the FFT process, squares the results, and does the first
+; eight levels of the inverse FFT.
+
+pass2_eight_levels_real MACRO
+	LOCAL	b1b, b2b, b3b, b4b, b5b, b6b1, b6b2, b6b3, b6b4
+	LOCAL	c1b, c2b, c3b, c4b, c5b
+	LOCAL	type1, type3, type4, unfft, no_unfft
+
+;; Load the TLBs for this data set and the next data set.
+;; Each data set is spread over 1 page (4KB) and we touch one more page
+;; because the data sets do not start on exact on 4KB boudaries.
+
+	IFDEF	PFETCH
+	mov	ecx, [esi]		;; Read data set #1 (loads the TLB)
+	mov	ecx, [esi+blkdst]	;; Read data set #2
+	mov	ecx, [esi+blkdst+4096-32];; Last cache line
+	ENDIF
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	ebx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	type4
+
+;; Do FFT levels 1,2
+;; Values 0-255 is real data, 256-511 is semi-real data
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	254	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 64 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 64
+;;	do 64 iterations
+
+	sub	al, al
+b1b:	disp four_real_four_semireal_first_fft, 64*dist1, 128*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/64		;; Test loop counter
+	jnc	b1b			;; Iterate if necessary
+	lea	esi, [esi-64*dist1]	;; Next source pointer
+
+;; Do FFT level 3,4
+;; Values 0-63 is real data, 64-127 is semi-real data, 128-511 is
+;; complex data.
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 16 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 16
+
+pf	lea	ecx, [esi+blkdst]	;; Prefetching pointer
+b2b:	disp four_real_four_semireal_fft, 16*dist1, 32*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/16		;; Test loop counter
+	jnc	b2b			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+
+;; Do 48 four_complex_fft macros
+;;	distance between fft data elements is 16
+
+	mov	edi, sincos8		;; Load sin/cos pointer
+	mov	al, 3			;; 3 iters of 16
+b3b:	disp four_complex_fft, 16*dist1, 32*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	al, 256/16		;; Test loop counter
+	jnc	b3b			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	dec	al			;; Test loop counter
+	jnz	b3b			;; Iterate if necessary
+	lea	esi, [esi-4*64*dist1]	;; Restore source pointer
+
+;; Do FFT level 5,6
+;; Values 0-15 is real data, 16-31 is semi-real data, 32-511 is
+;; complex data.
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 4 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 4
+
+b4b:	disp four_real_four_semireal_fft, 4*dist1, 8*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b4b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+
+;; Do 60 four_complex_fft macros
+;;	distance between fft data elements is 4
+
+	mov	edi, sincos9		;; Load sin/cos pointer
+	mov	al, 15			;; 15 iters of 4
+b5b:	disp four_complex_fft, 4*dist1, 8*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b5b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch64 [ecx]
+pf	lea	ecx, [ecx+64]
+	dec	al			;; Test loop counter
+	jnz	b5b			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1]	;; Restore source pointer
+
+;; Do FFT levels 7,8
+;; Values 0-3 is real data, 4-7 is semi-real data, 8-511 is
+;; complex data.
+;;
+;; On input and output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 1 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 1
+
+;; Do 63 four_complex_fft macros
+;;	distance between fft data elements is 1
+
+;; Execute the proper middle step
+
+	mov	edi, sincos10		;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+65*32]	;; Prefetching pointer
+	mov	al, 63			;; 63 iterations
+
+	cmp	ffttype, 2
+	jl	type1
+	jg	type3
+
+	disp four_real_four_semireal_square, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b2:	disp four_complex_square, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	dec	al			;; Test loop counter
+	jnz	b6b2			;; Loop if necessary
+	jmp	unfft
+
+type1:	disp four_real_four_semireal_fft, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b1:	disp four_complex_fft, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	dec	al			;; Test loop counter
+	jnz	b6b1			;; Loop if necessary
+	lea	esi, [esi-64*4*dist1+blkdst];; Point to next block
+	jmp	no_unfft
+
+type3:	mov	ebp, DIST_TO_MULSRCARG
+	disp four_real_four_semireal_mult, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b3:	disp four_complex_mult, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	dec	al			;; Test loop counter
+	jnz	b6b3			;; Loop if necessary
+	jmp	unfft
+
+type4:	mov	ebp, DIST_TO_MULSRCARG
+	mov	edi, sincos10		;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+65*32]	;; Prefetching pointer
+	mov	al, 63			;; 63 iterations
+	disp four_real_four_semireal_mulf, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b4:	disp four_complex_mulf, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	dec	al			;; Test loop counter
+	jnz	b6b4			;; Loop if necessary
+
+;; Do inverse FFT level 5,6
+;; On input the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 4 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 4
+
+unfft:	lea	esi, [esi-64*4*dist1]	;; Load source pointer
+pf	lea	ecx, [esi+blkdst]	;; Prefetching pointer
+c4b:	disp four_real_four_semireal_unfft, 8, 4*dist1, 8*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c4b			;; Iterate if necessary
+
+;; Do 60 four_complex_unfft macros
+;;	distance between fft data elements is 4
+
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	mov	edi, sincos9		;; Load sin/cos pointer
+	mov	al, 15			;; 15 iters of 4
+c5b:	disp four_complex_unfft, 8, 4*dist1, 8*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c5b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	dec	al			;; Test loop counter
+	jnz	c5b			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1]	;; Restore source pointer
+
+;; Do inverse FFT level 3,4
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 16 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 16
+
+c2b:	disp four_real_four_semireal_unfft, 8, 16*dist1, 32*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/16		;; Test loop counter
+	jnc	c2b			;; Iterate if necessary
+
+;; Do 48 four_complex_unfft macros
+;;	distance between fft data elements is 16
+
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	mov	edi, sincos8		;; Load sin/cos pointer
+	mov	al, 3			;; 3 iters of 16
+c3b:	disp four_complex_unfft, 8, 16*dist1, 32*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	al, 256/16		;; Test loop counter
+	jnc	c3b			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	dec	al			;; Test loop counter
+	jnz	c3b			;; Iterate if necessary
+	lea	esi, [esi-4*64*dist1]	;; Restore source pointer
+
+;; Do inverse FFT level 1,2
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	254	...
+
+;; Do 64 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 64
+
+c1b:	disp four_real_four_semireal_unfft, 8, 64*dist1, 128*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	al, 256/64		;; Test loop counter
+	jnc	c1b			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+blkdst];; Next pass 2 set of data
+no_unfft:
+	ENDM
+
+
+; *************** pass2-eight-levels-complex macro ******************
+; This macro takes 256 complex values, pre multiplies them and
+; performs the final eight levels of the FFT process, squares the
+; results, and does the first eight levels of the inverse FFT.
+; NOTE: Rather than remembering 256 multipliers we break them up
+; into 64 groups of 4 columns.  By remembering these 68 values we can compute
+; all 256 multipliers using a single complex multiply.  These extra
+; complex multiplies can be done faster than the computer can read the
+; extra 188 multipliers from memory.
+; esi = Pointer to the FFT data
+; edx = Pointer to the group and column pre-multiplier values
+
+pass2_eight_levels_complex MACRO
+	LOCAL	b0c, b1b, b2b, b3b, b4b1, b4b2, b4b3, b4b4, c1b, c2b, c3b
+	LOCAL	type1, type3, type4, unfft, no_unfft
+
+;; Load the TLBs for this data set and the next data set (if there is one).
+;; Each data set is spread over 1 page (4KB) and we touch one more page
+;; because the data sets do not start on exact on 4KB boudaries.
+;; Also, preload TLB for premultiplier data.
+
+	IFDEF	PFETCH
+	start_timer 3
+	pusher	ecx
+	cmp	ecx, 1			;; Test pass2 counter
+	je	short b0c		;; Skip if this is last data set
+	mov	ecx, [esi]		;; Read data set #1 (loads the TLB)
+	mov	ecx, [esi+blkdst]	;; Read data set #2
+	mov	ecx, [esi+blkdst+4096-32];; Last cache line
+	mov	ecx, [edx]		;; Load premultiplier TLB
+	mov	ecx, [edx+40*PMD-32]	;; Load last premultiplier
+b0c:	end_timer 3
+	ENDIF
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	ebx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	type4
+
+;; Do FFT level 1,2
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	254	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 64 four_complex_fft_gpm macros
+;; In this section we apply the 64 group multipliers.  We will apply the
+;; column multipliers in the next section.
+;;	distance between fft data elements is 64
+
+	start_timer 4
+	mov	edi, edx		;; The 64 group multipliers
+	mov	al, 16			;; 16 iterations of 4
+b1b:	disp four_complex_gpm4_fft, 64*dist1, 128*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b1b			;; Iterate if necessary
+	prefetch64 [edi+16*PMD]
+	lea	edi, [edi+PMD]		;; Next group multiplier
+	dec	al			;; Test outer loop counter
+	jnz	b1b			;; Iterate if necessary
+	lea	esi, [esi-16*4*dist1]	;; Restore source pointer
+	end_timer 4
+
+;; Do FFT level 3,4
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 64 four_complex_cpm_fft macros
+;; In this section we also apply the 4 column multipliers.  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+;;	distance between fft data elements is 16
+
+	start_timer 5
+;;	lea	edi, [edx+16*PMD]	;; The 4 column multipliers
+pf	lea	ecx, [esi+blkdst]	;; Prefetching pointer
+	mov	al, 4			;; 4 iterations of 4
+b2b:	dispc four_complex_cpm_fft_0, 16*dist1, 32*dist1, 8, 0
+	prefetch32 [ecx]
+	dispc four_complex_cpm_fft_1, 16*dist1, 32*dist1, 8, 64*dist1
+	prefetch32 [ecx+32]
+	dispc four_complex_cpm_fft_2, 16*dist1, 32*dist1, 8, 128*dist1
+	prefetch32 [ecx+64]
+	dispc four_complex_cpm_fft_3, 16*dist1, 32*dist1, 8, 192*dist1
+	prefetch32 [ecx+96]
+	lea	esi, [esi+dist1]	;; Next source pointer
+	lea	edi, [edi+PMD]		;; Next column multiplier
+pf	lea	ecx, [ecx+128]
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b2b			;; Iterate if necessary
+	lea	edi, [edi-4*PMD]	;; Next column multiplier
+	dec	al			;; Test outer loop counter
+	jnz	b2b			;; Iterate if necessary
+	lea	esi, [esi-16*dist1]	;; Restore source pointer
+	end_timer 5
+
+;; Do FFT levels 5,6
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 64 four_complex_fft macros
+;;	distance between fft data elements is 4
+
+	start_timer 6
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+	mov	al, 16			;; 16 iterations of 4
+b3b:	disp four_complex_fft, 4*dist1, 8*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b3b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	dec	al			;; Test outer loop counter
+	jnz	b3b			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1]	;; Restore source pointer
+	end_timer 6
+
+;; Do FFT levels 7,8
+;;
+;; On input and output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 64 four_complex_with_square macros
+;;	distance between fft data elements is 1
+
+;; Execute the proper middle step
+
+	mov	edi, xsincos_complex	;; Load sine/cosine ptr
+pf	lea	ecx, [esi+blkdst]	;; Prefetching pointer
+
+	cmp	ffttype, 2
+	jl	type1
+	jg	type3
+
+	start_timer 7
+b4b2:	disp four_complex_square, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	al, 256/64		;; Test inner loop counter
+	jnc	b4b2			;; Iterate if necessary
+	end_timer 7
+	jmp	unfft
+
+type1:
+b4b1:	disp four_complex_fft, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/64		;; Test inner loop counter
+	jnc	b4b1			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	lea	esi, [esi-64*4*dist1+blkdst];; Next pass 2 pointer
+	jmp	no_unfft
+
+type3:	mov	ebp, DIST_TO_MULSRCARG
+b4b3:	disp four_complex_mult, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	al, 256/64		;; Test inner loop counter
+	jnc	b4b3			;; Iterate if necessary
+	jmp	unfft
+
+type4:	mov	ebp, DIST_TO_MULSRCARG
+	mov	edi, xsincos_complex	;; Load sine/cosine ptr
+pf	lea	ecx, [esi+blkdst]	;; Prefetching pointer
+	sub	al, al
+b4b4:	disp four_complex_mulf, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	al, 256/64		;; Test inner loop counter
+	jnc	b4b4			;; Iterate if necessary
+
+;; Do inverse FFT level 5,6
+;; On input the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 64 four_complex_unfft macros
+;;	distance between fft data elements is 4
+
+unfft:	start_timer 8
+	lea	esi, [esi-64*4*dist1]	;; Restore source pointer
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+	mov	al, 16			;; 16 iterations of 4
+c3b:	disp four_complex_unfft, 8, 4*dist1, 8*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c3b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch64 [ecx]
+pf	lea	ecx, [ecx+64]
+	dec	al			;; Test outer loop counter
+	jnz	c3b			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1]	;; Restore source pointer
+	end_timer 8
+
+;; Do inverse FFT level 3,4
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 64 four_complex_cpm_unfft macros
+;; In this section we also apply the 4 column multipliers.  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+;;	distance between fft data elements is 16
+
+	start_timer 9
+	lea	edi, [edx+16*PMD]	;; The 4 column multipliers
+	mov	al, 4			;; 4 iterations of 4
+c2b:	dispc four_complex_cpm_unfft_0, 8, 16*dist1, 32*dist1, 0
+	dispc four_complex_cpm_unfft_1, 8, 16*dist1, 32*dist1, 64*dist1
+	prefetch32 [ecx]
+	dispc four_complex_cpm_unfft_2, 8, 16*dist1, 32*dist1, 128*dist1
+	dispc four_complex_cpm_unfft_3, 8, 16*dist1, 32*dist1, 192*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	lea	edi, [edi+PMD]		;; Next column multiplier
+	prefetch32 [ecx+32]
+pf	lea	ecx, [ecx+64]
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c2b			;; Iterate if necessary
+	lea	edi, [edi-4*PMD]	;; Next column multiplier
+	dec	al			;; Test outer loop counter
+	jnz	c2b			;; Iterate if necessary
+	lea	esi, [esi-4*4*dist1]	;; Restore source pointer
+	end_timer 9
+
+;; Do inverse FFT level 1,2
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	254	...
+
+;; Do 64 four_complex_unfft_gpm macros
+;; In this section we apply the 64 group multipliers.  We applied the
+;; column multipliers in the previous section.
+;;	distance between fft data elements is 64
+
+	start_timer 10
+	mov	edi, edx		;; The 64 group multipliers
+	mov	al, 16			;; 16 iterations of 4
+c1b:	disp four_complex_gpm4_unfft, 8, 64*dist1, 128*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c1b			;; Iterate if necessary
+	prefetch64 [edi+20*PMD]
+	lea	edi, [edi+PMD]		;; Next group multiplier
+	dec	al			;; Test outer loop counter
+	jnz	c1b			;; Iterate if necessary
+	lea	esi, [esi-16*4*dist1+blkdst];; Next pass 2 set of data
+	end_timer 10
+no_unfft:
+pf	popper	ecx
+	lea	edx, [edx+20*PMD]	;; Next group pre-multipliers
+	ENDM
+
+
+; *************** pass2-ten-levels-real macro ******************
+; This macro takes 1024 real and 1024 semi-real values and performs the final
+; ten levels of the FFT process, squares the results, and does the first
+; ten levels of the inverse FFT.
+
+pass2_ten_levels_real MACRO
+	LOCAL	b1b, b2b, b3b, b2c, b3c, b4b, b5b, b6b1, b6b2, b6b3, b6b4
+	LOCAL	c1b, c2b, c3b, c2c, c3c, c4b, c5b
+	LOCAL	type1, type3, type4, unfft, no_unfft
+
+;; Load the TLBs for this data set and the next data set.
+;; Each data set is spread over 4 pages (16KB) and we touch one more page
+;; because the data sets do not start on exact on 4KB boudaries.
+
+	IFDEF	PFETCH
+	mov	ecx, [esi]		;; Read data set #1 (loads the TLB)
+	mov	ecx, [esi+(4096+64)]	;; Read data set #1
+	mov	ecx, [esi+2*(4096+64)]	;; Read data set #1
+	mov	ecx, [esi+3*(4096+64)]	;; Read data set #1
+	mov	ecx, [esi+blkdst]	;; Read data set #2
+	mov	ecx, [esi+blkdst+(4096+64)];; Read data set #2
+	mov	ecx, [esi+blkdst+2*(4096+64)]; Read data set #2
+	mov	ecx, [esi+blkdst+3*(4096+64)]; Read data set #2
+	mov	ecx, [esi+blkdst+4*(4096+64)-32];; Last cache line
+	ENDIF
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	ebx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	type4
+
+;; Do FFT levels 1,2
+;; Values 0-1023 is real data, 1024-2047 is semi-real data
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	1022	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+
+;; Do 256 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 256
+;;	do 256 iterations
+
+	sub	eax, eax
+b1b:	disp four_real_four_semireal_first_fft, dist256, 2*dist256, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/256		;; Test loop counter
+	jnc	b1b			;; Iterate if necessary
+	lea	esi, [esi-256*dist1]	;; Next source pointer
+
+;; Do FFT level 3,4
+;; Values 0-255 is real data, 256-511 is semi-real data, 512-2047 is
+;; complex data.
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 64 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 64
+
+pf	lea	ecx, [esi+blkdst]	;; Prefetching pointer
+b2b:	disp four_real_four_semireal_fft, 64*dist1, 128*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b2b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b2b			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+dist256];; Next source pointer
+
+;; Do 192 four_complex_fft macros
+;;	distance between fft data elements is 64
+
+	mov	edi, sincos7		;; Load sin/cos pointer
+	mov	al, 3			;; 3 iters of 64
+b3b:	disp four_complex_fft, 64*dist1, 128*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b3b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b3b			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+dist256];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	dec	al			;; Test loop counter
+	jnz	b3b			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+
+;; Do FFT level 5,6
+;; Values 0-63 is real data, 64-127 is semi-real data, 128-2047 is
+;; complex data.
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 16 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 16
+
+b2c:	disp four_real_four_semireal_fft, 16*dist1, 32*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b2c			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/4		;; Test loop counter
+	jnc	b2c			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+
+;; Do 240 four_complex_fft macros
+;;	distance between fft data elements is 16
+
+	mov	edi, sincos8		;; Load sin/cos pointer
+	mov	eax, 80000000h/2+4	;; 4 iters of 3 or 4 iters of 16
+b3c:	disp four_complex_fft, 16*dist1, 32*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b3c			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/4		;; Test loop counter
+	jnc	b3c			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	eax, 80000000h/2	;; Test loop counter (4 iters)
+	jnc	b3c			;; Iterate if necessary
+	lea	esi, [esi-4*64*dist1+dist256];; Next source pointer
+	dec	al			;; Test loop counter
+	jnz	b3c			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+
+;; Do FFT level 7,8
+;; Values 0-15 is real data, 16-31 is semi-real data, 32-2047 is
+;; complex data.
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 4 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 4
+
+pf	lea	ecx, [esi+blkdst+(4096+64)];; Prefetching pointer
+b4b:	disp four_real_four_semireal_fft, 4*dist1, 8*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b4b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+
+;; Do 252 four_complex_fft macros
+;;	distance between fft data elements is 4
+
+	mov	edi, sincos9		;; Load sin/cos pointer
+	mov	eax, 256/16*256+4	;; 4 iters 15 or 16 iters of 4
+b5b:	disp four_complex_fft, 4*dist1, 8*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b5b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b5b			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1+dist256];; Next source pointer
+	dec	al			;; Test loop counter
+	jnz	b5b			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+
+;; Do FFT levels 9,10
+;; Values 0-3 is real data, 4-7 is semi-real data, 8-2047 is
+;; complex data.
+;;
+;; On input and output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 1 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 1
+
+;; Do 255 four_complex_fft macros
+;;	distance between fft data elements is 1
+
+;; Execute the proper middle step
+
+	mov	edi, sincos10		;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+2*(4096+64)];; Prefetching pointer
+	mov	eax, 256/2+4		;; 4 iters of 32 iters of 1 or 2
+
+	cmp	ffttype, 2
+	jl	type1
+	jg	type3
+
+	disp four_real_four_semireal_square, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b2:	disp four_complex_square, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/2		;; Test loop counter
+	jnc	b6b2			;; Loop if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/32		;; Test loop counter
+	jnc	b6b2			;; Loop if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+	dec	al			;; Test loop counter
+	jnz	b6b2			;; Loop if necessary
+	jmp	unfft
+
+type1:	disp four_real_four_semireal_fft, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b1:	disp four_complex_fft, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/2		;; Test loop counter
+	jnc	b6b1			;; Loop if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/32		;; Test loop counter
+	jnc	b6b1			;; Loop if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+	dec	al			;; Test loop counter
+	jnz	b6b1			;; Loop if necessary
+	lea	esi, [esi-4*dist256+blkdst];; Point to next block
+	jmp	no_unfft
+
+type3:	mov	ebp, DIST_TO_MULSRCARG
+	disp four_real_four_semireal_mult, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b3:	disp four_complex_mult, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/2		;; Test loop counter
+	jnc	b6b3			;; Loop if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/32		;; Test loop counter
+	jnc	b6b3			;; Loop if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+	dec	al			;; Test loop counter
+	jnz	b6b3			;; Loop if necessary
+	jmp	unfft
+
+type4:	mov	ebp, DIST_TO_MULSRCARG
+	mov	edi, sincos10		;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+2*(4096+64)];; Prefetching pointer
+	mov	eax, 256/2+4		;; 4 iters of 32 iters of 1 or 2
+	disp four_real_four_semireal_mulf, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b4:	disp four_complex_mulf, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/2		;; Test loop counter
+	jnc	b6b4			;; Loop if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/32		;; Test loop counter
+	jnc	b6b4			;; Loop if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+	dec	al			;; Test loop counter
+	jnz	b6b4			;; Loop if necessary
+
+;; Do inverse FFT level 7,8
+;; On input the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 4 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 4
+
+unfft:	lea	esi, [esi-4*dist256]	;; Load source pointer
+pf	lea	ecx, [esi+blkdst+(4096+64)+64*32];; Prefetching pointer
+c4b:	disp four_real_four_semireal_unfft, 8, 4*dist1, 8*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c4b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+
+;; Do 252 four_complex_unfft macros
+;;	distance between fft data elements is 4
+
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	mov	edi, sincos9		;; Load sin/cos pointer
+	mov	eax, 256/16*256+4	;; 4 iters 15 or 16 iters of 4
+c5b:	disp four_complex_unfft, 8, 4*dist1, 8*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c5b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/16		;; Test loop counter
+	jnc	c5b			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1+dist256];; Next source pointer
+	dec	al			;; Test loop counter
+	jnz	c5b			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+
+;; Do inverse FFT level 5,6
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 16 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 16
+
+pf	lea	ecx, [esi+blkdst+3*(4096+64)];; Prefetching pointer
+c2c:	disp four_real_four_semireal_unfft, 8, 16*dist1, 32*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c2c			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/4		;; Test loop counter
+	jnc	c2c			;; Iterate if necessary
+
+;; Do 240 four_complex_unfft macros
+;;	distance between fft data elements is 16
+
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	mov	edi, sincos8		;; Load sin/cos pointer
+	mov	eax, 80000000h/2+4	;; 4 iters of 3 or 4 iters of 16
+c3c:	disp four_complex_unfft, 8, 16*dist1, 32*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c3c			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/4		;; Test loop counter
+	jnc	c3c			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	eax, 80000000h/2	;; Test loop counter (4 iters)
+	jnc	c3c			;; Iterate if necessary
+	lea	esi, [esi-4*64*dist1+dist256];; Next source pointer
+	dec	al			;; Test loop counter
+	jnz	c3c			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+
+;; Do inverse FFT level 3,4
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+
+;; Do 64 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 64
+
+c2b:	disp four_real_four_semireal_unfft, 8, 64*dist1, 128*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c2b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/16		;; Test loop counter
+	jnc	c2b			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+dist256];; Next source pointer
+
+;; Do 192 four_complex_unfft macros
+;;	distance between fft data elements is 64
+
+	mov	edi, sincos7		;; Load sin/cos pointer
+	mov	al, 3			;; 3 iters of 64
+c3b:	disp four_complex_unfft, 8, 64*dist1, 128*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c3b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/16		;; Test loop counter
+	jnc	c3b			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+dist256];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	dec	al			;; Test loop counter
+	jnz	c3b			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+
+;; Do inverse FFT level 1,2
+;; On input the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	1022	...
+
+;; Do 256 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 256
+
+c1b:	disp four_real_four_semireal_unfft, 8, dist256, 2*dist256
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/256		;; Test loop counter
+	jnc	c1b			;; Iterate if necessary
+	lea	esi, [esi-256*dist1+blkdst];; Next pass 2 set of data
+no_unfft:
+	ENDM
+
+
+; *************** pass2-ten-levels-complex macro ******************
+; This macro takes 1024 complex values, pre multiplies them and
+; performs the final ten levels of the FFT process, squares the
+; results, and does the first ten levels of the inverse FFT.
+; NOTE: Rather than remembering 256 multipliers we break them up
+; into 64 groups of 4 columns.  By remembering these 68 values we can compute
+; all 256 multipliers using a single complex multiply.  These extra
+; complex multiplies can be done faster than the computer can read the
+; extra 188 multipliers from memory.
+; esi = Pointer to the FFT data
+; edx = Pointer to the group and column pre-multiplier values
+
+pass2_ten_levels_complex MACRO
+	LOCAL	b0c, b1b, b2b, b3b, b3c, b4b1, b4b2, b4b3, b4b4
+	LOCAL	c1b, c2b, c3b, c3c
+	LOCAL	type1, type3, type4, unfft, no_unfft
+
+;; Load the TLBs for this data set and the next data set (if there is one).
+;; Each data set is spread over 4 pages (16KB) and we touch one more page
+;; because the data sets do not start on exact on 4KB boudaries.
+;; Also, preload TLB for premultiplier data.
+
+	IFDEF	PFETCH
+	start_timer 3
+	pusher	ecx
+	cmp	ecx, 1			;; Test pass2 counter
+	je	short b0c		;; Skip if this is last data set
+	mov	ecx, [esi]		;; Read data set #1 (loads the TLB)
+	mov	ecx, [esi+(4096+64)]	;; Read data set #1
+	mov	ecx, [esi+2*(4096+64)]	;; Read data set #1
+	mov	ecx, [esi+3*(4096+64)]	;; Read data set #1
+	mov	ecx, [esi+blkdst]	;; Read data set #2
+	mov	ecx, [esi+blkdst+(4096+64)];; Read data set #2
+	mov	ecx, [esi+blkdst+2*(4096+64)];; Read data set #2
+	mov	ecx, [esi+blkdst+3*(4096+64)];; Read data set #2
+	mov	ecx, [esi+blkdst+4*(4096+64)-32];; Last cache line
+	mov	ecx, [edx]		;; Load premultiplier TLB
+	mov	ecx, [edx+4096]		;; Load premultiplier TLB
+	mov	ecx, [edx+2*4096]	;; Load premultiplier TLB
+	mov	ecx, [edx+132*PMD-32]	;; Load last premultiplier
+b0c:	end_timer 3
+	ENDIF
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	ebx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	type4
+
+;; Do FFT level 1,2
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	1022	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+
+;; Do 256 four_complex_fft_gpm macros
+;; In this section we apply the 256 group multipliers.  We will apply the
+;; column multipliers in the next section.
+;;	distance between fft data elements is 256
+
+	start_timer 4
+	mov	edi, edx		;; The 64 group multipliers
+	mov	eax, 64*256		;; 64 iterations of 4
+b1b:	disp four_complex_gpm4_fft, dist256, 2*dist256, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b1b			;; Iterate if necessary
+	prefetch32 [edi+68*PMD]
+	lea	edi, [edi+PMD]		;; Next group multiplier
+	sub	eax, 256		;; Test outer loop counter
+	jnz	b1b			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1]	;; Restore source pointer
+	end_timer 4
+
+;; Do FFT level 3,4
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 256 four_complex_cpm_fft macros
+;; In this section we also apply the 4 column multipliers.  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+;;	distance between fft data elements is 64
+
+	start_timer 5
+;;	lea	edi, [edx+64*PMD]	;; The 4 column multipliers
+pf	lea	ecx, [esi+blkdst]	;; Prefetching pointer
+	mov	al, 16			;; 16 iterations of 4
+b2b:	dispc four_complex_cpm_fft_0, 64*dist1, 128*dist1, 8, 0
+	dispc four_complex_cpm_fft_1, 64*dist1, 128*dist1, 8, dist256
+	dispc four_complex_cpm_fft_2, 64*dist1, 128*dist1, 8, 2*dist256
+	dispc four_complex_cpm_fft_3, 64*dist1, 128*dist1, 8, 3*dist256
+	lea	esi, [esi+dist1]	;; Next source pointer
+	lea	edi, [edi+PMD]		;; Next column multiplier
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b2b			;; Iterate if necessary
+	lea	edi, [edi-4*PMD]	;; Next column multiplier
+	dec	al			;; Test outer loop counter
+	jnz	b2b			;; Iterate if necessary
+	lea	esi, [esi-64*dist1]	;; Restore source pointer
+	end_timer 5
+
+;; Do FFT level 5,6
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 256 four_complex_fft macros
+;;	distance between fft data elements is 16
+
+	start_timer 6
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+	mov	eax, 4			;; 4 iters of 4 iters of 16
+b3b:	disp four_complex_fft, 16*dist1, 32*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b3b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/4		;; Test inner loop counter
+	jnc	b3b			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	eax, 80000000h/2	;; Test middle loop counter (4 iters)
+	jnc	b3b			;; Iterate if necessary
+	lea	esi, [esi-4*64*dist1+dist256];; Next source pointer
+	dec	al			;; Test outer loop counter
+	jnz	b3b			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+	end_timer 6
+
+;; Do FFT levels 7,8
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 256 four_complex_fft macros
+;;	distance between fft data elements is 4
+
+	start_timer 7
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+(4096+64)];; Prefetching pointer
+	mov	eax, 4			;; 4 iters of 16 iters of 4
+b3c:	disp four_complex_fft, 4*dist1, 8*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b3c			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/16		;; Test middle loop counter
+	jnc	b3c			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1+dist256];; Next source pointer
+	dec	al			;; Test outer loop counter
+	jnz	b3c			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+	end_timer 7
+
+;; Do FFT levels 9,10
+;;
+;; On input and output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 256 four_complex_with_square macros
+;;	distance between fft data elements is 1
+
+;; Execute the proper middle step
+
+	mov	edi, xsincos_complex	;; Load sine/cosine ptr
+pf	lea	ecx, [esi+blkdst+2*(4096+64)];; Prefetching pointer
+
+	cmp	ffttype, 2
+	jl	type1
+	jg	type3
+
+	start_timer 8
+b4b2:	disp four_complex_square, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/2		;; Test inner loop counter
+	jnc	b4b2			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/32		;; Test inner loop counter
+	jnc	b4b2			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+	add	eax, 80000000h/2	;; Test outer loop counter (4 iters)
+	jnc	b4b2			;; Iterate if necessary
+	end_timer 8
+	jmp	unfft
+
+type1:
+b4b1:	disp four_complex_fft, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/2		;; Test inner loop counter
+	jnc	b4b1			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/32		;; Test inner loop counter
+	jnc	b4b1			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+	add	eax, 80000000h/2	;; Test outer loop counter (4 iters)
+	jnc	b4b1			;; Iterate if necessary
+	lea	esi, [esi-4*dist256+blkdst];; Next pass 2 pointer
+	jmp	no_unfft
+
+type3:	mov	ebp, DIST_TO_MULSRCARG
+b4b3:	disp four_complex_mult, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/2		;; Test inner loop counter
+	jnc	b4b3			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/32		;; Test inner loop counter
+	jnc	b4b3			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+	add	eax, 80000000h/2	;; Test outer loop counter (4 iters)
+	jnc	b4b3			;; Iterate if necessary
+	jmp	unfft
+
+type4:	mov	ebp, DIST_TO_MULSRCARG
+	mov	edi, xsincos_complex	;; Load sine/cosine ptr
+pf	lea	ecx, [esi+blkdst+2*(4096+64)];; Prefetching pointer
+	sub	eax, eax
+b4b4:	disp four_complex_mulf, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/2		;; Test inner loop counter
+	jnc	b4b4			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/32		;; Test inner loop counter
+	jnc	b4b4			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+	add	eax, 80000000h/2	;; Test outer loop counter (4 iters)
+	jnc	b4b4			;; Iterate if necessary
+
+;; Do inverse FFT level 7,8
+;; On input the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 256 four_complex_unfft macros
+;;	distance between fft data elements is 4
+
+unfft:	start_timer 9
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+(4096+64)+64*32];; Prefetching pointer
+	mov	eax, 4			;; 4 iters of 16 iters of 4
+c3c:	disp four_complex_unfft, 8, 4*dist1, 8*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c3c			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/16		;; Test middle loop counter
+	jnc	c3c			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1+dist256];; Next source pointer
+	dec	al			;; Test outer loop counter
+	jnz	c3c			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+	end_timer 9
+
+;; Do inverse FFT level 5,6
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 256 four_complex_unfft macros
+;;	distance between fft data elements is 16
+
+	start_timer 10
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+3*(4096+64)];; Prefetching pointer
+	mov	eax, 4			;; 4 iters of 4 iters of 16
+c3b:	disp four_complex_unfft, 8, 16*dist1, 32*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c3b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/4		;; Test inner loop counter
+	jnc	c3b			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	eax, 80000000h/2	;; Test middle loop counter (4 iters)
+	jnc	c3b			;; Iterate if necessary
+	lea	esi, [esi-4*64*dist1+dist256];; Next source pointer
+	dec	al			;; Test outer loop counter
+	jnz	c3b			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+	end_timer 10
+
+;; Do inverse FFT level 3,4
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+
+;; Do 256 four_complex_cpm_unfft macros
+;; In this section we also apply the 4 column multipliers.  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+;;	distance between fft data elements is 64
+
+	start_timer 11
+	lea	edi, [edx+64*PMD]	;; The 4 column multipliers
+	mov	al, 16			;; 16 iterations of 4
+c2b:	dispc four_complex_cpm_unfft_0, 8, 64*dist1, 128*dist1, 0
+	dispc four_complex_cpm_unfft_1, 8, 64*dist1, 128*dist1, dist256
+	dispc four_complex_cpm_unfft_2, 8, 64*dist1, 128*dist1, 2*dist256
+	dispc four_complex_cpm_unfft_3, 8, 64*dist1, 128*dist1, 3*dist256
+	lea	esi, [esi+dist1]	;; Next source pointer
+	lea	edi, [edi+PMD]		;; Next column multiplier
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c2b			;; Iterate if necessary
+	lea	edi, [edi-4*PMD]	;; Next column multiplier
+	dec	al			;; Test outer loop counter
+	jnz	c2b			;; Iterate if necessary
+	lea	esi, [esi-16*4*dist1]	;; Restore source pointer
+	end_timer 11
+
+;; Do inverse FFT level 1,2
+;; On input the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	1022	...
+
+;; Do 256 four_complex_unfft_gpm macros
+;; In this section we apply the 256 group multipliers.  We applied the
+;; column multipliers in the previous section.
+;;	distance between fft data elements is 256
+
+	start_timer 12
+	mov	edi, edx		;; The 64 group multipliers
+	mov	eax, 64*256		;; 64 iterations of 4
+c1b:	disp four_complex_gpm4_unfft, 8, dist256, 2*dist256
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c1b			;; Iterate if necessary
+	prefetch32 [edi+68*PMD+32]
+	lea	edi, [edi+PMD]		;; Next group multiplier
+	sub	eax, 256		;; Test outer loop counter
+	jnz	c1b			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+blkdst];; Next pass 2 set of data
+	end_timer 12
+no_unfft:
+pf	popper	ecx
+	lea	edx, [edx+68*PMD]	;; Next group pre-multipliers
+	ENDM
+
+
+; *************** pass2-twelve-levels-real macro ******************
+; This macro takes 4096 real and 4096 semi-real values and performs the final
+; twelve levels of the FFT process, squares the results, and does the first
+; twelve levels of the inverse FFT.
+
+pass2_twelve_levels_real MACRO
+	LOCAL	b0a, b1b, b2b, b3b, b2c, b3c, b2d, b3d
+	LOCAL	b4b, b5b, b6b1, b6b2, b6b3, b6b4
+	LOCAL	c1b, c2b, c3b, c2c, c3c, c2d, c3d, c4b, c5b
+	LOCAL	type1, type3, type4, unfft, no_unfft
+
+;; Load the TLBs for this data set and the next data set.
+;; Each data set is spread over 16 pages (64KB) and we touch one more page
+;; because the data sets do not start on exact on 4KB boudaries.
+
+	IFDEF	PFETCH
+	sub	eax, eax
+b0a:	mov	ecx, [esi]		;; Read data set #1 (loads the TLB)
+	mov	ecx, [esi+blkdst]	;; Read data set #2
+	lea	esi, [esi+(4096+64)]	;; Next page
+	add	al, 256/16		;; Test loop counter
+	jnc	short b0a
+	lea	esi, [esi-16*(4096+64)]	;; Restore source pointer
+	mov	ecx, [esi+blkdst+16*(4096+64)-32];; Read last cache line
+	ENDIF
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	ebx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	type4
+
+;; Do FFT levels 1,2
+;; Values 0-4095 is real data, 4096-8191 is semi-real data
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	4096	1	4097
+;;	2	...
+;;	...
+;;	4094	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	2048	...
+;;	...
+
+;; Do 1024 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 1024
+;;	do 1024 iterations
+
+	mov	eax, 4*256
+b1b:	disp four_real_four_semireal_first_fft, 4*dist256, 8*dist256, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/256		;; Test loop counter
+	jnc	b1b			;; Iterate if necessary
+	lea	esi, [esi-256*dist1+dist256];; Next source pointer
+	sub	eax, 256		;; Test loop counter
+	jnz	b1b			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Next source pointer
+
+;; Do FFT level 3,4
+;; Values 0-1023 is real data, 1024-2047 is semi-real data, 2048-8191 is
+;; complex data.
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	2048	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+
+;; Do 256 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 256
+
+pf	lea	ecx, [esi+blkdst]	;; Prefetching pointer
+b2b:	disp four_real_four_semireal_fft, dist256, 2*dist256, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b2b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/64		;; Test loop counter
+	jnc	b2b			;; Iterate if necessary
+	lea	esi, [esi-256*dist1+4*dist256];; Next source pointer
+pf	lea	ecx, [ecx-64*32+(4096+64)]
+
+;; Do 768 four_complex_fft macros
+;;	distance between fft data elements is 256
+
+	mov	edi, sincos6		;; Load sin/cos pointer
+	mov	eax, 3			;; 3 iters of 256
+b3b:	disp four_complex_fft, dist256, 2*dist256, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b3b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/64		;; Test loop counter
+	jnc	b3b			;; Iterate if necessary
+	lea	esi, [esi-256*dist1+4*dist256];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+pf	lea	ecx, [ecx-64*32+(4096+64)]
+	dec	al			;; Test loop counter
+	jnz	b3b			;; Iterate if necessary
+	lea	esi, [esi-4*4*dist256]	;; Restore source pointer
+
+;; Do FFT level 5,6
+;; Values 0-255 is real data, 256-511 is semi-real data, 512-8191 is
+;; complex data.
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 64 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 64
+
+pf	lea	ecx, [esi+blkdst+64*32]	;; Prefetching pointer
+b2c:	disp four_real_four_semireal_fft, 64*dist1, 128*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/8		;; Test loop counter
+	jnc	b2c			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/8		;; Test loop counter
+	jnc	b2c			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-8*(4096+64)+32]
+
+;; Do 960 four_complex_fft macros
+;;	distance between fft data elements is 64
+
+	mov	edi, sincos7		;; Load sin/cos pointer
+	mov	eax, 15			;; 15 iters of 64
+b3c:	disp four_complex_fft, 64*dist1, 128*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	al, 256/8		;; Test loop counter
+	jnc	b3c			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/8		;; Test loop counter
+	jnc	b3c			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+dist256];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+pf	lea	ecx, [ecx-8*(4096+64)+32]
+	dec	al			;; Test loop counter
+	jnz	b3c			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+
+;; Do FFT level 7,8
+;; Values 0-63 is real data, 64-127 is semi-real data, 128-8191 is
+;; complex data.
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 16 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 16
+
+pf	lea	ecx, [esi+blkdst+4*(4096+64)];; Prefetching pointer
+b2d:	disp four_real_four_semireal_fft, 16*dist1, 32*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b2d			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/4		;; Test loop counter
+	jnc	b2d			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+pf	lea	ecx, [ecx-4*(4096+64)+32]
+
+;; Do 1008 four_complex_fft macros
+;;	distance between fft data elements is 16
+
+	mov	edi, sincos8		;; Load sin/cos pointer
+	mov	eax, 80000000h/2+16	;; 16 iters of 3 or 4 iters of 16
+b3d:	disp four_complex_fft, 16*dist1, 32*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b3d			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/4		;; Test loop counter
+	jnc	b3d			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+pf	lea	ecx, [ecx-4*(4096+64)+32]
+	add	eax, 80000000h/2	;; Test loop counter (4 iters)
+	jnc	b3d			;; Iterate if necessary
+	lea	esi, [esi-4*64*dist1+dist256];; Next source pointer
+	dec	al			;; Test loop counter
+	jnz	b3d			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+
+;; Do FFT level 9,10
+;; Values 0-15 is real data, 16-31 is semi-real data, 32-8191 is
+;; complex data.
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 4 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 4
+
+pf	lea	ecx, [esi+blkdst+80*32]	;; Prefetching pointer
+b4b:	disp four_real_four_semireal_fft, 4*dist1, 8*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b4b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+
+;; Do 1020 four_complex_fft macros
+;;	distance between fft data elements is 4
+
+	mov	edi, sincos9		;; Load sin/cos pointer
+	mov	eax, 256/16*256+16	;; 16 iters of 15 or 16 iters of 4
+b5b:	disp four_complex_fft, 4*dist1, 8*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b5b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b5b			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*(4096+64)+32]
+	dec	al			;; Test loop counter
+	jnz	b5b			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+
+;; Do FFT levels 11,12
+;; Values 0-3 is real data, 4-7 is semi-real data, 8-8191 is
+;; complex data.
+;;
+;; On input and output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 1 four_real_four_semireal_fft macros
+;;	distance between fft data elements is 1
+
+;; Do 1023 four_complex_fft macros
+;;	distance between fft data elements is 1
+
+;; Execute the proper middle step
+
+	mov	edi, sincos10		;; Load sin/cos pointer
+;;pf	lea	ecx, [esi+blkdst+96*32]	;; Prefetching pointer
+	mov	eax, 256/4+16		;; 16 iterations of 63 or 64
+
+	cmp	ffttype, 2
+	jl	type1
+	jg	type3
+
+	disp four_real_four_semireal_square, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b2:	disp four_complex_square, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b6b2			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+32)]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b6b2			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*(4096+64)+32]
+	dec	al			;; Test loop counter
+	jnz	b6b2			;; Loop if necessary
+	jmp	unfft
+
+type1:	disp four_real_four_semireal_fft, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b1:	disp four_complex_fft, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b6b1			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+32)]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b6b1			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*(4096+64)+32]
+	dec	al			;; Test loop counter
+	jnz	b6b1			;; Loop if necessary
+	lea	esi, [esi-16*dist256+blkdst];; Point to next block
+	jmp	no_unfft
+
+type3:	mov	ebp, DIST_TO_MULSRCARG
+	disp four_real_four_semireal_mult, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b3:	disp four_complex_mult, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b6b3			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+32)]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b6b3			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*(4096+64)+32]
+	dec	al			;; Test loop counter
+	jnz	b6b3			;; Loop if necessary
+	jmp	unfft
+
+type4:	mov	ebp, DIST_TO_MULSRCARG
+	mov	edi, sincos10		;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+96*32]	;; Prefetching pointer
+	mov	eax, 256/4+16		;; 16 iterations of 63 or 64
+	disp four_real_four_semireal_mulf, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+b6b4:	disp four_complex_mulf, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b6b4			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+32)]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b6b4			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*(4096+64)+32]
+	dec	al			;; Test loop counter
+	jnz	b6b4			;; Loop if necessary
+
+;; Do inverse FFT level 9,10
+;; On input the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 4 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 4
+
+unfft:	lea	esi, [esi-16*dist256]	;; Load source pointer
+;;pf	lea	ecx, [esi+blkdst+112*32];; Prefetching pointer
+c4b:	disp four_real_four_semireal_unfft, 8, 4*dist1, 8*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c4b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+
+;; Do 1020 four_complex_unfft macros
+;;	distance between fft data elements is 4
+
+	mov	edi, sincos9		;; Load sin/cos pointer
+	mov	eax, 256/16*256+16	;; 16 iters of 15 or 16 iters of 4
+c5b:	disp four_complex_unfft, 8, 4*dist1, 8*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c5b			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/16		;; Test loop counter
+	jnc	c5b			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*32+(4096+64)]
+	dec	al			;; Test loop counter
+	jnz	c5b			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+
+;; Do inverse FFT level 7,8
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 16 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 16
+
+pf	lea	ecx, [esi+blkdst+8*(4096+64)];; Prefetching pointer
+c2d:	disp four_real_four_semireal_unfft, 8, 16*dist1, 32*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c2d			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/4		;; Test loop counter
+	jnc	c2d			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+pf	lea	ecx, [ecx-4*(4096+64)+32]
+
+;; Do 1008 four_complex_unfft macros
+;;	distance between fft data elements is 16
+
+	mov	edi, sincos8		;; Load sin/cos pointer
+	mov	eax, 80000000h/2+16	;; 16 iters of 3 or 4 iters of 16
+c3d:	disp four_complex_unfft, 8, 16*dist1, 32*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c3d			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/4		;; Test loop counter
+	jnc	c3d			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+pf	lea	ecx, [ecx-4*(4096+64)+32]
+	add	eax, 80000000h/2	;; Test loop counter (4 iters)
+	jnc	c3d			;; Iterate if necessary
+	lea	esi, [esi-4*64*dist1+dist256];; Next source pointer
+	dec	al			;; Test loop counter
+	jnz	c3d			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+
+;; Do inverse FFT level 5,6
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+
+;; Do 64 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 64
+
+;;pf	lea	ecx, [esi+blkdst+8*(4096+64)+64*32];; Prefetching pointer
+c2c:	disp four_real_four_semireal_unfft, 8, 64*dist1, 128*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/8		;; Test loop counter
+	jnc	c2c			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/8		;; Test loop counter
+	jnc	c2c			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-8*(4096+64)+32]
+
+;; Do 960 four_complex_unfft macros
+;;	distance between fft data elements is 16
+
+	mov	edi, sincos7		;; Load sin/cos pointer
+	mov	eax, 15			;; 15 iters of 64
+c3c:	disp four_complex_unfft, 8, 64*dist1, 128*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/8		;; Test loop counter
+	jnc	c3c			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/8		;; Test loop counter
+	jnc	c3c			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+dist256];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+pf	lea	ecx, [ecx-8*(4096+64)+32]
+	dec	al			;; Test loop counter
+	jnz	c3c			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+
+;; Do inverse FFT level 3,4
+;; On input the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	2048	...
+;;	...
+
+;; Do 256 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 256
+
+pf	lea	ecx, [esi+blkdst+12*(4096+64)];; Prefetching pointer
+c2b:	disp four_real_four_semireal_unfft, 8, dist256, 2*dist256
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c2b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/64		;; Test loop counter
+	jnc	c2b			;; Iterate if necessary
+	lea	esi, [esi-256*dist1+4*dist256];; Next source pointer
+pf	lea	ecx, [ecx-64*32+(4096+64)]
+
+;; Do 768 four_complex_unfft macros
+;;	distance between fft data elements is 256
+
+	mov	edi, sincos7		;; Load sin/cos pointer
+	mov	eax, 3			;; 3 iters of 256
+c3b:	disp four_complex_unfft, 8, dist256, 2*dist256
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	c3b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/64		;; Test loop counter
+	jnc	c3b			;; Iterate if necessary
+	lea	esi, [esi-256*dist1+4*dist256];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+pf	lea	ecx, [ecx-64*32+(4096+64)]
+	dec	al			;; Test loop counter
+	jnz	c3b			;; Iterate if necessary
+	lea	esi, [esi-4*4*dist256]	;; Restore source pointer
+
+;; Do inverse FFT level 1,2
+;; On input the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	2048	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	4096	1	4097
+;;	2	...
+;;	...
+;;	4094	...
+
+;; Do 1024 four_real_four_semireal_unfft macros
+;;	distance between fft data elements is 1024
+
+	mov	eax, 4*256
+c1b:	disp four_real_four_semireal_unfft, 8, 4*dist256, 8*dist256
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/256		;; Test loop counter
+	jnc	c1b			;; Iterate if necessary
+	lea	esi, [esi-256*dist1+dist256];; Next source pointer
+	sub	eax, 256		;; Test loop counter
+	jnz	c1b			;; Iterate if necessary
+	lea	esi, [esi-4*dist256+blkdst];; Next pass 2 set of data
+no_unfft:
+	ENDM
+
+
+; *************** pass2-twelve-levels-complex macro ******************
+; This macro takes 4096 complex values, pre multiplies them and
+; performs the final twelve levels of the FFT process, squares the
+; results, and does the first twelve levels of the inverse FFT.
+; NOTE: Rather than remembering 1024 multipliers we break them up
+; into 256 groups of 4 columns.  By remembering these 260 values we can compute
+; all 1024 multipliers using a single complex multiply.  These extra
+; complex multiplies can be done faster than the computer can read the
+; extra multipliers from memory.
+; esi = Pointer to the FFT data
+; edx = Pointer to the group and column pre-multiplier values
+
+pass2_twelve_levels_complex MACRO
+	LOCAL	b0a, b0b, b0c, b1b, b2b, b3b, b3c, b3d, b4b1, b4b2, b4b3, b4b4
+	LOCAL	c1b, c2b, c3b, c3c, c3d
+	LOCAL	type1, type3, type4, unfft, no_unfft
+
+;; Load the TLBs for this data set and the next data set (if there is one).
+;; Each data set is spread over 16 pages (64KB) and we touch one more page
+;; because the data sets do not start on exact on 4KB boudaries.
+;; Also, preload TLB for premultiplier data.
+
+	IFDEF	PFETCH
+	start_timer 3
+	pusher	ecx
+	cmp	ecx, 1			;; Test pass2 counter
+	je	short b0c		;; Skip if this is last data set
+	sub	eax, eax
+b0a:	mov	ecx, [esi]		;; Read data set #1 (loads the TLB)
+	mov	ecx, [esi+blkdst]	;; Read data set #2
+	lea	esi, [esi+(4096+64)]	;; Next page
+	add	al, 256/16		;; Test loop counter
+	jnc	short b0a
+	lea	esi, [esi-16*(4096+64)]	;; Restore source pointer
+	mov	ecx, [esi+blkdst+16*(4096+64)-32];; Read last cache line
+b0b:	mov	ecx, [edx]		;; Load premultiplier TLB
+	lea	edx, [edx+4096]		;; Next page
+	add	al, 256/8		;; Test loop counter
+	jnc	short b0b
+	lea	edx, [edx-8*4096]	;; Restore source pointer
+	mov	ecx, [edx+516*PMD-32]	;; Load last premultiplier
+b0c:	end_timer 3
+	ENDIF
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	ebx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	type4
+
+;; Do FFT level 1,2
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	4096	1	4097
+;;	2	...
+;;	...
+;;	4094	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	2048	...
+;;	...
+
+;; Do 1024 four_complex_fft_gpm macros
+;; In this section we apply the 1024 group multipliers.  We will apply the
+;; column multipliers in the next section.
+;;	distance between fft data elements is 1024
+
+	start_timer 4
+	mov	edi, edx		;; The 256 group multipliers
+	mov	eax, 4			;; 4 iters of 64 iters of 4
+b1b:	disp four_complex_gpm4_fft, 4*dist256, 8*dist256, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b1b			;; Iterate if necessary
+	prefetch32 [edi+260*PMD]
+	lea	edi, [edi+PMD]		;; Next group multiplier
+	add	ah, 256/64		;; Test middle loop counter
+	jnc	b1b			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Restore source pointer
+	dec	al			;; Test outer loop counter
+	jnz	b1b			;; Iterate if necessary
+	lea	esi, [esi-4*dist256]	;; Restore source pointer
+	end_timer 4
+
+;; Do FFT level 3,4
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	2048	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+
+;; Do 1024 four_complex_cpm_fft macros
+;; In this section we also apply the 4 column multipliers.  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+;;	distance between fft data elements is 256
+
+	start_timer 5
+;;	lea	edi, [edx+256*PMD]	;; The 4 column multipliers
+pf	lea	ecx, [esi+blkdst]	;; Prefetching pointer
+	mov	eax, 64*256		;; 64 iterations of 4
+b2b:	dispc four_complex_cpm_fft_0, dist256, 2*dist256, 8, 0
+	dispc four_complex_cpm_fft_1, dist256, 2*dist256, 8, 4*dist256
+	dispc four_complex_cpm_fft_2, dist256, 2*dist256, 8, 8*dist256
+	dispc four_complex_cpm_fft_3, dist256, 2*dist256, 8, 12*dist256
+	lea	esi, [esi+dist1]	;; Next source pointer
+	lea	edi, [edi+PMD]		;; Next column multiplier
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b2b			;; Iterate if necessary
+	lea	edi, [edi-4*PMD]	;; Next column multiplier
+pf	lea	ecx, [ecx-4*(4096+64)+32]
+	sub	eax, 256		;; Test outer loop counter
+	jnz	b2b			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1]	;; Restore source pointer
+	end_timer 5
+
+;; Do FFT level 5,6
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 1024 four_complex_fft macros
+;;	distance between fft data elements is 64
+
+	start_timer 6
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+;;pf	lea	ecx, [esi+blkdst+64*32]	;; Prefetching pointer
+	mov	eax, 16			;; 16 iterations of 64
+b3b:	disp four_complex_fft, 64*dist1, 128*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/8		;; Test inner loop counter
+	jnc	b3b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/8		;; Test inner loop counter
+	jnc	b3b			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+dist256];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+pf	lea	ecx, [ecx-8*(4096+64)+32]
+	dec	al			;; Test outer loop counter
+	jnz	b3b			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+	end_timer 6
+
+;; Do FFT level 7,8
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 1024 four_complex_fft macros
+;;	distance between fft data elements is 16
+
+	start_timer 7
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+4*(4096+64)];; Prefetching pointer
+	mov	eax, 16			;; 16 iters of 4 iters of 16
+b3c:	disp four_complex_fft, 16*dist1, 32*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b3c			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/4		;; Test inner loop counter
+	jnc	b3c			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+pf	lea	ecx, [ecx-4*(4096+64)+32]
+	add	eax, 80000000h/2	;; Test middle loop counter (4 iters)
+	jnc	b3c			;; Iterate if necessary
+	lea	esi, [esi-4*64*dist1+dist256];; Next source pointer
+	dec	al			;; Test outer loop counter
+	jnz	b3c			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+	end_timer 7
+
+;; Do FFT levels 9,10
+;;
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 1024 four_complex_fft macros
+;;	distance between fft data elements is 4
+
+	start_timer 8
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+80*32]	;; Prefetching pointer
+	mov	eax, 16			;; 16 iters of 16 iters of 4
+b3d:	disp four_complex_fft, 4*dist1, 8*dist1, 8
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	b3d			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/16		;; Test middle loop counter
+	jnc	b3d			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*(4096+64)+32]
+	dec	al			;; Test outer loop counter
+	jnz	b3d			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+	end_timer 8
+
+;; Do FFT levels 11,12
+;;
+;; On input and output the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+
+;; Do 1024 four_complex_with_square macros
+;;	distance between fft data elements is 1
+
+;; Execute the proper middle step
+
+	mov	edi, xsincos_complex	;; Load sine/cosine ptr
+;;pf	lea	ecx, [esi+blkdst+96*32]	;; Prefetching pointer
+	mov	eax, 16			;; 16 iters of 64
+
+	cmp	ffttype, 2
+	jl	type1
+	jg	type3
+
+	start_timer 9
+b4b2:	disp four_complex_square, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b4b2			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+32)]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b4b2			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*(4096+64)+32]
+	dec	al			;; Test inner loop counter
+	jnz	b4b2			;; Iterate if necessary
+	end_timer 9
+	jmp	unfft
+
+type1:
+b4b1:	disp four_complex_fft, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b4b1			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+32)]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b4b1			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*(4096+64)+32]
+	dec	al			;; Test inner loop counter
+	jnz	b4b1			;; Iterate if necessary
+	lea	esi, [esi-16*dist256+blkdst];; Next pass 2 pointer
+	jmp	no_unfft
+
+type3:	mov	ebp, DIST_TO_MULSRCARG
+b4b3:	disp four_complex_mult, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b4b3			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+32)]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b4b3			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*(4096+64)+32]
+	dec	al			;; Test inner loop counter
+	jnz	b4b3			;; Iterate if necessary
+	jmp	unfft
+
+type4:	mov	ebp, DIST_TO_MULSRCARG
+	mov	edi, xsincos_complex	;; Load sine/cosine ptr
+pf	lea	ecx, [esi+blkdst+96*32]	;; Prefetching pointer
+	mov	eax, 16
+b4b4:	disp four_complex_mulf, dist1, 2*dist1, 8
+	lea	esi, [esi+4*dist1]	;; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	add	al, 256/4		;; Test loop counter
+	jnc	b4b4			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+32)]
+	add	ah, 256/16		;; Test loop counter
+	jnc	b4b4			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*(4096+64)+32]
+	dec	al			;; Test inner loop counter
+	jnz	b4b4			;; Iterate if necessary
+
+;; Do inverse FFT level 9,10
+;; On input the 32-byte cache lines hold these data values:
+;;	0	4	1	5
+;;	2	...
+;;	8	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+
+;; Do 1024 four_complex_unfft macros
+;;	distance between fft data elements is 4
+
+unfft:	start_timer 10
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+;;pf	lea	ecx, [esi+blkdst+112*32];; Prefetching pointer
+	mov	eax, 16			;; 16 iters of 16 iters of 4
+c3d:	disp four_complex_unfft, 8, 4*dist1, 8*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c3d			;; Iterate if necessary
+	lea	esi, [esi-4*dist1+16*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+32]
+	add	ah, 256/16		;; Test middle loop counter
+	jnc	c3d			;; Iterate if necessary
+	lea	esi, [esi-16*16*dist1+dist256];; Next source pointer
+pf	lea	ecx, [ecx-16*32+(4096+64)]
+	dec	al			;; Test outer loop counter
+	jnz	c3d			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+	end_timer 10
+
+;; Do inverse FFT level 7,8
+;; On input the 32-byte cache lines hold these data values:
+;;	0	16	1	17
+;;	2	...
+;;	...
+;;	32	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+
+;; Do 1024 four_complex_unfft macros
+;;	distance between fft data elements is 16
+
+	start_timer 11
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+pf	lea	ecx, [esi+blkdst+8*(4096+64)];; Prefetching pointer
+	mov	eax, 16			;; 16 iters of 4 iters of 16
+c3c:	disp four_complex_unfft, 8, 16*dist1, 32*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c3c			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/4		;; Test inner loop counter
+	jnc	c3c			;; Iterate if necessary
+	lea	esi, [esi-16*dist1+64*dist1];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+pf	lea	ecx, [ecx-4*(4096+64)+32]
+	add	eax, 80000000h/2	;; Test middle loop counter (4 iters)
+	jnc	c3c			;; Iterate if necessary
+	lea	esi, [esi-4*64*dist1+dist256];; Next source pointer
+	dec	al			;; Test outer loop counter
+	jnz	c3c			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+	end_timer 11
+
+;; Do inverse FFT level 5,6
+;; On input the 32-byte cache lines hold these data values:
+;;	0	64	1	65
+;;	2	...
+;;	...
+;;	128	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+
+;; Do 1024 four_complex_unfft macros
+;;	distance between fft data elements is 64
+
+	start_timer 12
+	mov	edi, xsincos_complex	;; Load sin/cos pointer
+;;pf	lea	ecx, [esi+blkdst+8*(4096+64)+64*32];; Prefetching pointer
+	mov	eax, 16			;; 16 iterations of 64
+c3b:	disp four_complex_unfft, 8, 64*dist1, 128*dist1
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/8		;; Test inner loop counter
+	jnc	c3b			;; Iterate if necessary
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	ah, 256/8		;; Test inner loop counter
+	jnc	c3b			;; Iterate if necessary
+	lea	esi, [esi-64*dist1+dist256];; Next source pointer
+	lea	edi, [edi+SCD]		;; Next sine/cosine pointer
+pf	lea	ecx, [ecx-8*(4096+64)+32]
+	dec	al			;; Test outer loop counter
+	jnz	c3b			;; Iterate if necessary
+	lea	esi, [esi-16*dist256]	;; Restore source pointer
+	end_timer 12
+
+;; Do inverse FFT level 3,4
+;; On input the 32-byte cache lines hold these data values:
+;;	0	256	1	257
+;;	2	...
+;;	...
+;;	512	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	2048	...
+;;	...
+
+;; Do 1024 four_complex_cpm_unfft macros
+;; In this section we also apply the 4 column multipliers.  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+;;	distance between fft data elements is 256
+
+	start_timer 13
+	lea	edi, [edx+256*PMD]	;; The 4 column multipliers
+pf	lea	ecx, [esi+blkdst+12*(4096+64)];; Prefetching pointer
+	mov	eax, 64*256		;; 64 iterations of 4
+c2b:	dispc four_complex_cpm_unfft_0, 8, dist256, 2*dist256, 0
+	dispc four_complex_cpm_unfft_1, 8, dist256, 2*dist256, 4*dist256
+	dispc four_complex_cpm_unfft_2, 8, dist256, 2*dist256, 8*dist256
+	dispc four_complex_cpm_unfft_3, 8, dist256, 2*dist256, 12*dist256
+	lea	esi, [esi+dist1]	;; Next source pointer
+	lea	edi, [edi+PMD]		;; Next column multiplier
+	prefetch32 [ecx]
+pf	lea	ecx, [ecx+(4096+64)]
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c2b			;; Iterate if necessary
+	lea	edi, [edi-4*PMD]	;; Next column multiplier
+pf	lea	ecx, [ecx-4*(4096+64)+32]
+	sub	eax, 256		;; Test outer loop counter
+	jnz	c2b			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1]	;; Restore source pointer
+	end_timer 13
+
+;; Do inverse FFT level 1,2
+;; On input the 32-byte cache lines hold these data values:
+;;	0	1024	1	1025
+;;	2	...
+;;	...
+;;	2048	...
+;;	...
+;; On output the 32-byte cache lines hold these data values:
+;;	0	4096	1	4097
+;;	2	...
+;;	...
+;;	4094	...
+
+;; Do 1024 four_complex_unfft_gpm macros
+;; In this section we apply the 1024 group multipliers.  We applied the
+;; column multipliers in the previous section.
+;;	distance between fft data elements is 1024
+
+	start_timer 14
+	mov	edi, edx		;; The 256 group multipliers
+	mov	eax, 4			;; 4 iters of 64 iters of 4
+c1b:	disp four_complex_gpm4_unfft, 8, 4*dist256, 8*dist256
+	lea	esi, [esi+dist1]	;; Next source pointer
+	add	al, 256/4		;; Test inner loop counter
+	jnc	c1b			;; Iterate if necessary
+	prefetch32 [edi+260*PMD+32]
+	lea	edi, [edi+PMD]		;; Next group multiplier
+	add	ah, 256/64		;; Test middle loop counter
+	jnc	c1b			;; Iterate if necessary
+	lea	esi, [esi-64*4*dist1+dist256];; Restore source pointer
+	dec	al			;; Test outer loop counter
+	jnz	c1b			;; Iterate if necessary
+	lea	esi, [esi-4*dist256+blkdst];; Next pass 2 set of data
+	end_timer 14
+no_unfft:
+pf	popper	ecx
+	lea	edx, [edx+260*PMD]	;; Next group pre-multipliers
+	ENDM

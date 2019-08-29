@@ -1,0 +1,5338 @@
+; Copyright 2001-2010 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros take the basic XMM FFT building blocks and build even
+; larger building blocks used in the final pass of a multi-pass FFT.
+;
+
+; ********************************************************
+; ********************************************************
+; *******************  PASS 2 MACROS  ********************
+; ********************************************************
+; ********************************************************
+
+
+; The goal of this pass is to perform the last FFT levels.
+;
+; To reduce the amount of sine-cosine data we read in from
+; main memory, we pre-multiply each set of values by a different
+; set of sine-cosine values and then perform a standard 11-level
+; FFT on each 2 sets of 2048 complex values.  The root of this idea
+; comes from articles by David Bailey available on the web.
+
+dist128 = (128*64+128)			; Distance between 128 cache lines
+
+
+; *************** xmm-pass2-8-levels-real macro ******************
+; This macro takes 256 real values, 256 semi-real values and the
+; first 256 complex values and performs the final 8 levels of the
+; FFT process, squares the results, and does the first 8 levels of
+; the inverse FFT.
+
+hg_pass2_8_levels_real MACRO
+	LOCAL	b0d, b1b, b2b, b3b, b4b, b5b, b6b, b7b, b8b, b9b
+	LOCAL	baa, bab, bac, bad
+	LOCAL	c0b, c1b, c2b, c3b, c4b, c5b, c6b, c7b, c8b
+	LOCAL	xpass2_8_levels_real_1, xpass2_8_levels_real_2
+	LOCAL	xpass2_8_levels_real_3, xpass2_8_levels_real_4
+	LOCAL	xpass2_8_real_unfft, xpass2_8_real_done
+
+;; We switch to the same format used in one-pass FFTs (that is, the
+;; high word of xmm registers being 1 greater than the low word):
+
+;; Load the TLBs for this data set and the next data set.
+;; This data set is spread over 2 pages (8KB), the next data set also
+;; takes 2 pages (8KB), and we touch one more page because the data
+;; sets do not start on exact on 4KB boudaries.
+
+	start_timer 2
+	mov	rsi, DATA_ADDR		;; Load source address
+	xtouch	[rsi]			;; Read from this page (loads the TLB)
+	xtouch	[rsi+4096]		;; Next page
+	xtouch	[rsi+2*4096-128]	;; Next page
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	xtouch	[rcx]			;; Read from this page (loads the TLB)
+	xtouch	[rcx+4096]		;; Next page
+	xtouch	[rcx+2*4096-128]	;; Next page
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	xpass2_8_levels_real_4
+
+;; Do FFT level 1
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+128	256	+128	512	+128	768	+128
+;;	1	...
+;;	...
+;;	127	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	128	129	256	257	384	385
+;;	+512	...
+;;	2	...
+;;	...
+;;	126	...
+;;	+512	...
+
+;; Do eight_reals_fft_1 on real values 0 - 255
+;; Do nothing on semi-real values from 256 - 511
+;; Do two_complex_fft on complex values from 512 - 1023
+;;	distance between fft data elements is 128
+
+	loops_init 64			;; Load loop counter
+b1b:	s2cl_eight_reals_fft_1 rsi, 2*64, 64
+	L2prefetch128 [rsi+3*128]		;; Prefetch a few iterations ahead
+	loops	64, b1b			;; Test loop counter
+	bump	rsi, -64*2*64		;; Restore source pointer
+
+;; Do FFT levels 2,3
+;; Values 0-127 is real data, 128-255 is semi-real data, 256-1023 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	128	129	256	257	384	385
+;;	+512	...
+;;	2	...
+;;	...
+;;	126	...
+;;	+512	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	32	33	64	65	96	97
+;;	+512	...
+;;	2	...
+;;	...
+;;	30	...
+;;	+512	...
+;;	128	...
+;;	...
+
+;; Do 16 eight_reals_fft_2 macros
+;; Do 16 nop_two_two_complex_fft_2 macros
+;; Do 32 four_complex_fft macros
+;;	distance between fft data elements is 32
+;;	do 16 macros each processing 32 data values
+
+	mov	rdi, sincos10		;; Load sin/cos pointer
+	loops_init 16
+b2b:	x4cl_eight_reals_fft_2 rsi, 2*64, 32*64, 64*64, rdi
+	loops	16, b2b			;; Test inner loop counter
+
+;; Do 64 four_complex_fft macros
+;;	distance between fft data elements is 32
+;;	do 16 macros each processing 32 data values
+
+	bump	rsi, -16*2*64+64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 16, 128, 1, rcx
+b3b:	x4cl_four_complex_fft rsi, 2*64, 32*64, 64*64, rdi
+	loops	16, b3b			;; Test inner loop counter
+	bump	rsi, -16*2*64-64	;; Restore source pointer
+
+;; Do FFT levels 4
+;; Values 0-31 is real data, 32-63 is semi-real data, 64-1023 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	32	33	64	65	96	97
+;;	+512	...
+;;	2	...
+;;	...
+;;	30	...
+;;	+512	...
+;;	128	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	16	17	32	33	48	49
+;;	+512	...
+;;	2	...
+;;	...
+;;	14	...
+;;	+512	...
+;;	64	...
+;;	...
+
+;; Do 16 eight_reals_fft_1 macros
+;;	distance between fft data elements is 16
+;;	do 8 macros each processing 16 data values
+
+	mov	rdi, sincos9		;; Load sin/cos pointer
+	loops_init 64
+b4b:	x2cl_eight_reals_fft_1 rsi, 2*64, 16*64
+	loops	8, b4b			;; Test inner loop counter
+
+;; Do 112 two_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 56 macros each processing 16 data values
+
+	bump	rsi, -8*2*64+32*64	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 3 then 4 iterations of 4
+b5b:	x2cl_two_complex_fft rsi, 2*64, 16*64, rdi
+	loops	8, b5b			;; Test inner loop counter
+	bump	rsi, -8*2*64+32*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	4, b5b			;; Test loop counter
+	bump	rsi, -4*32*64+64	;; Next source pointer
+	loops	2, b5b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 5,6
+;; Values 0-15 is real data, 16-31 is semi-real data, 32-1023 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	16	17	32	33	48	49
+;;	+512	...
+;;	2	...
+;;	...
+;;	14	...
+;;	+512	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	4	5	8	9	12	13
+;;	+512	...
+;;	2	...
+;;	+512	...
+;;	16	...
+;;	...
+
+;; Do 2 eight_reals_fft_2 macros
+;; Do 2 nop_two_two_complex_fft_2 macros
+;; Do 4 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 2 macros each processing 32 data values
+
+	mov	rdi, sincos7		;; Load sin/cos pointer
+	loops_init 32
+b8b:	x4cl_eight_reals_fft_2 rsi, 2*64, 4*64, 8*64, rdi
+	loops	2, b8b			;; Test loop counter
+
+;; Do 120 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 30 macros each processing 32 data values
+
+	bump	rsi, -2*2*64+16*64	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 7 then 8 iterations of 2
+b9b:	x4cl_four_complex_fft rsi, 2*64, 4*64, 8*64, rdi
+	loops	2, b9b			;; Test loop counter
+	bump	rsi, -2*2*64+16*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b9b			;; Test middle loop counter
+	bump	rsi, -8*16*64+64	;; Next source pointer
+	loops	2, b9b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 7,8
+;; Values 0-3 is real data, 4-7 is semi-real data, 8-1023 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	4	5	8	9	12	13
+;;	+512	...
+;;	2	...
+;;	+512	...
+;;	16	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	2	3	4	5	6	7
+;;	+512	...
+;;	8	...
+;;	...
+
+;; Do 1/2 eight_reals_fft_2 macros
+;; Do 1/2 nop_two_two_complex_fft_2 macros
+;; Do 1 four_complex_fft macros
+;;	distance between fft data elements is 1
+
+;; Do 126 more four_complex_fft macros
+;;	distance between fft data elements is 1
+;;	do 63 macros each processing 16 data values
+
+	mov	rdi, sincos6		;; Load sin/cos pointer
+
+;; Execute the proper middle step
+
+	cmp	ffttype, 2
+	jl	xpass2_8_levels_real_1
+	jg	xpass2_8_levels_real_3
+
+xpass2_8_levels_real_2:
+	s2cl_eight_reals_with_square_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init 64, 1, 32		;; 31 then 32 iterations
+baa:	s2cl_four_complex_with_square rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, baa			;; Test loop counter
+	bump	rsi, -32*4*64+64	;; Next source pointer
+	loops	2, baa			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+	jmp	xpass2_8_real_unfft
+
+xpass2_8_levels_real_1:
+	s2cl_eight_reals_fft_2_final rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init 64, 1, 32		;; 31 then 32 iterations
+bab:	s2cl_four_complex_fft_final rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bab			;; Test loop counter
+	bump	rsi, -32*4*64+64	;; Next source pointer
+	loops	2, bab			;; Test outer loop counter
+	jmp	xpass2_8_real_done
+
+xpass2_8_levels_real_3:
+	mov	rbp, DIST_TO_MULSRCARG
+	s2cl_eight_reals_with_mult_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init 64, 1, 32		;; 31 then 32 iterations
+bac:	s2cl_four_complex_with_mult rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bac			;; Test loop counter
+	bump	rsi, -32*4*64+64	;; Next source pointer
+	loops	2, bac			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+	jmp	xpass2_8_real_unfft
+
+xpass2_8_levels_real_4:
+	mov	rbp, DIST_TO_MULSRCARG
+	mov	rdi, sincos6		;; Load sin/cos pointer
+	s2cl_eight_reals_with_mulf_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init 64, 1, 32		;; 31 then 32 iterations
+bad:	s2cl_four_complex_with_mulf rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bad			;; Test loop counter
+	bump	rsi, -32*4*64+64	;; Next source pointer
+	loops	2, bad			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 5,6
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	2	3	4	5	6	7
+;;	+512	...
+;;	8	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	8	9	16	17	24	25
+;;	+512	...
+;;	2	...
+;;	...
+;;	6	...
+;;	+512	...
+;;	32	...
+;;	...
+
+;; Do 2 eight_reals_unfft_2 macros
+;; Do 2 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 4
+;;	do 1 macro processing 32 data values
+
+xpass2_8_real_unfft:
+	x4cl_eight_reals_unfft_2 rsi, 8*64, 2*64, 4*64
+
+;; Do 124 four_complex_unfft macros
+;;	distance between fft data elements is 4
+;;	do 31 macros each processing 32 data values
+
+	mov	rdi, sincos7		;; Load sin/cos pointer
+	loops_init 32, 1, 16		;; 15 then 16 iterations
+c8b:	x4cl_four_complex_unfft rsi, 8*64, 2*64, 4*64, rdi
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	16, c8b			;; Test loop counter
+	bump	rsi, -16*8*64+64	;; Next source pointer
+	loops	2, c8b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 4
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	8	9	16	17	24	25
+;;	+512	...
+;;	2	...
+;;	...
+;;	6	...
+;;	+512	...
+;;	32	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	16	17	32	33	48	49
+;;	+512	...
+;;	2	...
+;;	...
+;;	14	...
+;;	+512	...
+;;	64	...
+;;	...
+
+;; Do 8 eight_reals_unfft_1 macros
+;;	distance between fft data elements is 16
+;;	do 4 macros each processing 16 data values
+
+	loops_init 64
+c4b:	x2cl_eight_reals_unfft_1 rsi, 2*64, 8*64
+	loops	4, c4b			;; Test inner loop counter
+
+;; Do 960 two_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 240 macros each processing 32 data values
+
+	bump	rsi, -4*2*64+16*64	;; Load source pointer
+	mov	rdi, sincos9		;; Load sin/cos pointer
+	loops_reset			;; 7 then 8 iterations of 4
+c5b:	x2cl_two_complex_unfft rsi, 2*64, 8*64
+	loops	4, c5b			;; Test inner loop counter
+	bump	rsi, -4*2*64+16*64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	8, c5b			;; Test outer loop counter
+	bump	rsi, -8*16*64+64	;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 2,3
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	16	17	32	33	48	49
+;;	+512	...
+;;	2	...
+;;	...
+;;	14	...
+;;	+512	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	64	65	128	129	192	193
+;;	+512	...
+;;	2	...
+;;	...
+;;	62	...
+;;	+512	...
+;;	256	...
+;;	...
+
+;; Do 128 eight_reals_unfft_2 macros
+;; Do 128 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 256
+;;	do 8 macros each processing 32 data values
+
+	loops_init 32
+c2b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 16*64, 32*64
+	loops	8, c2b			;; Test inner loop counter
+
+;; Do 96 four_complex_unfft macros
+;;	distance between fft data elements is 32
+;;	do 24 macros each processing 32 data values
+
+	bump	rsi, -8*2*64+64*64	;; Next source pointer
+	mov	rdi, sincos10		;; Load sin/cos pointer
+	loops_reset			;; 1 then 2 iterations of 64
+c3b:	x4cl_four_complex_unfft rsi, 2*64, 16*64, 32*64, rdi
+	loops	8, c3b			;; Test inner loop counter
+	bump	rsi, -8*2*64+64*64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*64*64+64	;; Next source pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT level 1
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	64	65	128	129	192	193
+;;	+512	...
+;;	2	...
+;;	...
+;;	62	...
+;;	+512	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+128	256	+128	512	+128	768	+128
+;;	1	...
+;;	...
+;;	127	...
+
+;; Do 64 eight_reals_last_unfft macros
+;; Do 64 two_two_complex_unfft macros
+;;	distance between fft data elements is 128
+;;	do 32 macros each processing 16 data values
+
+	loops_init 32
+c1b:	s4cl_eight_reals_unfft_1 rsi, 2*64, 64*64, 64
+	loops	32, c1b			;; Test loop counter
+
+xpass2_8_real_done:
+	end_timer 2
+	ENDM
+
+
+; *************** xmm-pass2-8-levels-complex macro ******************
+; This macro takes 2 groups of 256 complex values, premultiplies them and
+; performs the final 8 levels of the FFT process, squares the
+; results, and does the first 8 levels of the inverse FFT.
+; NOTE: Rather than remembering 256 multipliers we break them up
+; into 64 groups of 4 columns.  By remembering these 68 values we can compute
+; all 256 multipliers using a single complex multiply.  These extra
+; complex multiplies can probably be done faster than the computer can read the
+; extra multipliers from memory (and are more likely stay in the L2 cache)
+
+hg_pass2_8_levels_complex MACRO
+	LOCAL	b1b, b2b, b5b
+	LOCAL	b6a0, b6a, b6b0, b6b, b6c0, b6c, b6d0, b6d
+	LOCAL	c1b, c2b, c5b
+	LOCAL	xpass2_8_levels_complex_1, xpass2_8_levels_complex_2
+	LOCAL	xpass2_8_levels_complex_3, xpass2_8_levels_complex_4
+	LOCAL	xpass2_8_levels_complex_unfft, xpass2_8_levels_complex_done
+
+;; Load the TLBs for this data set and the next data set.
+;; This data set is spread over 2 pages (8KB), the next data set also
+;; takes 2 pages (8KB), and we touch one more page because the data
+;; sets do not start on exact on 4KB boudaries.  Also, preload TLBs for
+;; premultiplier data.
+
+	start_timer 3
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	xtouch	[rcx]			;; Read from this page (loads the TLB)
+	xtouch	[rcx+4096]		;; Next page
+	xtouch	[rcx+2*4096-128]	;; Next page
+	mov	rcx, PREMULT_PREFETCH	;; Prefetch pointer
+	xtouch	[rcx]			;; Load premultiplier TLBs
+	xtouch	[rcx+4096-128]		;; Load premultiplier TLBs
+	end_timer 3
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	rsi, DATA_ADDR		;; Load address of FFT data
+	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	xpass2_8_levels_complex_4
+
+;; Do FFT level 1,2
+;;
+;; We swizzle the data so that one set of data is in the high word of
+;; an xmm register, the other set is in the low word.  This means
+;; a distance of 4096 data values.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+128	256	+128	512	+128	768	+128
+;;	1	...
+;;	...
+;;	127
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+512	64	+512	128	+512	192	+512
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+
+;; Do 128 four_complex_gpm_fft macros
+;;	distance between fft data elements is 64
+;;	do 64 macros each processing 16 data values
+
+	start_timer 4
+	mov	rdi, PREMULT_ADDR	;; The group multipliers
+	loops_init 64			;; 16 iterations of 4
+b1b:	s2cl_four_complex_gpm_fft rsi, 64, 64*64
+	L2prefetch128 [rsi+5*64]		;; Prefetch a few iterations ahead in
+	L2prefetch128 [rsi+64*64+5*64]	;; case they are not in the L2 cache
+	loops	4, b1b			;; Test inner loop counter
+	bump	rdi, XMM_PMD		;; Next group multiplier
+	L2prefetch128 [rdi+4*XMM_PMD]
+	L2prefetch128 [rdi+16*XMM_PMD]
+	loops	16, b1b			;; Test outer loop counter
+	bump	rsi, -64*64		;; Restore source pointer
+	end_timer 4
+
+;; Do FFT levels 3,4
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+512	64	+512	128	+512	192	+512
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+512	16	+512	32	+512	48	+512
+;;	1	...
+;;	...
+;;	15	...
+;;	64	...
+;;	...
+
+;; Do 4 groups of four_complex_fft_cpm macros
+;; To make things run faster we precompute the column multipliers times the
+;; 4 different sine/cosine multipliers we run into in this section.  This
+;; costs some memory but saves us some complex multiplies.
+
+;; Do 128 four_complex_cpm_fft macros
+;;	distance between fft data elements is 16
+;;	do 16 macros each processing 64 data values
+
+	start_timer 5
+	mov	rcx, PREMULT_PREFETCH	;; Prefetch pointer
+	loops_init_prefetch 32, 128, 1, rcx ;; 2 iters of 4 iterations of 4
+b2b:	x4cl_four_complex_cpm_fft rsi, 64, 16*64, 32*64, 4*XMM_PMD
+	bump	rdi, XMM_PMD		;; Next column premultiplier
+	loops	4, b2b			;; Test inner loop counter
+	bump	rdi, -4*XMM_PMD		;; Restore column premultiplier
+	loops	4, b2b			;; Test loop counter
+	bump	rsi, -16*64+64*64	;; Next source pointer
+	bump	rdi, 8*XMM_PMD		;; Next set of premultipliers
+	loops	2, b2b			;; Test outer loop counter
+	bump	rsi, -2*64*64		;; Restore source pointer
+	end_timer 5
+
+;; Do FFT levels 5,6
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+512	16	+512	32	+512	48	+512
+;;	1	...
+;;	...
+;;	15	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+512	4	+512	8	+512	12	+512
+;;	1	...
+;;	...
+;;	3	...
+;;	16	...
+;;	...
+
+;; Do 128 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 32 macros each processing 32 data values
+
+	start_timer 8
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+	loops_init_prefetch 32, 64, 1, rcx ;; 8 iterations of 4, prefetch 64 bytes every macro
+b5b:	x4cl_four_complex_fft rsi, 64, 4*64, 8*64, rdi
+	loops	4, b5b			;; Loop 4 times
+	bump	rsi, -4*64+16*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b5b			;; Test outer loop counter
+	bump	rsi, -8*16*64		;; Restore source pointer
+	end_timer 8
+
+;; Do FFT levels 7,8 as well as inverse FFT levels 7,8
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+512	4	+512	8	+512	12	+512
+;;	1	...
+;;	...
+;;	3	...
+;;	16	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+512	2	+512	4	+512	6	+512
+;;	1	...
+;;	8	...
+;;	...
+
+;; Do 128 four_complex_fft macros
+;;	distance between fft data elements is 1
+;;	do 32 macros each processing 32 data values
+
+;; Execute the right middle step
+
+	cmp	ffttype, 2
+	jl	xpass2_8_levels_complex_1
+	jg	xpass2_8_levels_complex_3
+
+xpass2_8_levels_complex_2:
+	start_timer 9
+	loops_init_prefetch 32, 64, 1, rcx
+b6a0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6a:	x4cl_four_complex_with_square rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b6a			;; Loop 8 times
+	loops	4, b6a0			;; Test loop counter
+	end_timer 9
+	bump	rsi, -32*4*64		;; Restore source pointer
+	jmp	xpass2_8_levels_complex_unfft
+
+xpass2_8_levels_complex_1:
+	start_timer 9
+	loops_init_prefetch 32, 128, 1, rcx
+b6b0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6b:	x4cl_four_complex_fft_final rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b6b			;; Test loop counter
+	loops	4, b6b0			;; Test loop counter
+	end_timer 9
+	jmp	xpass2_8_levels_complex_done
+
+xpass2_8_levels_complex_3:
+	start_timer 9
+	mov	rbp, DIST_TO_MULSRCARG
+	loops_init_prefetch 32, 64, 1, rcx
+b6c0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6c:	x4cl_four_complex_with_mult rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b6c			;; Loop 8 times
+	loops	4, b6c0			;; Test loop counter
+	end_timer 9
+	bump	rsi, -32*4*64		;; Restore source pointer
+	jmp	xpass2_8_levels_complex_unfft
+
+xpass2_8_levels_complex_4:
+	start_timer 9
+	mov	rbp, DIST_TO_MULSRCARG
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	loops_init_prefetch 32, 128, 1, rcx
+b6d0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6d:	x4cl_four_complex_with_mulf rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b6d			;; Test loop counter
+	loops	4, b6d0			;; Test loop counter
+	end_timer 9
+	bump	rsi, -32*4*64		;; Restore source pointer
+
+;; Do inverse FFT levels 5,6
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+512	2	+512	4	+512	6	+512
+;;	1	...
+;;	8	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+512	8	+512	16	+512	24	+512
+;;	1	...
+;;	...
+;;	7	...
+;;	32	...
+;;	...
+
+;; Do 128 four_complex_unfft macros
+;;	distance between fft data elements is 4
+;;	do 32 macros each processing 32 data values
+
+xpass2_8_levels_complex_unfft:
+	start_timer 10
+	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+	loops_init_prefetch 32, 64, 1, rcx
+c5b:	x4cl_four_complex_unfft rsi, 64, 2*64, 4*64, rdi
+	loops	2, c5b			;; Test inner loop counter
+	bump	rsi, -2*64+8*64		;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	16, c5b			;; Test loop counter
+	bump	rsi, -16*8*64		;; Restore source pointer
+	end_timer 10
+
+;; Do inverse FFT levels 3,4
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+512	8	+512	16	+512	24	+512
+;;	1	...
+;;	...
+;;	7	...
+;;	32	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+512	32	+512	64	+512	96	+512
+;;	1	...
+;;	...
+;;	31	...
+;;	128	...
+;;	...
+
+;; Do 4 groups of 32 four_complex_fft macros (FFT levels 3,4)
+;; In this section we also apply the 4 column multipliers (actually three
+;; since the first column multiplier is always one).  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+
+;; Do 128 four_complex_cpm_unfft macros
+;;	distance between fft data elements is 16
+;;	do 8 macros each processing 128 data values
+
+	start_timer 13
+	mov	rdi, PREMULT_ADDR	;; Load column multipliers pointer
+	bump	rdi, 16*XMM_PMD		;; Load column multipliers pointer
+	loops_init_prefetch 32, 64, 1, rcx ;; 4 iters of 2 iterations of 4
+c2b:	x4cl_four_complex_cpm_unfft rsi, 64, 8*64, 16*64
+	bump	rdi, XMM_PMD		;; Next column premultiplier
+	loops	4, c2b			;; Loop 4 times
+	bump	rdi, -4*XMM_PMD		;; Reset premultiplier pointer
+	loops	2, c2b			;; Reset counters, test loop counter
+	bump	rsi, -8*64+32*64	;; Next source pointer
+	bump	rdi, 4*XMM_PMD		;; Next premultiplier pointer
+	loops	4, c2b			;; Test outer loop counter
+	bump	rsi, -4*32*64		;; Restore source pointer
+	end_timer 13
+
+;; Do inverse FFT levels 1,2
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+512	32	+512	64	+512	96	+512
+;;	1	...
+;;	...
+;;	31	...
+;;	128	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+128	256	+128	512	+128	768	+128
+;;	1	...
+;;	...
+;;	255
+
+;; Do 32 four_complex_gpm_unfft macros
+;;	distance between fft data elements is 64
+;;	do 32 macros each processing 32 data values
+
+	start_timer 14
+	mov	rcx, PREMULT_PREFETCH	;; Prefetch pointer
+	mov	rdi, PREMULT_ADDR	;; Load group multiplier pointer
+	loops_init_prefetch 32, 64, 1, rcx ;; 8 iterations of 4
+c1b:	s4cl_four_complex_gpm_unfft rsi, 64, 32*64, 64*64, 8*XMM_PMD
+	loops	4, c1b			;; Test inner loop counter
+	bump	rdi, XMM_PMD		;; Next set of multipliers
+	loops	8, c1b			;; Test outer loop counter
+	end_timer 14
+
+xpass2_8_levels_complex_done:
+	ENDM
+
+
+; *************** xmm-pass2-10-levels-real macro ******************
+; This macro takes 1024 real values, 1024 semi-real values and the
+; first 1024 complex values and performs the final 10 levels of the
+; FFT process, squares the results, and does the first 10 levels of
+; the inverse FFT.
+
+hg_pass2_10_levels_real MACRO
+	LOCAL	b0d, b1b, b2b, b3b, b4b, b5b, b6b, b7b, b8b, b9b
+	LOCAL	baa0, baa, bab0, bab, bac0, bac, bad0, bad
+	LOCAL	c0b, c1b, c2b, c3b, c4b, c5b, c6b, c7b, c8b
+	LOCAL	xpass2_10_levels_real_1, xpass2_10_levels_real_2
+	LOCAL	xpass2_10_levels_real_3, xpass2_10_levels_real_4
+	LOCAL	xpass2_10_real_unfft, xpass2_10_real_done
+
+;; We switch to the same format used in one-pass FFTs (that is, the
+;; high word of xmm registers being 1 greater than the low word):
+
+;; Type 4 FFTs skip the forward FFT process
+
+	start_timer 2
+	mov	rsi, DATA_ADDR		;; Load source address
+	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	xpass2_10_levels_real_4
+
+;; Do FFT level 1
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+512	1024	+512	2048	+512	3072	+512
+;;	1	...
+;;	...
+;;	511	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	512	+1	1024	+1	1536	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	510	...
+;;	+2048	...
+
+;; Do eight_reals_fft_1 on real values 0 - 1023
+;; Do nothing on semi-real values from 1024 - 2047
+;; Do two_complex_fft on complex values from 2048 - 4095
+;;	distance between fft data elements is 512
+;;	do 256 iterations
+
+	loops_init 256
+b1b:	s2cl_eight_reals_fft_1 rsi, 2*64, 64
+	L2prefetch128 [rsi+3*128]		;; Prefetch a few iterations ahead
+	loops	64, b1b			;; Test loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	4, b1b			;; Test loop counter
+	bump	rsi, -4*dist128		;; Restore source pointer
+
+;; Do FFT levels 2,3
+;; Values 0-511 is real data, 512-1023 is semi-real data, 1024-4095 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	512	+1	1024	+1	1536	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	510	...
+;;	+2048	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	128	+1	256	+1	384	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	126	...
+;;	+2048	...
+;;	512	...
+;;	...
+
+;; Do 64 eight_reals_fft_2 macros
+;; Do 64 nop_two_two_complex_fft_2 macros
+;; Do 128 four_complex_fft macros
+;;	distance between fft data elements is 128
+;;	do 64 macros each processing 32 data values
+
+	mov	rdi, sincos10		;; Load sin/cos pointer
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	loops_init 64
+b2b:	x4cl_eight_reals_fft_2 rsi, 2*64, dist128, 2*dist128, rdi
+	loops	64, b2b			;; Test loop counter
+
+;; Do 256 four_complex_fft macros
+;;	distance between fft data elements is 128
+;;	do 64 macros each processing 32 data values
+
+	bump	rsi, -64*2*64+64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 64, 128, 1, rcx
+	xtouch	[rcx]			;; Preload first TLB
+	xtouch	[rcx+4096-128]		;; Preload the TLBs
+	xtouch	[rcx+2*4096-128]
+b3b:	x4cl_four_complex_fft rsi, 2*64, dist128, 2*dist128, rdi
+	loops	64, b3b			;; Test loop counter
+	bump	rsi, -64*2*64-64	;; Restore source pointer
+	bump	rcx, 128		;; Skip pad bytes every 8KB
+
+;; Do FFT levels 4
+;; Values 0-127 is real data, 128-255 is semi-real data, 256-4095 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	128	+1	256	+1	384	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	126	...
+;;	+2048	...
+;;	512	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	64	+1	128	+1	192	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	62	...
+;;	+2048	...
+;;	256	...
+;;	...
+
+;; Do 64 eight_reals_fft_1 macros
+;;	distance between fft data elements is 64
+;;	do 32 macros each processing 16 data values
+
+	mov	rdi, sincos9		;; Load sin/cos pointer
+	loops_init 256
+b4b:	x2cl_eight_reals_fft_1 rsi, 2*64, 64*64
+	loops	32, b4b			;; Test loop counter
+
+;; Do 448 two_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 224 macros each processing 16 data values
+
+	bump	rsi, -32*2*64+dist128	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 3 then 4 iterations of 32
+b5b:	x2cl_two_complex_fft rsi, 2*64, 64*64, rdi
+	loops	32, b5b			;; Test loop counter
+	bump	rsi, -32*2*64+dist128	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	4, b5b			;; Test loop counter
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	loops	2, b5b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 5,6
+;; Values 0-63 is real data, 64-127 is semi-real data, 128-4095 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	64	+1	128	+1	192	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	62	...
+;;	+2048	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	16	+1	32	+1	48	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	14	...
+;;	+2048	...
+;;	64	...
+;;	...
+
+;; Do 8 eight_reals_fft_2 macros
+;; Do 8 nop_two_two_complex_fft_2 macros
+;; Do 16 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 8 macros each processing 32 data values
+
+	mov	rdi, sincos8		;; Load sin/cos pointer
+	loops_init 128
+b6b:	x4cl_eight_reals_fft_2 rsi, 2*64, 16*64, 32*64, rdi
+	loops	8, b6b			;; Test loop counter
+
+;; Do 480 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 120 macros each processing 32 data values
+
+	bump	rsi, -8*2*64+64*64	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 2 iters of 4 iters of 1 or 2 of 8
+b7b:	x4cl_four_complex_fft rsi, 2*64, 16*64, 32*64, rdi
+	loops	8, b7b			;; Test inner loop counter
+	bump	rsi, -8*2*64+64*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	2, b7b			;; Test middle loop counter
+	bump	rsi, -2*64*64+dist128	;; Next source pointer
+	loops	4, b7b			;; 4 iters
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	loops	2, b7b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 7,8
+;; Values 0-15 is real data, 16-31 is semi-real data, 32-4095 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	16	+1	32	+1	48	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	14	...
+;;	+2048	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	4	+1	8	+1	12	+1
+;;	+2048	...
+;;	2	...
+;;	+2048	...
+;;	16	...
+;;	...
+
+;; Do 2 eight_reals_fft_2 macros
+;; Do 2 nop_two_two_complex_fft_2 macros
+;; Do 4 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 2 macros each processing 32 data values
+
+	mov	rdi, sincos7		;; Load sin/cos pointer
+	loops_init 128
+b8b:	x4cl_eight_reals_fft_2 rsi, 2*64, 4*64, 8*64, rdi
+	loops	2, b8b			;; Test loop counter
+
+;; Do 504 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 126 macros each processing 32 data values
+
+	bump	rsi, -2*2*64+16*64	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 2 iters of 4 iters of 7 or 8 of 2
+b9b:	x4cl_four_complex_fft rsi, 2*64, 4*64, 8*64, rdi
+	loops	2, b9b			;; Test loop counter
+	bump	rsi, -2*2*64+16*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b9b			;; Test loop counter
+	bump	rsi, -8*16*64+dist128	;; Next source pointer
+	loops	4, b9b			;; 4 iters
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	loops	2, b9b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 9,10
+;; Values 0-3 is real data, 4-7 is semi-real data, 8-4095 is complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	4	+1	8	+1	12	+1
+;;	+2048	...
+;;	2	...
+;;	+2048	...
+;;	16	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	2	+1	4	+1	6	+1
+;;	+2048	...
+;;	8	...
+;;	...
+
+;; Do 1/2 eight_reals_fft_2 macros
+;; Do 1/2 nop_two_two_complex_fft_2 macros
+;; Do 1 four_complex_fft macros
+;;	distance between fft data elements is 1
+
+;; Do 510 more four_complex_fft macros
+;;	distance between fft data elements is 1
+;;	do 255 macros each processing 16 data values
+
+	mov	rdi, sincos6		;; Load sin/cos pointer
+
+;; Execute the proper middle step
+
+	cmp	ffttype, 2
+	jl	xpass2_10_levels_real_1
+	jg	xpass2_10_levels_real_3
+
+xpass2_10_levels_real_2:
+	s2cl_eight_reals_with_square_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 256, 64, 1, rcx, 1, 32
+baa0:	xtouch	[rcx+4096-128]		;; Preload the TLB
+	xtouch	[rcx+2*4096-128]	;; Preload the TLB
+baa:	s2cl_four_complex_with_square rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, baa			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	4, baa			;; Test loop counter
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	loops	2, baa0			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+	jmp	xpass2_10_real_unfft
+
+xpass2_10_levels_real_1:
+	s2cl_eight_reals_fft_2_final rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 256, 64, 1, rcx, 1, 32
+bab0:	xtouch	[rcx+4096-128]		;; Preload the TLB
+	xtouch	[rcx+2*4096-128]	;; Preload the TLB
+bab:	s2cl_four_complex_fft_final rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bab			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	4, bab			;; Test loop counter
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	loops	2, bab0			;; Test loop counter
+	jmp	xpass2_10_real_done
+
+xpass2_10_levels_real_3:
+	mov	rbp, DIST_TO_MULSRCARG
+	s2cl_eight_reals_with_mult_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 256, 64, 1, rcx, 1, 32
+bac0:	xtouch	[rcx+4096-128]		;; Preload the TLB
+	xtouch	[rcx+2*4096-128]	;; Preload the TLB
+bac:	s2cl_four_complex_with_mult rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bac			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	4, bac			;; Test loop counter
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	loops	2, bac0			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+	jmp	xpass2_10_real_unfft
+
+xpass2_10_levels_real_4:
+	mov	rbp, DIST_TO_MULSRCARG
+	mov	rdi, sincos6		;; Load sin/cos pointer
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	s2cl_eight_reals_with_mulf_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 256, 64, 1, rcx, 1, 32
+	xtouch	[rcx]			;; Preload first TLB
+bad0:	xtouch	[rcx+4096-128]		;; Preload the TLB
+	xtouch	[rcx+2*4096-128]	;; Preload the TLB
+bad:	s2cl_four_complex_with_mulf rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bad			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	4, bad			;; Test loop counter
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	loops	2, bad0			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 7,8
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	2	+1	4	+1	6	+1
+;;	+2048	...
+;;	8	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	8	+1	16	+1	24	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	6	...
+;;	+2048	...
+;;	32	...
+;;	...
+
+;; Do 2 eight_reals_unfft_2 macros
+;; Do 2 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 4
+;;	do 1 macro processing 32 data values
+
+xpass2_10_real_unfft:
+	x4cl_eight_reals_unfft_2 rsi, 8*64, 2*64, 4*64
+
+;; Do 508 four_complex_unfft macros
+;;	distance between fft data elements is 4
+;;	do 127 macros each processing 32 data values
+
+	mov	rdi, sincos7		;; Load sin/cos pointer
+	loops_init 128, 1, 16		;; 2 iters of 4 iters of 15 or 16
+c8b:	x4cl_four_complex_unfft rsi, 8*64, 2*64, 4*64, rdi
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	16, c8b			;; Test loop counter
+	bump	rsi, -16*8*64+dist128	;; Next source pointer
+	loops	4, c8b			;; Test loop counter
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	loops	2, c8b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 5,6
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	8	+1	16	+1	24	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	6	...
+;;	+2048	...
+;;	32	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	32	+1	64	+1	96	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	30	...
+;;	+2048	...
+;;	128	...
+;;	...
+
+;; Do 8 eight_reals_unfft_2 macros
+;; Do 8 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 16
+;;	do 4 macros each processing 32 data values
+
+	loops_init 128
+c6b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 8*64, 16*64
+	loops	4, c6b			;; Test loop counter
+
+;; Do 496 four_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 124 macros each processing 32 data values
+
+	mov	rdi, sincos8		;; Load sin/cos pointer
+	bump	rsi, -4*2*64+32*64	;; Load source pointer
+	loops_reset			;; 2 iters of 4 iters of 3 or 4 of 4
+c7b:	x4cl_four_complex_unfft rsi, 2*64, 8*64, 16*64, rdi
+	loops	4, c7b			;; Test inner loop counter
+	bump	rsi, -4*2*64+32*64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	4, c7b			;; Test loop counter
+	bump	rsi, -4*32*64+dist128	;; Next source pointer
+	loops	4, c7b			;; 4 iters
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	loops	2, c7b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 4
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	32	+1	64	+1	96	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	30	...
+;;	+2048	...
+;;	128	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	64	+1	128	+1	192	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	62	...
+;;	+2048	...
+;;	256	...
+;;	...
+
+;; Do 32 eight_reals_unfft_1 macros
+;;	distance between fft data elements is 64
+;;	do 16 macros each processing 16 data values
+
+	loops_init 256
+c4b:	x2cl_eight_reals_unfft_1 rsi, 2*64, 32*64
+	loops	16, c4b			;; Test loop counter
+
+;; Do 480 two_complex_unfft macros
+;;	distance between fft data elements is 64
+;;	do 240 macros each processing 16 data values
+
+	mov	rdi, sincos9		;; Load sin/cos pointer
+	bump	rsi, -16*2*64+64*64	;; Load source pointer
+	loops_reset			;; 2 iters of 4 iters of 1 or 2 of 16
+c5b:	x2cl_two_complex_unfft rsi, 2*64, 32*64
+	loops	16, c5b			;; Test inner loop counter
+	bump	rsi, -16*2*64+64*64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64*64+dist128	;; Next source pointer
+	loops	4, c5b			;; Test loop counter (4 iters)
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 2,3
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	64	+1	128	+1	192	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	62	...
+;;	+2048	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	256	+1	512	+1	768	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	254	...
+;;	+2048	...
+;;	1024	...
+;;	...
+
+;; Do 64 eight_reals_unfft_2 macros
+;; Do 64 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 128
+;;	do 32 macros each processing 32 data values
+
+	loops_init 128
+c2b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 64*64, dist128
+	loops	32, c2b			;; Test loop counter
+
+;; Do 384 four_complex_unfft macros
+;;	distance between fft data elements is 128
+;;	do 96 macros each processing 32 data values
+
+	bump	rsi, -32*2*64+2*dist128	;; Next source pointer
+	mov	rdi, sincos10		;; Load sin/cos pointer
+	loops_reset			;; 2 iters of 1 or 2 iterations of 32
+c3b:	x4cl_four_complex_unfft rsi, 2*64, 64*64, dist128, rdi
+	loops	32, c3b			;; Test inner loop counter
+	bump	rsi, -32*2*64+2*dist128	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*2*dist128+64	;; Next source pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT level 1
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	256	+1	512	+1	768	+1
+;;	+2048	...
+;;	2	...
+;;	...
+;;	254	...
+;;	+2048	...
+;;	1024	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+512	1024	+512	2048	+512	3072	+512
+;;	1	...
+;;	...
+;;	511	...
+
+;; Do 256 eight_reals_last_unfft macros
+;; Do 256 two_two_complex_unfft macros
+;;	distance between fft data elements is 512
+;;	do 128 macros each processing 16 data values
+
+	loops_init 128
+c1b:	s4cl_eight_reals_unfft_1 rsi, 2*64, 2*dist128, 64
+	loops	64, c1b			;; Test loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	2, c1b			;; Test loop counter
+
+xpass2_10_real_done:
+	end_timer 2
+	ENDM
+
+
+; *************** xmm-pass2-10-levels-complex macro ******************
+; This macro takes 2 groups of 1024 complex values, premultiplies them and
+; performs the final 10 levels of the FFT process, squares the
+; results, and does the first 10 levels of the inverse FFT.
+; NOTE: Rather than remembering 1024 multipliers we break them up
+; into 256 groups of 4 columns.  By remembering these 260 values we can compute
+; all 1024 multipliers using a single complex multiply.  These extra
+; complex multiplies can probably be done faster than the computer can read the
+; extra multipliers from memory (and are more likely stay in the L2 cache)
+
+hg_pass2_10_levels_complex MACRO
+	LOCAL	b1b, b2b0, b2b, b3b, b4b, b5b
+	LOCAL	b6a0, b6a, b6b0, b6b, b6c0, b6c, b6d0, b6d
+	LOCAL	c1b, c2b, c3b, c4b, c5b
+	LOCAL	xpass2_10_levels_complex_1, xpass2_10_levels_complex_2
+	LOCAL	xpass2_10_levels_complex_3, xpass2_10_levels_complex_4
+	LOCAL	xpass2_10_levels_complex_unfft, xpass2_10_levels_complex_done
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	rsi, DATA_ADDR		;; Load address of FFT data
+	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	xpass2_10_levels_complex_4
+
+;; Do FFT level 1,2
+;;
+;; We swizzle the data so that one set of data is in the high word of
+;; an xmm register, the other set is in the low word.  This means
+;; a distance of 4096 data values.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+512	1024	+512	2048	+512	3072	+512
+;;	1	...
+;;	...
+;;	511
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+2K	256	+2K	512	+2K	768	+2K
+;;	1	...
+;;	...
+;;	255	...
+;;	1024	...
+;;	...
+
+;; Do 512 four_complex_gpm_fft macros
+;;	distance between fft data elements is 256
+;;	do 256 macros each processing 16 data values
+
+	start_timer 4
+	mov	rdi, PREMULT_ADDR	;; The group multipliers
+	loops_init 256			;; 64 iterations of 4
+b1b:	s2cl_four_complex_gpm_fft rsi, 64, 2*dist128
+	L2prefetch128 [rsi+5*64]		;; Prefetch a few iterations ahead in
+	L2prefetch128 [rsi+2*dist128+5*64];; case they are not in the L2 cache
+	loops	8, b1b			;; Test inner loop counter
+	bump	rdi, XMM_PMD		;; Next group multiplier
+	L2prefetch128 [rdi+2*XMM_PMD]
+	loops	16, b1b			;; Test loop counter
+	bump	rsi, -16*8*64+dist128	;; Next source pointer
+	loops	2, b1b			;; Test outer loop counter
+	bump	rsi, -2*dist128		;; Restore source pointer
+	end_timer 4
+
+;; Do FFT levels 3,4
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+2K	256	+2K	512	+2K	768	+2K
+;;	1	...
+;;	...
+;;	255	...
+;;	1024	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+2K	64	+2K	128	+2K	192	+2K
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+
+;; Do 4 groups of four_complex_fft_cpm macros
+;; To make things run faster we precompute the column multipliers times the
+;; 4 different sine/cosine multipliers we run into in this section.  This
+;; costs some memory but saves us some complex multiplies.
+
+;; Do 512 four_complex_cpm_fft macros
+;;	distance between fft data elements is 64
+;;	do 64 macros each processing 64 data values
+
+	start_timer 5
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	loops_init_prefetch 128, 64, 1, rcx ;; 2 iters of 8 iters of 8
+	xtouch	[rcx]			;; Load first TLB
+	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+b2b:	x4cl_four_complex_cpm_fft rsi, 64, 64*64, dist128, 8*XMM_PMD
+	bump	rdi, XMM_PMD		;; Next column premultiplier
+	loops	8, b2b			;; Test inner loop counters
+	bump	rdi, -8*XMM_PMD		;; Restore column premultiplier
+	loops	8, b2b			;; Test loop counter
+	bump	rsi, -64*64+2*dist128	;; Next source pointer
+	bump	rdi, 16*XMM_PMD		;; Next set of premultipliers
+	loops	2, b2b			;; Test loop counter
+	bump	rsi, -2*2*dist128	;; Restore source pointer
+	bump	rcx, 128		;; Don't prefetch pad bytes
+	end_timer 5
+
+;; Do FFT levels 5,6
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+2K	64	+2K	128	+2K	192	+2K
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+2K	16	+2K	32	+2K	48	+2K
+;;	1	...
+;;	...
+;;	15	...
+;;	64	...
+;;	...
+;;
+;; Do 512 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 128 macros each processing 32 data values
+
+;; Do FFT levels 7,8
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+2K	16	+2K	32	+2K	48	+2K
+;;	1	...
+;;	...
+;;	15	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+2K	4	+2K	8	+2K	12	+2K
+;;	1	...
+;;	...
+;;	3	...
+;;	16	...
+;;	...
+;;
+;; Do 512 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 128 macros each processing 32 data values
+
+;; Do this 16 cache lines at a time to maximize accessing data
+;; while it is in the L1 cache.
+
+	start_timer 6
+	mov	rdi, xsincos_complex	;; Load sin/cos pointers
+	mov	rbx, xsincos_complex
+	loops_init_prefetch 128, 64, 1, rcx ;; 2 iters of 4 of 4 of 16 cache lines
+
+	xtouch	[rcx+4096-128]		;; Load two prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+
+b4b:	x4cl_four_complex_fft rsi, 4*64, 16*64, 32*64, rdi
+	loops	4, b4b			;; Test inner loop counters
+	loops_undo 4			;; Restore counters
+
+	bump	rsi, -4*4*64		;; Restore source pointer
+b5b:	x4cl_four_complex_fft rsi, 16*64, 4*64, 8*64, rbx
+	bump	rbx, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	4, b5b			;; Test inner loop counters
+	bump	rbx, -4*2*XMM_SCD	;; Restore sine/cosine pointer
+
+	bump	rsi, -4*16*64+64	;; Next source pointer
+	loops	4, b4b			;; Test loop counter
+	bump	rsi, -4*64+64*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	bump	rbx, 4*2*XMM_SCD	;; Next sine/cosine pointer
+	loops	2, b4b			;; Test loop counters
+	bump	rsi, -2*64*64+dist128	;; Next source pointer
+	loops	2, b4b			;; Iterate if necessary
+	bump	rcx, -64*128		;; Re-prefetch 8KB section
+	loops	2, b4b			;; Test loop counter
+	bump	rcx, 8192+128		;; Prefetch next 8KB section after pad
+	bump	rsi, -4*dist128		;; Restore source pointer
+	end_timer 6
+
+;; Do FFT levels 9,10 as well as inverse FFT levels 9,10
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+2K	4	+2K	8	+2K	12	+2K
+;;	1	...
+;;	...
+;;	3	...
+;;	16	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+2K	2	+2K	4	+2K	6	+2K
+;;	1	...
+;;	8	...
+;;	...
+
+;; Do 512 four_complex_fft macros
+;;	distance between fft data elements is 1
+;;	do 128 macros each processing 32 data values
+
+;; Execute the right middle step
+
+	cmp	ffttype, 2
+	jl	xpass2_10_levels_complex_1
+	jg	xpass2_10_levels_complex_3
+
+xpass2_10_levels_complex_2:
+	start_timer 9
+	loops_init_prefetch 128, 64, 1, rcx
+	xtouch	[rcx+4096-128]		;; Prefetch TLB
+	xtouch	[rcx+2*4096-128]
+b6a0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6a:	x4cl_four_complex_with_square rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6a			;; Test inner loop counters
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6a0			;; Do 4 iters
+	bump	rcx, 128		;; Prefetch next 8KB section after pad
+	bump	rsi, -4*dist128		;; Restore source pointer
+	end_timer 9
+	jmp	xpass2_10_levels_complex_unfft
+
+xpass2_10_levels_complex_1:
+	start_timer 9
+	loops_init_prefetch 128, 64, 1, rcx
+	xtouch	[rcx+4096-128]		;; Prefetch TLB
+	xtouch	[rcx+2*4096-128]
+b6b0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6b:	x4cl_four_complex_fft_final rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6b			;; Test inner loop counters
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6b0			;; Do 4 iters
+	end_timer 9
+	jmp	xpass2_10_levels_complex_done
+
+xpass2_10_levels_complex_3:
+	start_timer 9
+	loops_init_prefetch 128, 64, 1, rcx
+	mov	rbp, DIST_TO_MULSRCARG
+	xtouch	[rcx+4096-128]		;; Prefetch TLB
+	xtouch	[rcx+2*4096-128]
+b6c0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6c:	x4cl_four_complex_with_mult rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6c			;; Test inner loop counters
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6c0			;; Do 4 iters
+	bump	rcx, 128		;; Prefetch next 8KB section after pad
+	bump	rsi, -4*dist128		;; Restore source pointer
+	end_timer 9
+	jmp	xpass2_10_levels_complex_unfft
+
+xpass2_10_levels_complex_4:
+	start_timer 9
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	loops_init_prefetch 128, 64, 1, rcx
+	mov	rbp, DIST_TO_MULSRCARG
+	xtouch	[rcx]			;; Load first prefetch TLB
+	xtouch	[rcx+4096-128]		;; Prefetch TLB
+	xtouch	[rcx+2*4096-128]
+b6d0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6d:	x4cl_four_complex_with_mulf rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6d			;; Test inner loop counters
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6d0			;; Do 4 iters
+	bump	rcx, 128		;; Prefetch next 8KB section after pad
+	bump	rsi, -4*dist128		;; Restore source pointer
+	end_timer 9
+
+;; Do inverse FFT levels 7,8
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+2K	2	+2K	4	+2K	6	+2K
+;;	1	...
+;;	8	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+2K	8	+2K	16	+2K	24	+2K
+;;	1	...
+;;	...
+;;	7	...
+;;	32	...
+;;	...
+;;
+;; Do 512 four_complex_unfft macros
+;;	distance between fft data elements is 4
+;;	do 128 macros each processing 32 data values
+
+;; Do inverse FFT levels 5,6
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+2K	8	+2K	16	+2K	24	+2K
+;;	1	...
+;;	...
+;;	7	...
+;;	32	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+2K	32	+2K	64	+2K	96	+2K
+;;	1	...
+;;	...
+;;	31	...
+;;	128	...
+;;	...
+;;
+;; Do 512 four_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 128 macros each processing 32 data values
+
+;; Do this 16 cache lines at a time to maximize accessing data
+;; while it is in the L1 cache.
+
+xpass2_10_levels_complex_unfft:
+	start_timer 10
+	mov	rdi, xsincos_complex	;; Load sin/cos pointers
+	mov	rbx, xsincos_complex
+	loops_init_prefetch 128, 64, 1, rcx ;; 2 iters of 16 cache lines
+
+	xtouch	[rcx+4096-128]		;; Load two prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+
+c5b:	x4cl_four_complex_unfft rsi, 8*64, 2*64, 4*64, rbx
+	bump	rbx, XMM_SCD		;; Next sine/cosine pointer
+	loops	4, c5b			;; Test loop counter
+	bump	rsi, -4*8*64		;; Restore source pointer
+	bump	rbx, -4*XMM_SCD		;; Next sine/cosine pointer
+	loops_undo 4			;; Restore loop counters
+
+c4b:	x4cl_four_complex_unfft rsi, 2*64, 8*64, 16*64, rdi
+	loops	4, c4b			;; Test loop counter
+
+	bump	rsi, -4*2*64+64		;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64+32*64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	bump	rbx, 4*XMM_SCD		;; Next sine/cosine pointer
+	loops	4, c5b			;; Iterate if necessary
+	bump	rsi, -4*32*64+dist128	;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rcx, -64*128		;; Re-prefetch section
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -4*dist128		;; Restore source pointer
+	end_timer 10
+
+;; Do inverse FFT levels 3,4
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+2K	32	+2K	64	+2K	96	+2K
+;;	1	...
+;;	...
+;;	31	...
+;;	128	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+2K	128	+2K	256	+2K	384	+2K
+;;	1	...
+;;	...
+;;	127	...
+;;	512	...
+;;	...
+
+;; Do 4 groups of 256 four_complex_fft macros (FFT levels 3,4)
+;; In this section we also apply the 4 column multipliers (actually three
+;; since the first column multiplier is always one).  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+
+;; Do 512 four_complex_cpm_unfft macros
+;;	distance between fft data elements is 64
+;;	do 32 macros each processing 128 data values
+
+	start_timer 13
+	mov	rcx, PREMULT_PREFETCH	;; Prefetch pointer
+	mov	rdi, PREMULT_ADDR	;; Load column multipliers pointer
+	bump	rdi, 32*XMM_PMD		;; Load column multipliers pointer
+	loops_init_prefetch 128, 64, 1, rcx ;; 4 iters of 4 iters of 8
+	xtouch	[rcx]			;; Load first prefetch TLBs
+	xtouch	[rcx+4096-128]		;; Load two prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+c2b:	x4cl_four_complex_cpm_unfft rsi, 64, 32*64, 64*64
+	bump	rdi, XMM_PMD		;; Next column premultiplier
+	loops	8, c2b			;; Test inner loop counters
+	bump	rdi, -8*XMM_PMD		;; Reset premultiplier pointer
+	loops	4, c2b			;; Test loop counter
+	bump	rsi, -32*64+dist128	;; Next source pointer
+	bump	rdi, 8*XMM_PMD		;; Next premultiplier pointer
+	loops	4, c2b			;; Test loop counter
+	bump	rsi, -4*dist128		;; Restore source pointer
+	bump	rcx, -64*128		;; Re-prefetch section
+	end_timer 13
+
+;; Do inverse FFT levels 1,2
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+2K	128	+2K	256	+2K	384	+2K
+;;	1	...
+;;	...
+;;	127	...
+;;	512	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+512	1024	+512	2048	+512	3072	+512
+;;	1	...
+;;	...
+;;	511
+
+;; Do 128 four_complex_gpm_unfft macros
+;;	distance between fft data elements is 256
+;;	do 128 macros each processing 32 data values
+
+	start_timer 14
+	mov	rdi, PREMULT_ADDR	;; Load group multiplier pointer
+	loops_init_prefetch 256, 64, 1, rcx ;; 16 iterations of 8
+c1b:	s4cl_four_complex_gpm_unfft rsi, 64, dist128, 2*dist128, 16*XMM_PMD
+	loops	8, c1b			;; Test inner loop counters
+	bump	rdi, XMM_PMD		;; Next set of multipliers
+	loops	16, c1b			;; Test loop counter
+	end_timer 14
+
+xpass2_10_levels_complex_done:
+	ENDM
+
+
+; *************** xmm-pass2-11-levels-real macro ******************
+; This macro takes 2048 real values, 2048 semi-real values and the
+; first 2048 complex values and performs the final 11 levels of the
+; FFT process, squares the results, and does the first 11 levels of
+; the inverse FFT.
+
+hg_pass2_11_levels_real MACRO
+	LOCAL	b0d, b1b, b2b, b3b0, b3b, b4b, b5b, b6b, b7b, b8b, b9b
+	LOCAL	baa0, baa, bab0, bab, bac0, bac, bad0, bad
+	LOCAL	c0b, c1b, c2b, c3b, c4b, c5b, c6b, c7b, c8b
+	LOCAL	xpass2_11_levels_real_1, xpass2_11_levels_real_2
+	LOCAL	xpass2_11_levels_real_3, xpass2_11_levels_real_4
+	LOCAL	xpass2_11_real_unfft, xpass2_11_real_done
+
+;; We switch to the same format used in one-pass FFTs (that is, the
+;; high word of xmm registers being 1 greater than the low word):
+
+;; Type 4 FFTs skip the forward FFT process
+
+	start_timer 2
+	mov	rsi, DATA_ADDR		;; Load source address
+	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	xpass2_11_levels_real_4
+
+;; Do FFT level 1
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1K	2048	+1K	4096	+1K	6144	+1K
+;;	1	...
+;;	...
+;;	1023	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	1024	+1	2048	+1	3072	+1
+;;	4096	...
+;;	2	...
+;;	...
+;;	1022	...
+;;	5118	...
+
+;; Do eight_reals_fft_1 on real values 0 - 2047
+;; Do nothing on semi-real values from 2048 - 4095
+;; Do two_complex_fft on complex values from 4096 - 8191
+;;	distance between fft data elements is 1K
+;;	do 512 iterations
+
+	loops_init 512
+b1b:	s2cl_eight_reals_fft_1 rsi, 2*64, 64
+	L2prefetch128 [rsi+3*128]		;; Prefetch a few iterations ahead
+	loops	64, b1b			;; Test loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	8, b1b			;; Test loop counter
+	bump	rsi, -8*dist128		;; Restore source pointer
+
+;; Do FFT levels 2,3
+;; Values 0-1023 is real data, 1024-2047 is semi-real data, 2048-8191 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	1024	+1	2048	+1	3072	+1
+;;	4096	...
+;;	2	...
+;;	...
+;;	1022	...
+;;	5118	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	256	+1	512	+1	768	+1
+;;	4096	...
+;;	2	...
+;;	...
+;;	254	...
+;;	4350	...
+;;	1024	...
+;;	...
+
+;; Do 128 eight_reals_fft_2 macros
+;; Do 128 nop_two_two_complex_fft_2 macros
+;; Do 256 four_complex_fft macros
+;;	distance between fft data elements is 256
+;;	do 128 macros each processing 32 data values
+
+	mov	rdi, sincos10		;; Load sin/cos pointer
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	loops_init 128
+b2b:	x4cl_eight_reals_fft_2 rsi, 2*64, 2*dist128, 4*dist128, rdi
+	loops	64, b2b			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	2, b2b			;; Test loop counter
+
+;; Do 512 four_complex_fft macros
+;;	distance between fft data elements is 256
+;;	do 128 macros each processing 32 data values
+
+	bump	rsi, -2*dist128+64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 128, 128, 1, rcx
+	xtouch	[rcx]			;; Preload first TLB
+b3b0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+	xtouch	[rcx+2*4096-128]
+b3b:	x4cl_four_complex_fft rsi, 2*64, 2*dist128, 4*dist128, rdi
+	loops	64, b3b			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	bump	rcx, 128		;; Skip pad bytes every 8KB
+	loops	2, b3b0			;; Test loop counter
+	bump	rsi, -2*dist128-64	;; Restore source pointer
+
+;; Do FFT levels 4,5
+;; Values 0-255 is real data, 256-511 is semi-real data, 512-8191 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	256	257	512	513	768	769
+;;	4096	...
+;;	2	...
+;;	...
+;;	254	...
+;;	4350	...
+;;	1024	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	64	65	128	129	192	193
+;;	4096	...
+;;	2	...
+;;	...
+;;	62	...
+;;	4158	...
+;;	256	...
+;;	...
+
+;; Do 32 eight_reals_fft_2 macros
+;; Do 32 nop_two_two_complex_fft_2 macros
+;; Do 64 four_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 32 macros each processing 32 data values
+
+	mov	rdi, sincos9		;; Load sin/cos pointer
+	loops_init 256
+b4b:	x4cl_eight_reals_fft_2 rsi, 2*64, 64*64, dist128, rdi
+	loops	32, b4b			;; Test inner loop counter
+
+;; Do 896 four_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 224 macros each processing 32 data values
+
+	bump	rsi, -32*2*64+2*dist128	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 3 then 4 iterations of 32
+b5b:	x4cl_four_complex_fft rsi, 2*64, 64*64, dist128, rdi
+	loops	32, b5b			;; Test inner loop counter
+	bump	rsi, -32*2*64+2*dist128	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	4, b5b			;; Test loop counter
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	loops	2, b5b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 6,7
+;; Values 0-63 is real data, 64-127 is semi-real data, 128-8191 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	64	65	128	129	192	193
+;;	4096	...
+;;	2	...
+;;	...
+;;	62	...
+;;	4158	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	16	17	32	33	48	49
+;;	4096	...
+;;	2	...
+;;	...
+;;	14	...
+;;	4110	...
+;;	64	...
+;;	...
+
+;; Do 8 eight_reals_fft_2 macros
+;; Do 8 nop_two_two_complex_fft_2 macros
+;; Do 16 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 8 macros each processing 32 data values
+
+	mov	rdi, sincos8		;; Load sin/cos pointer
+	loops_init 256
+b6b:	x4cl_eight_reals_fft_2 rsi, 2*64, 16*64, 32*64, rdi
+	loops	8, b6b			;; Test inner loop counter
+
+;; Do 992 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 248 macros each processing 32 data values
+
+	bump	rsi, -8*2*64+64*64	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 2 iters of 8 iters of 1 or 2 of 8
+b7b:	x4cl_four_complex_fft rsi, 2*64, 16*64, 32*64, rdi
+	loops	8, b7b			;; Test inner loop counter
+	bump	rsi, -8*2*64+64*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	2, b7b			;; Test middle loop counter
+	bump	rsi, -2*64*64+dist128	;; Next source pointer
+	loops	8, b7b			;; 8 iters
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	loops	2, b7b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 8,9
+;; Values 0-15 is real data, 16-31 is semi-real data, 32-8191 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	16	17	32	33	48	49
+;;	4096	...
+;;	2	...
+;;	...
+;;	14	...
+;;	4110	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	4	5	8	9	12	13
+;;	4096	...
+;;	2	...
+;;	4098	...
+;;	16	...
+;;	...
+
+;; Do 2 eight_reals_fft_2 macros
+;; Do 2 nop_two_two_complex_fft_2 macros
+;; Do 4 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 2 macros each processing 32 data values
+
+	mov	rdi, sincos7		;; Load sin/cos pointer
+	loops_init 256
+b8b:	x4cl_eight_reals_fft_2 rsi, 2*64, 4*64, 8*64, rdi
+	loops	2, b8b			;; Test loop counter
+
+;; Do 1016 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 254 macros each processing 32 data values
+
+	bump	rsi, -2*2*64+16*64	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 2 iters of 8 iters of 7 or 8 of 2
+b9b:	x4cl_four_complex_fft rsi, 2*64, 4*64, 8*64, rdi
+	loops	2, b9b			;; Test loop counter
+	bump	rsi, -2*2*64+16*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b9b			;; Test loop counter
+	bump	rsi, -8*16*64+dist128	;; Next source pointer
+	loops	8, b9b			;; 8 iters
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	loops	2, b9b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 10,11
+;; Values 0-3 is real data, 4-7 is semi-real data, 8-8191 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	4	5	8	9	12	13
+;;	4096	...
+;;	2	...
+;;	4098	...
+;;	16	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	2	3	4	5	6	7
+;;	4096	...
+;;	8	...
+;;	...
+
+;; Do 1/2 eight_reals_fft_2 macros
+;; Do 1/2 nop_two_two_complex_fft_2 macros
+;; Do 1 four_complex_fft macros
+;;	distance between fft data elements is 1
+
+;; Do 1022 more four_complex_fft macros
+;;	distance between fft data elements is 1
+;;	do 511 macros each processing 16 data values
+
+	mov	rdi, sincos6		;; Load sin/cos pointer
+
+;; Execute the proper middle step
+
+	cmp	ffttype, 2
+	jl	xpass2_11_levels_real_1
+	jg	xpass2_11_levels_real_3
+
+xpass2_11_levels_real_2:
+	s2cl_eight_reals_with_square_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 512, 64, 1, rcx, 1, 32
+baa0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+baa:	s2cl_four_complex_with_square rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, baa			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, baa			;; Test loop counter
+	loops	4, baa0			;; Test loop counter
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	loops	2, baa0			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+	jmp	xpass2_11_real_unfft
+
+xpass2_11_levels_real_1:
+	s2cl_eight_reals_fft_2_final rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 512, 64, 1, rcx, 1, 32
+bab0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+bab:	s2cl_four_complex_fft_final rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bab			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, bab			;; Test loop counter
+	loops	4, bab0			;; Test loop counter
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	loops	2, bab0			;; Test loop counter
+	jmp	xpass2_11_real_done
+
+xpass2_11_levels_real_3:
+	mov	rbp, DIST_TO_MULSRCARG
+	s2cl_eight_reals_with_mult_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 512, 64, 1, rcx, 1, 32
+bac0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+bac:	s2cl_four_complex_with_mult rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bac			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, bac			;; Test loop counter
+	loops	4, bac0			;; Test loop counter
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	loops	2, bac0			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+	jmp	xpass2_11_real_unfft
+
+xpass2_11_levels_real_4:
+	mov	rdi, sincos6		;; Load sin/cos pointer
+	mov	rbp, DIST_TO_MULSRCARG
+	mov	rcx, DATA_PREFETCH	;; Load prefetch pointer
+	s2cl_eight_reals_with_mulf_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 512, 64, 1, rcx, 1, 32
+	xtouch	[rcx]			;; Preload the TLBs
+bad0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+bad:	s2cl_four_complex_with_mulf rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bad			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, bad			;; Test loop counter
+	loops	4, bad0			;; Test loop counter
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	loops	2, bad0			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 8,9
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	2	3	4	5	6	7
+;;	4096	...
+;;	8	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	8	9	16	17	24	25
+;;	4096	...
+;;	2	...
+;;	...
+;;	6	...
+;;	4102	...
+;;	32	...
+;;	...
+
+;; Do 2 eight_reals_unfft_2 macros
+;; Do 2 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 4
+;;	do 1 macro processing 32 data values
+
+xpass2_11_real_unfft:
+	x4cl_eight_reals_unfft_2 rsi, 8*64, 2*64, 4*64
+
+;; Do 1020 four_complex_unfft macros
+;;	distance between fft data elements is 4
+;;	do 255 macros each processing 32 data values
+
+	mov	rdi, sincos7		;; Load sin/cos pointer
+	loops_init 256, 1, 16		;; 2 iters of 8 iters of 15 or 16
+c8b:	x4cl_four_complex_unfft rsi, 8*64, 2*64, 4*64, rdi
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	16, c8b			;; Test loop counter
+	bump	rsi, -16*8*64+dist128	;; Next source pointer
+	loops	8, c8b			;; Test loop counter
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	loops	2, c8b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 6,7
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	8	9	16	17	24	25
+;;	4096	...
+;;	2	...
+;;	...
+;;	6	...
+;;	4102	...
+;;	32	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	32	33	64	65	96	97
+;;	4096	...
+;;	2	...
+;;	...
+;;	30	...
+;;	4126	...
+;;	128	...
+;;	...
+
+;; Do 8 eight_reals_unfft_2 macros
+;; Do 8 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 16
+;;	do 4 macros each processing 32 data values
+
+	loops_init 256
+c6b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 8*64, 16*64
+	loops	4, c6b			;; Test loop counter
+
+;; Do 1008 four_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 252 macros each processing 32 data values
+
+	mov	rdi, sincos8		;; Load sin/cos pointer
+	bump	rsi, -4*2*64+32*64	;; Load source pointer
+	loops_reset			;; 2 iters of 8 iters of 3 or 4 of 4
+c7b:	x4cl_four_complex_unfft rsi, 2*64, 8*64, 16*64, rdi
+	loops	4, c7b			;; Test inner loop counter
+	bump	rsi, -4*2*64+32*64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	4, c7b			;; Test loop counter
+	bump	rsi, -4*32*64+dist128	;; Next source pointer
+	loops	8, c7b			;; 8 iters
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	loops	2, c7b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 4,5
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	32	33	64	65	96	97
+;;	4096	...
+;;	2	...
+;;	...
+;;	30	...
+;;	4126	...
+;;	128	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	128	129	256	257	384	385
+;;	4096	...
+;;	2	...
+;;	...
+;;	126	...
+;;	4222	...
+;;	512	...
+;;	...
+
+;; Do 32 eight_reals_unfft_2 macros
+;; Do 32 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 64
+;;	do 16 macros each processing 32 data values
+
+	loops_init 256
+c4b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 32*64, 64*64
+	loops	16, c4b			;; Test loop counter
+
+;; Do 960 four_complex_unfft macros
+;;	distance between fft data elements is 64
+;;	do 240 macros each processing 32 data values
+
+	mov	rdi, sincos9		;; Load sin/cos pointer
+	bump	rsi, -16*2*64+dist128	;; Load source pointer
+	loops_reset			;; 2 iters of 7 or 8 iterations of 16
+c5b:	x4cl_four_complex_unfft rsi, 2*64, 32*64, 64*64, rdi
+	loops	16, c5b			;; Test inner loop counter
+	bump	rsi, -16*2*64+dist128	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	8, c5b			;; Test loop counter
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 2,3
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	128	129	256	257	384	385
+;;	4096	...
+;;	2	...
+;;	...
+;;	126	...
+;;	4222	...
+;;	512	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	512	513	1024	1025	1536	1537
+;;	4096	...
+;;	2	...
+;;	...
+;;	510	...
+;;	4606	...
+;;	2048	...
+;;	...
+
+;; Do 128 eight_reals_unfft_2 macros
+;; Do 128 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 256
+;;	do 64 macros each processing 32 data values
+
+	loops_init 256
+c2b:	x4cl_eight_reals_unfft_2 rsi, 2*64, dist128, 2*dist128
+	loops	64, c2b			;; Test loop counter
+
+;; Do 768 four_complex_unfft macros
+;;	distance between fft data elements is 256
+;;	do 192 macros each processing 32 data values
+
+	bump	rsi, -64*2*64+4*dist128	;; Next source pointer
+	mov	rdi, sincos10		;; Load sin/cos pointer
+	loops_reset			;; 1 then 2 iterations of 64
+c3b:	x4cl_four_complex_unfft rsi, 2*64, dist128, 2*dist128, rdi
+	loops	64, c3b			;; Test inner loop counter
+	bump	rsi, -64*2*64+4*dist128	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*4*dist128+64	;; Next source pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT level 1
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	512	513	1024	1025	1536	1537
+;;	4096	...
+;;	2	...
+;;	...
+;;	510	...
+;;	4606	...
+;;	2048	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1K	2048	+1K	4096	+1K	6144	+1K
+;;	1	...
+;;	...
+;;	1023	...
+
+;; Do 512 eight_reals_last_unfft macros
+;; Do 512 two_two_complex_unfft macros
+;;	distance between fft data elements is 1024
+;;	do 256 macros each processing 16 data values
+
+	loops_init 256
+c1b:	s4cl_eight_reals_unfft_1 rsi, 2*64, 4*dist128, 64
+	loops	64, c1b			;; Test loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	4, c1b			;; Test loop counter
+
+xpass2_11_real_done:
+	end_timer 2
+	ENDM
+
+
+; *************** xmm-pass2-11-levels-complex macro ******************
+; This macro takes 2 groups of 2048 complex values, premultiplies them and
+; performs the final 11 levels of the FFT process, squares the
+; results, and does the first 11 levels of the inverse FFT.
+; NOTE: Rather than remembering 2048 multipliers we break them up
+; into 512 groups of 4 columns.  By remembering these 516 values we can compute
+; all 2048 multipliers using a single complex multiply.  These extra
+; complex multiplies can probably be done faster than the computer can read the
+; extra multipliers from memory (and are more likely stay in the L2 cache)
+
+hg_pass2_11_levels_complex MACRO incr
+	LOCAL	b1b, b2b0, b2b, b3b, b4b, b5b
+	LOCAL	b6a0, b6a, b6b0, b6b1, b6b, b6c0, b6c, b6d0, b6d1, b6d
+	LOCAL	c1b0, c1b, c2b, c3b, c4b, c5b
+	LOCAL	xpass2_11_levels_complex_1, xpass2_11_levels_complex_2
+	LOCAL	xpass2_11_levels_complex_3, xpass2_11_levels_complex_4
+	LOCAL	xpass2_11_levels_complex_unfft, xpass2_11_levels_complex_done
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	rsi, DATA_ADDR		;; Load address of FFT data
+	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	xpass2_11_levels_complex_4
+
+;; Do FFT level 1,2
+;;
+;; We swizzle the data so that one set of data is in the high word of
+;; an xmm register, the other set is in the low word.  This means
+;; a distance of 4096 data values.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1K	2048	+1K	4096	+1K	6144	+1K
+;;	1	...
+;;	...
+;;	1023
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	512	+4K	1024	+4K	1536	+4K
+;;	1	...
+;;	...
+;;	511	...
+;;	2048	...
+;;	...
+
+;; Do 1024 four_complex_gpm_fft macros
+;;	distance between fft data elements is 512
+;;	do 512 macros each processing 16 data values
+
+	start_timer 4
+	mov	rdi, PREMULT_ADDR	;; The group multipliers
+	loops_init 512			;; 128 iterations of 4
+b1b:	s2cl_four_complex_gpm_fft rsi, 64, 4*dist128
+	L2prefetch128 [rsi+5*64]		;; Prefetch a few iterations ahead in
+	L2prefetch128 [rsi+4*dist128+5*64];; case they are not in the L2 cache
+	loops	8, b1b			;; Test inner loop counter
+	bump	rdi, XMM_PMD		;; Next group multiplier
+	L2prefetch128 [rdi+2*XMM_PMD]
+	loops	16, b1b			;; Test loop counter
+	bump	rsi, -16*8*64+dist128	;; Next source pointer
+	loops	4, b1b			;; Test outer loop counter
+	bump	rsi, -4*dist128		;; Restore source pointer
+	end_timer 4
+
+;; Do FFT levels 3,4
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	512	+4K	1024	+4K	1536	+4K
+;;	1	...
+;;	...
+;;	511	...
+;;	2048	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	128	+4K	256	+4K	384	+4K
+;;	1	...
+;;	...
+;;	127	...
+;;	512	...
+;;	...
+
+;; Do 4 groups of four_complex_fft_cpm macros
+;; To make things run faster we precompute the column multipliers times the
+;; 4 different sine/cosine multipliers we run into in this section.  This
+;; costs some memory but saves us some complex multiplies.
+
+;; Do 1024 four_complex_cpm_fft macros
+;;	distance between fft data elements is 128
+;;	do 128 macros each processing 64 data values
+
+	start_timer 5
+	mov	rcx, PREMULT_PREFETCH	;; Prefetch pointer
+	loops_init_prefetch 256, 64, 1, rcx ;; 2 iters of 2 iters of 8 iters of 8
+	xtouch	[rcx]			;; Load first TLB
+b2b0:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+b2b:	x4cl_four_complex_cpm_fft rsi, 64, dist128, 2*dist128, 8*XMM_PMD
+	bump	rdi, XMM_PMD		;; Next column premultiplier
+	loops	8, b2b			;; Test inner loop counter
+	bump	rdi, -8*XMM_PMD		;; Restore column premultiplier
+	loops	8, b2b			;; Test loop counter
+	loops	2, b2b0			;; Test loop counter
+	bump	rsi, -128*64+4*dist128	;; Next source pointer
+	bump	rdi, 16*XMM_PMD		;; Next set of premultipliers
+	bump	rcx, -4096		;; Back up so we only prefetch 12KB
+	loops	2, b2b0			;; Test loop counter
+	bump	rsi, -2*4*dist128	;; Restore source pointer
+	end_timer 5
+
+;; Do FFT levels 5
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	128	+4K	256	+4K	384	+4K
+;;	1	...
+;;	...
+;;	127	...
+;;	512	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	64	+4K	128	+4K	192	+4K
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+;;
+;; Do 1024 two_two_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 512 macros each processing 16 data values
+
+;; Do FFT levels 6,7
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	64	+4K	128	+4K	192	+4K
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	16	+4K	32	+4K	48	+4K
+;;	1	...
+;;	...
+;;	15	...
+;;	64	...
+;;	...
+;;
+;; Do 1024 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 256 macros each processing 32 data values
+
+;; Do FFT levels 8,9
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	16	+4K	32	+4K	48	+4K
+;;	1	...
+;;	...
+;;	15	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	4	+4K	8	+4K	12	+4K
+;;	1	...
+;;	...
+;;	3	...
+;;	16	...
+;;	...
+;;
+;; Do 1024 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 256 macros each processing 32 data values
+
+;; Do this 32 cache lines at a time to maximize accessing data
+;; while it is in the L1 cache.
+
+	start_timer 6
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	mov	rdi, xsincos_complex	;; Load sin/cos pointers
+	mov	rbx, xsincos_complex
+	mov	rbp, xsincos_complex
+	loops_init_prefetch 512, 64, 2, rcx ;; 2 iters of 4 of 4 of 32 cache lines
+
+	xtouch	[rcx]			;; Load first TLB
+	xtouch	[rcx+4096]		;; Load six prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+	xtouch	[rcx+3*4096-128]
+	xtouch	[rcx+4*4096-128]
+	xtouch	[rcx+5*4096-128]
+	xtouch	[rcx+6*4096-128]
+
+b3b:	x2cl_two_complex_fft rsi, 4*64, 64*64, rdi
+	loops	16, b3b			;; 8 iterations
+	bump	rsi, -16*4*64		;; Restore source pointer
+	bump	rcx, -4*128+8192+128	;; Prefetch from next section
+	loops_undo 16
+
+b4b:	x4cl_four_complex_fft rsi, 4*64, 16*64, 32*64, rbx
+	loops	4, b4b, 2		;; 4 iterations with non-standard increment
+	bump	rsi, -4*4*64+64*64
+	bump	rbx, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	2, b4b			;; 2 iterations
+	bump	rsi, -2*64*64		;; Restore source pointer
+	bump	rbx, -2*2*XMM_SCD	;; Restore sine/cosine pointer
+	bump	rcx, -4*128+8192+128	;; Prefetch from next section
+	loops_undo 2*4*2
+
+b5b:	x4cl_four_complex_fft rsi, 16*64, 4*64, 8*64, rbp
+	bump	rbp, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b5b, 2 		;; 8 iterations with non-standard increment
+	bump	rbp, -8*2*XMM_SCD	;; Restore sine/cosine pointer
+	bump	rcx, -2*(8192+128)	;; Back to prefetching from 1st section
+
+	bump	rsi, -8*16*64+64	;; Next source pointer
+	loops	4, b3b			;; Test inner loop counter
+	bump	rsi, -4*64+dist128	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	bump	rbx, 2*2*XMM_SCD	;; Next sine/cosine pointer
+	bump	rbp, 8*2*XMM_SCD	;; Next sine/cosine pointer
+	loops	4, b3b			;; Test loop counter
+	bump	rcx, -16*4*128		;; Re-prefetch 3 sections
+	loops	2, b3b			;; Test loop counter
+	bump	rsi, -8*dist128		;; Restore source pointer
+	bump	rcx, 3*(8192+128)	;; Prefetch next 3 sections
+	end_timer 6
+
+;; Do FFT levels 10,11 as well as inverse FFT levels 10,11
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	4	+4K	8	+4K	12	+4K
+;;	1	...
+;;	...
+;;	3	...
+;;	16	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	2	+4K	4	+4K	6	+4K
+;;	1	...
+;;	8	...
+;;	...
+
+;; Do 1024 four_complex_fft macros
+;;	distance between fft data elements is 1
+;;	do 256 macros each processing 32 data values
+
+;; Execute the right middle step
+
+	cmp	ffttype, 2
+	jl	xpass2_11_levels_complex_1
+	jg	xpass2_11_levels_complex_3
+
+xpass2_11_levels_complex_2:
+	start_timer 9
+	loops_init_prefetch 256, 64, 1, rcx
+	xtouch	[rcx+4096-128]		;; Prefetch TLB
+	xtouch	[rcx+2*4096-128]
+b6a0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6a:	x4cl_four_complex_with_square rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6a			;; Test inner loop counters
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	2, b6a			;; Do 2 iters
+	loops	2, b6a0			;; Test loop counter
+	bump	rcx, -64*128		;; Reprefetch section
+	loops	2, b6a0			;; Test loop counter
+	bump	rsi, -8*dist128		;; Restore source pointer
+	bump	rcx, 8192+128		;; Don't prefetch pad bytes
+	end_timer 9
+	jmp	xpass2_11_levels_complex_unfft
+
+xpass2_11_levels_complex_1:
+	start_timer 9
+	loops_init_prefetch 256, 64, 1, rcx
+b6b0:	xtouch	[rcx+4096-128]		;; Prefetch TLB
+	xtouch	[rcx+2*4096-128]
+b6b1:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6b:	x4cl_four_complex_fft_final rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6b			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	2, b6b			;; Do 2 iters
+	loops	2, b6b1			;; Test loop counter
+	bump	rcx, 128		;; Don't prefetch pad bytes
+	loops	2, b6b0			;; Test loop counter
+	end_timer 9
+	jmp	xpass2_11_levels_complex_done
+
+xpass2_11_levels_complex_3:
+	start_timer 9
+	mov	rbp, DIST_TO_MULSRCARG
+	loops_init_prefetch 256, 64, 1, rcx
+	xtouch	[rcx+4096-128]		;; Prefetch TLB
+	xtouch	[rcx+2*4096-128]
+b6c0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6c:	x4cl_four_complex_with_mult rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6c			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	2, b6c			;; Do 2 iters
+	loops	2, b6c0			;; Test loop counter
+	bump	rcx, -64*128		;; Back to prefetching from 1st section
+	loops	2, b6c0			;; Test loop counter
+	bump	rsi, -8*dist128		;; Restore source pointer
+	bump	rcx, 8192+128		;; Don't prefetch pad bytes
+	end_timer 9
+	jmp	xpass2_11_levels_complex_unfft
+
+xpass2_11_levels_complex_4:
+	start_timer 9
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	mov	rbp, DIST_TO_MULSRCARG
+	loops_init_prefetch 256, 64, 1, rcx
+	xtouch	[rcx]			;; Load first prefetch TLB
+b6d0:	xtouch	[rcx+4096-128]		;; Prefetch TLB
+	xtouch	[rcx+2*4096-128]
+b6d1:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6d:	x4cl_four_complex_with_mulf rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6d			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	2, b6d			;; Do 2 iters
+	loops	2, b6d1			;; Test loop counter
+	bump	rcx, 128		;; Don't prefetch pad bytes
+	loops	2, b6d0			;; Test loop counter
+	bump	rsi, -8*dist128		;; Restore source pointer
+	end_timer 9
+
+;; Do inverse FFT levels 8,9
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	2	+4K	4	+4K	6	+4K
+;;	1	...
+;;	8	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	8	+4K	16	+4K	24	+4K
+;;	1	...
+;;	...
+;;	7	...
+;;	32	...
+;;	...
+;;
+;; Do 1024 four_complex_unfft macros
+;;	distance between fft data elements is 4
+;;	do 256 macros each processing 32 data values
+
+;; Do inverse FFT levels 6,7
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	8	+4K	16	+4K	24	+4K
+;;	1	...
+;;	...
+;;	7	...
+;;	32	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	32	+4K	64	+4K	96	+4K
+;;	1	...
+;;	...
+;;	31	...
+;;	128	...
+;;	...
+;;
+;; Do 1024 four_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 256 macros each processing 32 data values
+
+;; Do inverse FFT levels 5
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	32	+4K	64	+4K	96	+4K
+;;	1	...
+;;	...
+;;	31	...
+;;	128	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	64	+4K	128	+4K	192	+4K
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+;;
+;; Do 512 two_two_complex_unfft macros
+;;	distance between fft data elements is 64
+;;	do 512 macros each processing 16 data values
+
+;; Do this 32 cache lines at a time to maximize accessing data
+;; while it is in the L1 cache.
+
+xpass2_11_levels_complex_unfft:
+	start_timer 10
+	mov	rdi, xsincos_complex	;; Load sin/cos pointers
+	mov	rbx, xsincos_complex
+	mov	rbp, xsincos_complex
+	loops_init_prefetch 512, 64, 2, rcx ;; 32 iterations of 16
+
+	xtouch	[rcx+4096-128]		;; Load six prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+	xtouch	[rcx+3*4096-128]
+	xtouch	[rcx+4*4096-128]
+	xtouch	[rcx+5*4096-128]
+	xtouch	[rcx+6*4096-128]
+c5b:	x4cl_four_complex_unfft rsi, 8*64, 2*64, 4*64, rbp
+	bump	rbp, XMM_SCD		;; Next sine/cosine pointer
+	loops	8, c5b, 2		;; Test inner loop counter
+	bump	rsi, -8*8*64		;; Restore source pointer
+	bump	rbp, -8*XMM_SCD		;; Next sine/cosine pointer
+	bump	rcx, -4*128+8192+128	;; Prefetch from next section
+	loops_undo 8*2
+
+c4b:	x4cl_four_complex_unfft rsi, 2*64, 8*64, 16*64, rbx
+	loops	4, c4b, 2		;; Test loop counter
+	bump	rsi, -4*2*64+32*64	;; Next source pointer
+	bump	rbx, XMM_SCD		;; Next sine/cosine pointer
+	loops	2, c4b			;; Test loop counter
+	bump	rsi, -2*32*64		;; Restore source pointer
+	bump	rbx, -2*XMM_SCD		;; Restore sine/cosine pointer
+	bump	rcx, -4*128+8192+128	;; Prefetch from next section
+	loops_undo 2*4*2
+
+c3b:	x2cl_two_complex_unfft rsi, 2*64, 32*64
+	loops	16, c3b			;; Test inner loop counter
+	bump	rcx, -2*(8192+128)	;; Back to prefetching from 1st section
+
+	bump	rsi, -16*2*64+64	;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64+64*64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	bump	rbx, 2*XMM_SCD		;; Next sine/cosine pointer
+	bump	rbp, 8*XMM_SCD		;; Next sine/cosine pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64*64+dist128	;; Next source pointer
+	loops	4, c5b			;; Test loop counter
+	bump	rcx, -16*4*128		;; Prefetch next 3 sections
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -8*dist128		;; Restore source pointer
+	bump	rcx, 3*(8192+128)	;; Prefetch next section
+	end_timer 10
+
+;; Do inverse FFT levels 3,4
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	64	+4K	128	+4K	192	+4K
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	256	+4K	512	+4K	768	+4K
+;;	1	...
+;;	...
+;;	255	...
+;;	1024	...
+;;	...
+
+;; Do 4 groups of 256 four_complex_fft macros (FFT levels 3,4)
+;; In this section we also apply the 4 column multipliers (actually three
+;; since the first column multiplier is always one).  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+
+;; Do 1024 four_complex_cpm_unfft macros
+;;	distance between fft data elements is 128
+;;	do 64 macros each processing 128 data values
+
+	start_timer 13
+	mov	rdi, PREMULT_ADDR	;; Load column multipliers pointer
+	bump	rdi, 64*XMM_PMD		;; Load column multipliers pointer
+	loops_init_prefetch 256, 64, 1, rcx ;; 2 iters of 2 iters of 8 iters of 8
+	xtouch	[rcx+4096-128]		;; Load two prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+c2b:	x4cl_four_complex_cpm_unfft rsi, 64, 64*64, dist128
+	bump	rdi, XMM_PMD		;; Next column premultiplier
+	loops	8, c2b			;; Test inner loop counters
+	bump	rdi, -8*XMM_PMD		;; Reset premultiplier pointer
+	loops	8, c2b			;; Test loop counter
+	bump	rsi, -64*64+2*dist128	;; Next source pointer
+	bump	rdi, 8*XMM_PMD		;; Next premultiplier pointer
+	loops	2, c2b			;; Test loop counter
+	bump	rcx, -64*128		;; Re-prefetch section
+	loops	2, c2b			;; Test loop counter
+	bump	rsi, -4*2*dist128	;; Restore source pointer
+	end_timer 13
+
+;; Do inverse FFT levels 1,2
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	256	+4K	512	+4K	768	+4K
+;;	1	...
+;;	...
+;;	255	...
+;;	1024	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1K	2048	+1K	4096	+1K	6144	+1K
+;;	1	...
+;;	...
+;;	1023
+
+;; Do 256 four_complex_gpm_unfft macros
+;;	distance between fft data elements is 512
+;;	do 256 macros each processing 32 data values
+
+	start_timer 14
+	mov	rcx, PREMULT_PREFETCH	;; Prefetch pointer
+	mov	rdi, PREMULT_ADDR	;; Load group multiplier pointer
+	loops_init_prefetch 256, 64, 1, rcx ;; 2 iters of 16 iterations of 8
+	xtouch	[rcx]			;; Load prefetch TLB
+	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+c1b0:	xtouch	[rcx+2*4096-128]
+c1b:	s4cl_four_complex_gpm_unfft rsi, 64, 2*dist128, 4*dist128, 32*XMM_PMD
+	loops	8, c1b			;; Test inner loop counter
+	bump	rdi, XMM_PMD		;; Next set of multipliers
+	loops	16, c1b			;; Test loop counter
+	bump	rsi, -16*4*2*64+dist128	;; Next source pointer
+	bump	rcx, -4096		;; Back up so we only prefetch 12KB
+	loops	2, c1b0			;; Test outer loop counter
+	end_timer 14
+
+xpass2_11_levels_complex_done:
+	ENDM
+
+
+; *************** xmm-pass2-12-levels-real macro ******************
+; This macro takes 4096 real values, 4096 semi-real values and the
+; first 4096 complex values and performs the final 12 levels of the
+; FFT process, squares the results, and does the first 12 levels of
+; the inverse FFT.
+
+hg_pass2_12_levels_real MACRO
+	LOCAL	b1b, b2b, b3b0, b3b, b3c, b3d, b4b, b5b, b6b, b7b
+	LOCAL	b8b, b9b, baa0, baa, bab0, bab, bac0, bac, bad0, bad
+	LOCAL	c0b, c1b, c2b, c3b, c3c, c3d, c4b, c5b, c6b, c7b, c8b
+	LOCAL	xpass2_12_levels_real_1, xpass2_12_levels_real_2
+	LOCAL	xpass2_12_levels_real_3, xpass2_12_levels_real_4
+	LOCAL	xpass2_12_real_unfft, xpass2_12_real_done
+
+;; We switch to the same format used in one-pass FFTs (that is, the
+;; high word of xmm registers being 1 greater than the low word):
+
+;; Type 4 FFTs skip the forward FFT process
+
+	start_timer 2
+	mov	rsi, DATA_ADDR		;; Load source address
+	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	xpass2_12_levels_real_4
+
+;; Do FFT level 1
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+2K	4096	+2K	8192	+2K	12288	+2K
+;;	1	...
+;;	...
+;;	2047	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	2048	+1	4096	+1	6144	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	2046	...
+;;	+8192	...
+
+;; Do eight_reals_fft_1 on real values 0 - 4095
+;; Do nothing on semi-real values from 4096 - 8191
+;; Do two_complex_fft on complex values from 8192 - 16383
+;;	distance between fft data elements is 2K
+;;	do 1024 iterations
+
+	loops_init 1024
+b1b:	s2cl_eight_reals_fft_1 rsi, 2*64, 64
+	L2prefetch128 [rsi+3*128]		;; Prefetch a few iterations ahead
+	loops	64, b1b			;; Test loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	16, b1b			;; Test loop counter
+	bump	rsi, -16*dist128	;; Restore source pointer
+
+;; Do FFT levels 2,3
+;; Values 0-2047 is real data, 2048-4195 is semi-real data, 4096-16383 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	2048	+1	4096	+1	6144	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	2046	...
+;;	+8192	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	512	+1	1024	+1	1536	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	510	...
+;;	+8192	...
+;;	2048	...
+;;	...
+
+;; Do 256 eight_reals_fft_2 macros
+;; Do 256 nop_two_two_complex_fft_2 macros
+;; Do 512 four_complex_fft macros
+;;	distance between fft data elements is 512
+;;	do 256 macros each processing 32 data values
+
+	mov	rdi, sincos11		;; Load sin/cos pointer
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	loops_init 256
+b2b:	x4cl_eight_reals_fft_2 rsi, 2*64, 4*dist128, 8*dist128, rdi
+	loops	64, b2b			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	4, b2b			;; Test loop counter
+
+;; Do 1024 four_complex_fft macros
+;;	distance between fft data elements is 512
+;;	do 256 macros each processing 32 data values
+
+	bump	rsi, -4*dist128+64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 256, 128, 1, rcx
+	xtouch	[rcx]			;; Preload first TLB
+b3b0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+	xtouch	[rcx+2*4096-128]
+b3b:	x4cl_four_complex_fft rsi, 2*64, 4*dist128, 8*dist128, rdi
+	loops	64, b3b			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	bump	rcx, 128		;; Skip pad bytes
+	loops	4, b3b0			;; Test loop counter
+	bump	rsi, -4*dist128-64	;; Restore source pointer
+
+;; Do FFT levels 4
+;; Values 0-511 is real data, 512-1023 is semi-real data, 1024-16383 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	512	+1	1024	+1	1536	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	510	...
+;;	+8192	...
+;;	2048	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	256	+1	512	+1	768	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	254	...
+;;	+8192	...
+;;	1024	...
+;;	...
+
+;; Do 256 eight_reals_fft_1 macros
+;;	distance between fft data elements is 256
+;;	do 128 macros each processing 16 data values
+
+	mov	rdi, sincos10		;; Load sin/cos pointer
+	loops_init 1024
+b3c:	x2cl_eight_reals_fft_1 rsi, 2*64, 2*dist128
+	loops	64, b3c			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	2, b3c			;; Test outer loop counter
+
+;; Do 1792 two_complex_fft macros
+;;	distance between fft data elements is 256
+;;	do 896 macros each processing 16 data values
+
+	bump	rsi, -2*dist128+4*dist128 ;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 3 then 4 iterations of 128
+b3d:	x2cl_two_complex_fft rsi, 2*64, 2*dist128, rdi
+	loops	64, b3d			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	2, b3d			;; Test loop counter
+	bump	rsi, -2*dist128+4*dist128 ;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	4, b3d			;; Test loop counter
+	bump	rsi, -4*4*dist128+64	;; Next source pointer
+	loops	2, b3d			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 5,6
+;; Values 0-255 is real data, 256-511 is semi-real data, 512-16384 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	256	+1	512	+1	768	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	254	...
+;;	+8192	...
+;;	1024	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	64	+1	128	+1	192	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	62	...
+;;	+8192	...
+;;	256	...
+;;	...
+
+;; Do 32 eight_reals_fft_2 macros
+;; Do 32 nop_two_two_complex_fft_2 macros
+;; Do 64 four_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 32 macros each processing 32 data values
+
+	mov	rdi, sincos9		;; Load sin/cos pointer
+	loops_init 512
+b4b:	x4cl_eight_reals_fft_2 rsi, 2*64, 64*64, dist128, rdi
+	loops	32, b4b			;; Test loop counter
+
+;; Do 1920 four_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 480 macros each processing 32 data values
+
+	bump	rsi, -32*2*64+2*dist128	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 7 then 8 iterations of 32
+b5b:	x4cl_four_complex_fft rsi, 2*64, 64*64, dist128, rdi
+	loops	32, b5b			;; Test inner loop counter
+	bump	rsi, -32*2*64+2*dist128	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b5b			;; Test loop counter
+	bump	rsi, -8*2*dist128+64	;; Next source pointer
+	loops	2, b5b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 7,8
+;; Values 0-63 is real data, 64-127 is semi-real data, 128-16384 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	64	+1	128	+1	192	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	62	...
+;;	+8192	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	16	+1	32	+1	48	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	14	...
+;;	+8192	...
+;;	64	...
+;;	...
+
+;; Do 8 eight_reals_fft_2 macros
+;; Do 8 nop_two_two_complex_fft_2 macros
+;; Do 16 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 8 macros each processing 32 data values
+
+	mov	rdi, sincos8		;; Load sin/cos pointer
+	loops_init 512
+b6b:	x4cl_eight_reals_fft_2 rsi, 2*64, 16*64, 32*64, rdi
+	loops	8, b6b			;; Test loop counter
+
+;; Do 2016 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 504 macros each processing 32 data values
+
+	bump	rsi, -8*2*64+64*64	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 2 iters of 16 iters of 1 or 2 of 8
+b7b:	x4cl_four_complex_fft rsi, 2*64, 16*64, 32*64, rdi
+	loops	8, b7b			;; Test inner loop counter
+	bump	rsi, -8*2*64+64*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	2, b7b			;; Test loop counter
+	bump	rsi, -2*64*64+dist128	;; Next source pointer
+	loops	16, b7b			;; 16 iterations
+	bump	rsi, -16*dist128+64	;; Next source pointer
+	loops	2, b7b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 9,10
+;; Values 0-15 is real data, 16-31 is semi-real data, 32-16383 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	16	+1	32	+1	48	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	14	...
+;;	+8192	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	4	+1	8	+1	12	+1
+;;	+8192	...
+;;	2	...
+;;	+8192	...
+;;	16	...
+;;	...
+
+;; Do 2 eight_reals_fft_2 macros
+;; Do 2 nop_two_two_complex_fft_2 macros
+;; Do 4 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 2 macros each processing 32 data values
+
+	mov	rdi, sincos7		;; Load sin/cos pointer
+	loops_init 512
+b8b:	x4cl_eight_reals_fft_2 rsi, 2*64, 4*64, 8*64, rdi
+	loops	2, b8b			;; Test loop counter
+
+;; Do 2040 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 510 macros each processing 32 data values
+
+	bump	rsi, -2*2*64+16*64	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 2 iters of 16 iters of 7 or 8 of 2
+b9b:	x4cl_four_complex_fft rsi, 2*64, 4*64, 8*64, rdi
+	loops	2, b9b			;; Test loop counter
+	bump	rsi, -2*2*64+16*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b9b			;; Test middle loop counter
+	bump	rsi, -8*16*64+dist128	;; Next source pointer
+	loops	16, b9b			;; 16 iterations
+	bump	rsi, -16*dist128+64	;; Next source pointer
+	loops	2, b9b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 11,12
+;; Values 0-3 is real data, 4-7 is semi-real data, 8-16383 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	4	+1	8	+1	12	+1
+;;	+8192	...
+;;	2	...
+;;	+8192	...
+;;	16	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	2	+1	4	+1	6	+1
+;;	8192	...
+;;	8	...
+;;	...
+
+;; Do 1/2 eight_reals_fft_2 macros
+;; Do 1/2 nop_two_two_complex_fft_2 macros
+;; Do 1 four_complex_fft macros
+;;	distance between fft data elements is 1
+
+;; Do 2046 more four_complex_fft macros
+;;	distance between fft data elements is 1
+;;	do 1023 macros each processing 16 data values
+
+	mov	rdi, sincos6		;; Load sin/cos pointer
+
+;; Execute the proper middle step
+
+	cmp	ffttype, 2
+	jl	xpass2_12_levels_real_1
+	jg	xpass2_12_levels_real_3
+
+xpass2_12_levels_real_2:
+	s2cl_eight_reals_with_square_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 1024, 64, 1, rcx, 1, 32
+baa0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+baa:	s2cl_four_complex_with_square rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, baa			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, baa			;; Test loop counter
+	loops	8, baa0			;; Test loop counter
+	bump	rsi, -16*dist128+64	;; Next source pointer
+	loops	2, baa0			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+	jmp	xpass2_12_real_unfft
+
+xpass2_12_levels_real_1:
+	s2cl_eight_reals_fft_2_final rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 1024, 64, 1, rcx, 1, 32
+bab0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+bab:	s2cl_four_complex_fft_final rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bab			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, bab			;; Test loop counter
+	loops	8, bab0			;; Test loop counter
+	bump	rsi, -16*dist128+64	;; Next source pointer
+	loops	2, bab0			;; Test loop counter
+	jmp	xpass2_12_real_done
+
+xpass2_12_levels_real_3:
+	mov	rbp, DIST_TO_MULSRCARG
+	s2cl_eight_reals_with_mult_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 1024, 64, 1, rcx, 1, 32
+bac0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+bac:	s2cl_four_complex_with_mult rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bac			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, bac			;; Test loop counter
+	loops	8, bac0			;; Test loop counter
+	bump	rsi, -16*dist128+64	;; Next source pointer
+	loops	2, bac0			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+	jmp	xpass2_12_real_unfft
+
+xpass2_12_levels_real_4:
+	mov	rbp, DIST_TO_MULSRCARG
+	mov	rdi, sincos6		;; Load sin/cos pointer
+	mov	rcx, DATA_PREFETCH	;; Load prefetch pointer
+	s2cl_eight_reals_with_mulf_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 1024, 64, 1, rcx, 1, 32
+	xtouch	[rcx]			;; Preload the TLBs
+bad0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+bad:	s2cl_four_complex_with_mulf rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bad			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, bad			;; Test loop counter
+	loops	8, bad0			;; Test loop counter
+	bump	rsi, -16*dist128+64	;; Next source pointer
+	loops	2, bad0			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 9,10
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	2	+1	4	+1	6	+1
+;;	8192	...
+;;	8	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	8	+1	16	+1	24	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	6	...
+;;	+8192	...
+;;	32	...
+;;	...
+
+;; Do 2 eight_reals_unfft_2 macros
+;; Do 2 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 4
+;;	do 1 macro processing 32 data values
+
+xpass2_12_real_unfft:
+	x4cl_eight_reals_unfft_2 rsi, 8*64, 2*64, 4*64
+
+;; Do 2044 four_complex_unfft macros
+;;	distance between fft data elements is 4
+;;	do 511 macros each processing 32 data values
+
+	mov	rdi, sincos7		;; Load sin/cos pointer
+	loops_init 512, 1, 16		;; 2 iters of 16 iters of 15 or 16
+c8b:	x4cl_four_complex_unfft rsi, 8*64, 2*64, 4*64, rdi
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	16, c8b			;; Test loop counter
+	bump	rsi, -16*8*64+dist128	;; Next source pointer
+	loops	16, c8b			;; Test loop counter
+	bump	rsi, -16*dist128+64	;; Next source pointer
+	loops	2, c8b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 7,8
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	8	+1	16	+1	24	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	6	...
+;;	+8192	...
+;;	32	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	32	+1	64	+1	96	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	30	...
+;;	+8192	...
+;;	128	...
+;;	...
+
+;; Do 8 eight_reals_unfft_2 macros
+;; Do 8 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 16
+;;	do 4 macros each processing 32 data values
+
+	loops_init 512
+c6b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 8*64, 16*64
+	loops	4, c6b			;; Test inner loop counter
+
+;; Do 2032 four_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 508 macros each processing 32 data values
+
+	mov	rdi, sincos8		;; Load sin/cos pointer
+	bump	rsi, -4*2*64+32*64	;; Load source pointer
+	loops_reset			;; 2 iters of 16 of 3 or 4 of 4
+c7b:	x4cl_four_complex_unfft rsi, 2*64, 8*64, 16*64, rdi
+	loops	4, c7b			;; Test inner loop counter
+	bump	rsi, -4*2*64+32*64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	4, c7b			;; Test loop counter
+	bump	rsi, -4*32*64+dist128	;; Next source pointer
+	loops	16, c7b			;; 16 iterations
+	bump	rsi, -16*dist128+64	;; Next source pointer
+	loops	2, c7b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 5,6
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	32	+1	64	+1	96	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	30	...
+;;	+8192	...
+;;	128	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	128	+1	256	+1	384	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	126	...
+;;	+8192	...
+;;	512	...
+;;	...
+
+;; Do 32 eight_reals_unfft_2 macros
+;; Do 32 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 64
+;;	do 16 macros each processing 32 data values
+
+	loops_init 512
+c4b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 32*64, 64*64
+	loops	16, c4b			;; Test loop counter
+
+;; Do 1984 four_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 496 macros each processing 32 data values
+
+	mov	rdi, sincos9		;; Load sin/cos pointer
+	bump	rsi, -16*2*64+dist128	;; Load source pointer
+	loops_reset			;; 2 iters of 15 or 16 iters of 16
+c5b:	x4cl_four_complex_unfft rsi, 2*64, 32*64, 64*64, rdi
+	loops	16, c5b			;; Test inner loop counter
+	bump	rsi, -16*2*64+dist128	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	16, c5b			;; Test loop counter
+	bump	rsi, -16*dist128+64	;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 4
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	128	+1	256	+1	384	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	126	...
+;;	+8192	...
+;;	512	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	256	+1	512	+1	768	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	254	...
+;;	+8192	...
+;;	1024	...
+;;	...
+
+;; Do 128 eight_reals_unfft_1 macros
+;;	distance between fft data elements is 256
+;;	do 64 macros each processing 16 data values
+
+	loops_init 1024
+c3c:	x2cl_eight_reals_unfft_1 rsi, 2*64, dist128
+	loops	64, c3c			;; Test loop counter
+
+;; Do 1920 two_complex_unfft macros
+;;	distance between fft data elements is 256
+;;	do 960 macros each processing 16 data values
+
+	mov	rdi, sincos10		;; Load sin/cos pointer
+	bump	rsi, -64*2*64+2*dist128	;; Load source pointer
+	loops_reset			;; 7 then 8 iterations of 64
+c3d:	x2cl_two_complex_unfft rsi, 2*64, dist128
+	loops	64, c3d			;; Test inner loop counter
+	bump	rsi, -64*2*64+2*dist128	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	8, c3d			;; Test loop counter
+	bump	rsi, -8*2*dist128+64	;; Next source pointer
+	loops	2, c3d			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 2,3
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	256	+1	512	+1	768	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	254	...
+;;	+8192	...
+;;	1024	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	1024	+1	2048	+1	3072	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	510	...
+;;	+8192	...
+;;	4096	...
+;;	...
+
+;; Do 256 eight_reals_unfft_2 macros
+;; Do 256 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 512
+;;	do 128 macros each processing 32 data values
+
+	loops_init 512
+c2b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 2*dist128, 4*dist128
+	loops	64, c2b			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	2, c2b			;; Test loop counter
+
+;; Do 1536 four_complex_unfft macros
+;;	distance between fft data elements is 512
+;;	do 384 macros each processing 32 data values
+
+	bump	rsi, -2*dist128+8*dist128;; Next source pointer
+	mov	rdi, sincos11		;; Load sin/cos pointer
+	loops_reset			;; 2 iters of 1 or 2 iters of 2 of 64
+c3b:	x4cl_four_complex_unfft rsi, 2*64, 2*dist128, 4*dist128, rdi
+	loops	64, c3b			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*dist128+8*dist128;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*8*dist128+64	;; Next source pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT level 1
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	1024	+1	2048	+1	3072	+1
+;;	+8192	...
+;;	2	...
+;;	...
+;;	510	...
+;;	+8192	...
+;;	4096	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+2K	4096	+2K	8192	+2K	12288	+2K
+;;	1	...
+;;	...
+;;	2047	...
+
+;; Do 1024 eight_reals_last_unfft macros
+;; Do 1024 two_two_complex_unfft macros
+;;	distance between fft data elements is 2048
+;;	do 512 macros each processing 16 data values
+
+	loops_init 512
+c1b:	s4cl_eight_reals_unfft_1 rsi, 2*64, 8*dist128, 64
+	loops	64, c1b			;; Test loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	8, c1b			;; Test loop counter
+
+xpass2_12_real_done:
+	end_timer 2
+	ENDM
+
+
+; *************** xmm-pass2-12-levels-complex macro ******************
+; This macro takes 2 groups of 4096 complex values, premultiplies them and
+; performs the final 12 levels of the FFT process, squares the
+; results, and does the first 12 levels of the inverse FFT.
+; NOTE: Rather than remembering 4096 multipliers we break them up
+; into 1024 groups of 4 columns.  By remembering these 1028 values we can
+; compute all 4096 multipliers using a single complex multiply.  These extra
+; complex multiplies can probably be done faster than the computer can read the
+; extra multipliers from memory (and are more likely stay in the L2 cache)
+
+hg_pass2_12_levels_complex MACRO
+	LOCAL	b1b, b2b0, b2b, b3b0, b3b, b4b, b5b
+	LOCAL	b6a0, b6a1, b6a, b6b0, b6b, b6c0, b6c1, b6c, b6d0, b6d
+	LOCAL	c1b0, c1b, c2a, c2b, c3b, c4b, c5b0, c5b
+	LOCAL	xpass2_12_levels_complex_1, xpass2_12_levels_complex_2
+	LOCAL	xpass2_12_levels_complex_3, xpass2_12_levels_complex_4
+	LOCAL	xpass2_12_levels_complex_unfft, xpass2_12_levels_complex_done
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	rsi, DATA_ADDR		;; Load address of FFT data
+	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	xpass2_12_levels_complex_4
+
+;; Do FFT level 1,2
+;;
+;; We swizzle the data so that one set of data is in the high word of
+;; an xmm register, the other set is in the low word.  This means
+;; a distance of 8192 data values.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+2K	4096	+2K	8192	+2K	12288	+2K
+;;	1	...
+;;	...
+;;	2047
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+8K	1024	+8K	2048	+8K	3072	+8K
+;;	1	...
+;;	...
+;;	1023	...
+;;	4096	...
+;;	...
+
+;; Do 2048 four_complex_gpm_fft macros
+;;	distance between fft data elements is 1024
+;;	do 1024 macros each processing 16 data values
+
+	start_timer 4
+	mov	rdi, PREMULT_ADDR	;; The group multipliers
+	loops_init 1024			;; 256 iterations of 4
+;	mov	rcx, xsincos_complex	;; Prefetch pointer
+b1b:	s2cl_four_complex_gpm_fft rsi, 64, 8*dist128
+	L2prefetch128 [rsi+5*64]		;; Prefetch a few iterations ahead in
+	L2prefetch128 [rsi+8*dist128+5*64];; case they are not in the L2 cache
+	loops	16, b1b			;; Test inner loop counter
+	bump	rdi, XMM_PMD		;; Next group multiplier
+	L2prefetch128 [rdi+2*XMM_PMD]
+;	xtouch	[rcx]			;; Touch the sin/cos data to keep it
+;	bump	rcx, 96			;; in the L2 data cache
+	loops	8, b1b			;; Test loop counter
+	bump	rsi, -8*16*64+dist128	;; Next source pointer
+	loops	8, b1b			;; Test outer loop counter
+	bump	rsi, -8*dist128		;; Restore source pointer
+	end_timer 4
+
+;; Do FFT levels 3,4
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+8K	1024	+8K	2048	+8K	3072	+8K
+;;	1	...
+;;	...
+;;	1023	...
+;;	4096	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+8K	256	+8K	512	+8K	768	+8K
+;;	1	...
+;;	...
+;;	255	...
+;;	1024	...
+;;	...
+
+;; Do 4 groups of four_complex_fft_cpm macros
+;; To make things run faster we precompute the column multipliers times the
+;; 4 different sine/cosine multipliers we run into in this section.  This
+;; costs some memory but saves us some complex multiplies.
+
+;; Do 2048 four_complex_cpm_fft macros
+;;	distance between fft data elements is 256
+;;	do 256 macros each processing 64 data values
+
+	start_timer 5
+	mov	rcx, PREMULT_PREFETCH	;; Prefetch pointer
+	loops_init_prefetch 512, 64, 1, rcx ;; 2 iters of 2 iters of 8 iters of 16
+	xtouch	[rcx]			;; Load first TLB
+b2b0:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+b2b:	x4cl_four_complex_cpm_fft rsi, 64, 2*dist128, 4*dist128, 16*XMM_PMD
+	bump	rdi, XMM_PMD		;; Next column premultiplier
+	loops	16, b2b			;; Test inner loop counter
+	bump	rdi, -16*XMM_PMD	;; Restore column premultiplier
+	loops	8, b2b			;; Test loop counter
+	bump	rsi, -8*16*64+dist128	;; Next source pointer
+	bump	rcx, -64*128		;; Re-prefetch section
+	loops	2, b2b			;; Test loop counter
+	bump	rsi, -2*dist128+8*dist128;; Next source pointer
+	bump	rdi, 32*XMM_PMD		;; Next set of premultipliers
+	bump	rcx, 64*128		;; Prefetch next section
+	loops	2, b2b0			;; Test loop counter
+	bump	rsi, -2*8*dist128	;; Restore source pointer
+	end_timer 5
+
+;; Do FFT levels 5,6
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+8K	256	+8K	512	+8K	768	+8K
+;;	1	...
+;;	...
+;;	255	...
+;;	1024	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+8K	64	+8K	128	+8K	192	+8K
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+;;
+;; Do 2048 four_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 512 macros each processing 32 data values
+
+;; Do FFT levels 7,8
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+8K	64	+8K	128	+8K	192	+8K
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+8K	16	+8K	32	+8K	48	+8K
+;;	1	...
+;;	...
+;;	15	...
+;;	64	...
+;;	...
+;;
+;; Do 2048 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 512 macros each processing 32 data values
+
+;; Do FFT levels 9,10
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+8K	16	+8K	32	+8K	48	+8K
+;;	1	...
+;;	...
+;;	15	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+8K	4	+8K	8	+8K	12	+8K
+;;	1	...
+;;	...
+;;	3	...
+;;	16	...
+;;	...
+;;
+;; Do 2048 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 512 macros each processing 32 data values
+
+;; Do this 64 cache lines at a time to maximize accessing data
+;; while it is in the L1 cache.
+
+	start_timer 6
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	mov	rdi, xsincos_complex	;; Load sin/cos pointers
+	mov	rbx, xsincos_complex
+	mov	rbp, xsincos_complex
+	loops_init_prefetch 512, 64, 1, rcx ;; 2*2*2 iters of 4 of 64 cache lines
+
+	xtouch	[rcx]			;; Load first TLB
+b3b0:	xtouch	[rcx+4096-128]		;; Load six prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+	xtouch	[rcx+3*4096-128]
+	xtouch	[rcx+4*4096-128]
+	xtouch	[rcx+5*4096-128]
+	xtouch	[rcx+6*4096-128]
+
+b3b:	x4cl_four_complex_fft rsi, 4*64, 64*64, dist128, rdi
+	loops	16, b3b			;; Test loop counter
+	bump	rsi, -16*4*64		;; Restore source pointer
+	bump	rcx, -8*128+8192+128	;; Prefetch from next section
+	loops_undo 16
+
+b4b:	x4cl_four_complex_fft rsi, 4*64, 16*64, 32*64, rbx
+	loops	4, b4b			;; Test inner loop counter
+	bump	rsi, -4*4*64+64*64	;; Next source pointer
+	bump	rbx, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	2, b4b			;; Loop twice
+	bump	rsi, -2*64*64+dist128	;; Next source pointer
+	loops	2, b4b			;; Loop twice
+	bump	rsi, -2*dist128		;; Restore source pointer
+	bump	rbx, -4*2*XMM_SCD	;; Restore sine/cosine pointer
+	bump	rcx, -8*128+8192+128	;; Prefetch from next section
+	loops_undo 2*2*4
+
+b5b:	x4cl_four_complex_fft rsi, 16*64, 4*64, 8*64, rbp
+	bump	rbp, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b5b			;; Test inner loop counter
+	bump	rsi, -8*16*64+dist128	;; Next source pointer
+	loops	2, b5b			;; 2 iterations
+	bump	rbp, -16*2*XMM_SCD	;; Restore sine/cosine pointer
+	bump	rcx, -2*(8192+128)	;; Back to prefetching from 1st section
+
+	bump	rsi, -2*dist128+64	;; Next source pointer
+	loops	4, b3b			;; Test loop counter
+	bump	rsi, -4*64+2*dist128	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	bump	rbx, 4*2*XMM_SCD	;; Next sine/cosine pointer
+	bump	rbp, 16*2*XMM_SCD	;; Next sine/cosine pointer
+	loops	2, b3b			;; Test loop counter
+	bump	rcx, -64*128		;; Re-prefetch 3 sections
+	loops	2, b3b			;; Test loop counter
+	bump	rcx, 3*(8192+128)	;; Prefetch next 3 sections
+	loops	2, b3b0			;; Test loop counter
+	bump	rsi, -8*2*dist128	;; Restore source pointer
+	end_timer 6
+
+;; Do FFT levels 11,12 as well as inverse FFT levels 11,12
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+8K	4	+8K	8	+8K	12	+8K
+;;	1	...
+;;	...
+;;	3	...
+;;	16	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+8K	2	+8K	4	+8K	6	+8K
+;;	1	...
+;;	8	...
+;;	...
+
+;; Do 2048 four_complex_fft macros
+;;	distance between fft data elements is 1
+;;	do 512 macros each processing 32 data values
+
+;; Execute the right middle step
+
+	cmp	ffttype, 2
+	jl	xpass2_12_levels_complex_1
+	jg	xpass2_12_levels_complex_3
+
+xpass2_12_levels_complex_2:
+	start_timer 9
+	loops_init_prefetch 512, 64, 1, rcx
+b6a0:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+b6a1:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6a:	x4cl_four_complex_with_square rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6a			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6a			;; Do 4 iters
+	bump	rcx, -64*128		;; Re-prefetch section
+	loops	2, b6a1			;; Test loop counter
+	bump	rcx, (8192+128)		;; Prefetch next section
+	loops	2, b6a0			;; Test loop counter
+	bump	rsi, -16*dist128	;; Restore source pointer
+	end_timer 9
+	jmp	xpass2_12_levels_complex_unfft
+
+xpass2_12_levels_complex_1:
+	start_timer 9
+	loops_init_prefetch 512, 64, 1, rcx
+b6b0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+b6b:	x4cl_four_complex_fft_final rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6b			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6b			;; Do 4 iters
+	bump	rcx, 128		;; Prefetch next section
+	loops	4, b6b0			;; Test loop counter
+	end_timer 9
+	jmp	xpass2_12_levels_complex_done
+
+xpass2_12_levels_complex_3:
+	start_timer 9
+	loops_init_prefetch 512, 64, 1, rcx
+	mov	rbp, DIST_TO_MULSRCARG
+b6c0:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+b6c1:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6c:	x4cl_four_complex_with_mult rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6c			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6c			;; Do 4 iters
+	bump	rcx, -64*128		;; Re-prefetch section
+	loops	2, b6c1			;; Test loop counter
+	bump	rcx, (8192+128)		;; Prefetch next section
+	loops	2, b6c0			;; Test loop counter
+	bump	rsi, -16*dist128	;; Restore source pointer
+	end_timer 9
+	jmp	xpass2_12_levels_complex_unfft
+
+xpass2_12_levels_complex_4:
+	start_timer 9
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	mov	rbp, DIST_TO_MULSRCARG
+	loops_init_prefetch 512, 64, 1, rcx
+	xtouch	[rcx]			;; Load first prefetch TLB
+b6d0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+b6d:	x4cl_four_complex_with_mulf rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6d			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6d			;; Do 4 iters
+	bump	rcx, 128		;; Prefetch next section
+	loops	4, b6d0			;; Test loop counter
+	bump	rsi, -16*dist128	;; Restore source pointer
+	end_timer 9
+
+;; Do inverse FFT levels 9,10
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+8K	2	+8K	4	+8K	6	+8K
+;;	1	...
+;;	8	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+8K	8	+8K	16	+8K	24	+8K
+;;	1	...
+;;	...
+;;	7	...
+;;	32	...
+;;	...
+;;
+;; Do 2048 four_complex_unfft macros
+;;	distance between fft data elements is 4
+;;	do 512 macros each processing 32 data values
+
+;; Do inverse FFT levels 7,8
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+8K	8	+8K	16	+8K	24	+8K
+;;	1	...
+;;	...
+;;	7	...
+;;	32	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+8K	32	+8K	64	+8K	96	+8K
+;;	1	...
+;;	...
+;;	31	...
+;;	128	...
+;;	...
+;;
+;; Do 2048 four_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 512 macros each processing 32 data values
+
+;; Do inverse FFT levels 5,6
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+8K	32	+8K	64	+8K	96	+8K
+;;	1	...
+;;	...
+;;	31	...
+;;	128	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+8K	128	+8K	256	+8K	384	+8K
+;;	1	...
+;;	...
+;;	127	...
+;;	512	...
+;;	...
+;;
+;; Do 2048 four_complex_unfft macros
+;;	distance between fft data elements is 64
+;;	do 512 macros each processing 32 data values
+
+;; Do this 64 cache lines at a time to maximize accessing data
+;; while it is in the L1 cache.
+
+xpass2_12_levels_complex_unfft:
+	start_timer 10
+	mov	rdi, xsincos_complex	;; Load sin/cos pointers
+	mov	rbx, xsincos_complex
+	mov	rbp, xsincos_complex
+	loops_init_prefetch 512, 64, 1, rcx ;; 2*2*4*2 iters of 64 cache lines
+
+c5b0:	xtouch	[rcx+4096-128]		;; Load six prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+	xtouch	[rcx+3*4096-128]
+	xtouch	[rcx+4*4096-128]
+	xtouch	[rcx+5*4096-128]
+	xtouch	[rcx+6*4096-128]
+
+c5b:	x4cl_four_complex_unfft rsi, 8*64, 2*64, 4*64, rbp
+	bump	rbp, XMM_SCD		;; Next sine/cosine pointer
+	loops	16, c5b			;; Test loop counter
+	bump	rsi, -16*8*64		;; Restore source pointer
+	bump	rbp, -16*XMM_SCD	;; Next sine/cosine pointer
+	bump	rcx, -8*128+8192+128	;; Prefetch from next section
+	loops_undo 16
+
+c4b:	x4cl_four_complex_unfft rsi, 2*64, 8*64, 16*64, rbx
+	loops	4, c4b			;; Test inner loop counter
+	bump	rsi, -4*2*64+32*64	;; Next source pointer
+	bump	rbx, XMM_SCD		;; Next sine/cosine pointer
+	loops	4, c4b			;; Test loop counter
+	bump	rsi, -4*32*64		;; Restore source pointer
+	bump	rbx, -4*XMM_SCD		;; Restore sine/cosine pointer
+	bump	rcx, -8*128+8192+128	;; Prefetch from next section
+	loops_undo 4*4
+
+c3b:	x4cl_four_complex_unfft rsi, 2*64, 32*64, 64*64, rdi
+	loops	16, c3b			;; Test inner loop counter
+	bump	rcx, -2*(8192+128)	;; Back to prefetching from 1st section
+
+	bump	rsi, -16*2*64+64	;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64+dist128	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	bump	rbx, 4*XMM_SCD		;; Next sine/cosine pointer
+	bump	rbp, 16*XMM_SCD		;; Next sine/cosine pointer
+	loops	4, c5b			;; Test loop counter
+	bump	rcx, -64*128		;; Re-prefetch 3 sections
+	loops	2, c5b			;; Test loop counter
+	bump	rcx, 3*(8192+128)	;; Prefetch next 3 sections
+	loops	2, c5b0			;; Test loop counter
+	bump	rsi, -16*dist128	;; Restore source pointer
+	end_timer 10
+
+;; Do inverse FFT levels 3,4
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+8K	128	+8K	256	+8K	384	+8K
+;;	1	...
+;;	...
+;;	127	...
+;;	512	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+8K	512	+8K	1024	+8K	1536	+8K
+;;	1	...
+;;	...
+;;	511	...
+;;	2048	...
+;;	...
+
+;; Do 4 groups of 512 four_complex_fft macros (FFT levels 3,4)
+;; In this section we also apply the 4 column multipliers (actually three
+;; since the first column multiplier is always one).  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+
+;; Do 2048 four_complex_cpm_unfft macros
+;;	distance between fft data elements is 256
+;;	do 128 macros each processing 128 data values
+
+	start_timer 13
+	mov	rdi, PREMULT_ADDR	;; Load column multipliers pointer
+	bump	rdi, 64*XMM_PMD		;; Load column multipliers pointer
+	loops_init_prefetch 512, 64, 1, rcx ;; 2 iters of 2 iters of 8 iters of 16
+c2a:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+c2b:	x4cl_four_complex_cpm_unfft rsi, 64, dist128, 2*dist128
+	bump	rdi, XMM_PMD		;; Next column premultiplier
+	loops	16, c2b			;; Test inner loop counter
+	bump	rdi, -16*XMM_PMD	;; Reset premultiplier pointer
+	loops	8, c2b			;; Test loop counter
+	bump	rsi, -128*64+4*dist128	;; Next source pointer
+	bump	rdi, 16*XMM_PMD		;; Next premultiplier pointer
+	bump	rcx, -64*128		;; Reprefetch 8KB section
+	loops	2, c2b			;; Test loop counter
+	bump	rcx, 8192+128		;; Next 8KB section to prefetch
+	loops	2, c2a			;; Test loop counter
+	bump	rsi, -4*4*dist128	;; Restore source pointer
+	end_timer 13
+
+;; Do inverse FFT levels 1,2
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+8K	512	+8K	1024	+8K	1536	+8K
+;;	1	...
+;;	...
+;;	511	...
+;;	2048	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+2K	4096	+2K	8192	+2K	12288	+2K
+;;	1	...
+;;	...
+;;	2047
+
+;; Do 512 four_complex_gpm_unfft macros
+;;	distance between fft data elements is 1024
+;;	do 512 macros each processing 32 data values
+
+	start_timer 14
+	mov	rcx, PREMULT_PREFETCH	;; Prefetch pointer
+	mov	rdi, PREMULT_ADDR	;; Load group multiplier pointer
+	loops_init_prefetch 512, 64, 2, rcx ;; 4 iters of 8 iters of 16
+	xtouch	[rcx]			;; Load first prefetch TLB
+c1b0:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+c1b:	s4cl_four_complex_gpm_unfft rsi, 64, 4*dist128, 8*dist128, 32*XMM_PMD
+	loops	16, c1b			;; Test inner loop counter
+	bump	rdi, XMM_PMD		;; Next set of multipliers
+	loops	8, c1b			;; Test loop counter
+	bump	rsi, -8*4*4*64+dist128	;; Next source pointer
+	loops	4, c1b0			;; Test outer loop counter
+	end_timer 14
+
+xpass2_12_levels_complex_done:
+	ENDM
+
+
+; *************** xmm-pass2-13-levels-real macro ******************
+; This macro takes 8192 real values, 8192 semi-real values and the
+; first 8192 complex values and performs the final 12 levels of the
+; FFT process, squares the results, and does the first 13 levels of
+; the inverse FFT.
+
+hg_pass2_13_levels_real MACRO
+	LOCAL	b1b, b2b, b3b0, b3b, b3c, b3d, b4b, b5b, b6b, b7b
+	LOCAL	b8b, b9b, baa0, baa, bab0, bab, bac0, bac, bad0, bad
+	LOCAL	c0b, c1b, c2b, c3b, c3c, c3d, c4b, c5b, c6b, c7b, c8b
+	LOCAL	xpass2_13_levels_real_1, xpass2_13_levels_real_2
+	LOCAL	xpass2_13_levels_real_3, xpass2_13_levels_real_4
+	LOCAL	xpass2_13_real_unfft, xpass2_13_real_done
+
+;; We switch to the same format used in one-pass FFTs (that is, the
+;; high word of xmm registers being 1 greater than the low word):
+
+;; Type 4 FFTs skip the forward FFT process
+
+	start_timer 2
+	mov	rsi, DATA_ADDR		;; Load source address
+	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	xpass2_13_levels_real_4
+
+;; Do FFT level 1
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	8192	+4K	16384	+4K	24576	+4K
+;;	1	...
+;;	...
+;;	4095	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	4096	+1	8192	+1	12288	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	4094	...
+;;	+16K	...
+
+;; Do eight_reals_fft_1 on real values 0 - 8191
+;; Do nothing on semi-real values from 8192 - 16383
+;; Do two_complex_fft on complex values from 16384 - 32767
+;;	distance between fft data elements is 4K
+;;	do 2048 iterations
+
+	loops_init 2048
+b1b:	s2cl_eight_reals_fft_1 rsi, 2*64, 64
+	L2prefetch128 [rsi+3*128]		;; Prefetch a few iterations ahead
+	loops	64, b1b			;; Test loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	32, b1b			;; Test loop counter
+	bump	rsi, -32*dist128	;; Restore source pointer
+
+;; Do FFT levels 2,3
+;; Values 0-4095 is real data, 4096-8191 is semi-real data, 8192-32767 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	4096	+1	8192	+1	12288	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	4094	...
+;;	+16K	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+1	1024	+1	2048	+1	3072	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	1022	...
+;;	+16K	...
+;;	4096	...
+;;	...
+
+;; Do 512 eight_reals_fft_2 macros
+;; Do 512 nop_two_two_complex_fft_2 macros
+;; Do 1024 four_complex_fft macros
+;;	distance between fft data elements is 1024
+;;	do 512 macros each processing 32 data values
+
+	mov	rdi, sincos11		;; Load sin/cos pointer
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	loops_init 512
+b2b:	x4cl_eight_reals_fft_2 rsi, 2*64, 8*dist128, 16*dist128, rdi
+	loops	64, b2b			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	8, b2b			;; Test loop counter
+
+;; Do 2048 four_complex_fft macros
+;;	distance between fft data elements is 1024
+;;	do 512 macros each processing 32 data values
+
+	bump	rsi, -8*dist128+64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 512, 128, 1, rcx
+	xtouch	[rcx]			;; Preload first TLB
+b3b0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+	xtouch	[rcx+2*4096-128]
+b3b:	x4cl_four_complex_fft rsi, 2*64, 8*dist128, 16*dist128, rdi
+	loops	64, b3b			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	bump	rcx, 128		;; Skip pad bytes
+	loops	8, b3b0			;; Test loop counter
+	bump	rsi, -8*dist128-64	;; Restore source pointer
+
+;; Do FFT levels 4,5
+;; Values 0-1023 is real data, 1024-2047 is semi-real data, 2048-32767 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+1	1024	+1	2048	+1	3072	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	1022	...
+;;	+16K	...
+;;	4096	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	256	+1	512	+1	768	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	254	...
+;;	+16K	...
+;;	1024	...
+;;	...
+
+;; Do 128 eight_reals_fft_2 macros
+;; Do 128 nop_two_two_complex_fft_2 macros
+;; Do 256 four_complex_fft macros
+;;	distance between fft data elements is 256
+;;	do 128 macros each processing 32 data values
+
+	mov	rdi, sincos10		;; Load sin/cos pointer
+	loops_init 1024
+b3c:	x4cl_eight_reals_fft_2 rsi, 2*64, 2*dist128, 4*dist128, rdi
+	loops	64, b3c			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	2, b3c			;; Test outer loop counter
+
+;; Do 3584 four_complex_fft macros
+;;	distance between fft data elements is 256
+;;	do 896 macros each processing 32 data values
+
+	bump	rsi, -2*dist128+8*dist128;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 3 then 4 iterations of 128
+b3d:	x4cl_four_complex_fft rsi, 2*64, 2*dist128, 4*dist128, rdi
+	loops	64, b3d			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	2, b3d			;; Test loop counter
+	bump	rsi, -2*dist128+8*dist128;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	4, b3d			;; Test loop counter
+	bump	rsi, -4*8*dist128+64	;; Next source pointer
+	loops	2, b3d			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 6,7
+;; Values 0-255 is real data, 256-511 is semi-real data, 512-32767 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	256	+1	512	+1	768	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	254	...
+;;	+16K	...
+;;	1024	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	64	+1	128	+1	192	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	62	...
+;;	+16K	...
+;;	256	...
+;;	...
+
+;; Do 32 eight_reals_fft_2 macros
+;; Do 32 nop_two_two_complex_fft_2 macros
+;; Do 64 four_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 32 macros each processing 32 data values
+
+	mov	rdi, sincos9		;; Load sin/cos pointer
+	loops_init 1024
+b4b:	x4cl_eight_reals_fft_2 rsi, 2*64, 64*64, dist128, rdi
+	loops	32, b4b			;; Test loop counter
+
+;; Do 3840 four_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 960 macros each processing 32 data values
+
+	bump	rsi, -32*2*64+2*dist128	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 15 then 16 iterations of 32
+b5b:	x4cl_four_complex_fft rsi, 2*64, 64*64, dist128, rdi
+	loops	32, b5b			;; Test inner loop counter
+	bump	rsi, -32*2*64+2*dist128	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	16, b5b			;; Test loop counter
+	bump	rsi, -16*2*dist128+64	;; Next source pointer
+	loops	2, b5b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 8,9
+;; Values 0-63 is real data, 64-127 is semi-real data, 128-32767 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	64	+1	128	+1	192	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	62	...
+;;	+16K	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	16	+1	32	+1	48	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	14	...
+;;	+16K	...
+;;	64	...
+;;	...
+
+;; Do 8 eight_reals_fft_2 macros
+;; Do 8 nop_two_two_complex_fft_2 macros
+;; Do 16 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 8 macros each processing 32 data values
+
+	mov	rdi, sincos8		;; Load sin/cos pointer
+	loops_init 1024
+b6b:	x4cl_eight_reals_fft_2 rsi, 2*64, 16*64, 32*64, rdi
+	loops	8, b6b			;; Test loop counter
+
+;; Do 4064 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 1016 macros each processing 32 data values
+
+	bump	rsi, -8*2*64+64*64	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 2 iters of 32 iters of 1 or 2 of 8
+b7b:	x4cl_four_complex_fft rsi, 2*64, 16*64, 32*64, rdi
+	loops	8, b7b			;; Test inner loop counter
+	bump	rsi, -8*2*64+64*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	2, b7b			;; Test loop counter
+	bump	rsi, -2*64*64+dist128	;; Next source pointer
+	loops	32, b7b			;; 32 iterations
+	bump	rsi, -32*dist128+64	;; Next source pointer
+	loops	2, b7b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 10,11
+;; Values 0-15 is real data, 16-31 is semi-real data, 32-32767 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	16	+1	32	+1	48	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	14	...
+;;	+16K	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	4	+1	8	+1	12	+1
+;;	+16K	...
+;;	2	...
+;;	+16K	...
+;;	16	...
+;;	...
+
+;; Do 2 eight_reals_fft_2 macros
+;; Do 2 nop_two_two_complex_fft_2 macros
+;; Do 4 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 2 macros each processing 32 data values
+
+	mov	rdi, sincos7		;; Load sin/cos pointer
+	loops_init 1024
+b8b:	x4cl_eight_reals_fft_2 rsi, 2*64, 4*64, 8*64, rdi
+	loops	2, b8b			;; Test loop counter
+
+;; Do 4088 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 1022 macros each processing 32 data values
+
+	bump	rsi, -2*2*64+16*64	;; Load source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_reset			;; 2 iters of 32 iters of 7 or 8 of 2
+b9b:	x4cl_four_complex_fft rsi, 2*64, 4*64, 8*64, rdi
+	loops	2, b9b			;; Test loop counter
+	bump	rsi, -2*2*64+16*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	8, b9b			;; Test middle loop counter
+	bump	rsi, -8*16*64+dist128	;; Next source pointer
+	loops	32, b9b			;; 32 iterations
+	bump	rsi, -32*dist128+64	;; Next source pointer
+	loops	2, b9b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do FFT levels 12,13
+;; Values 0-3 is real data, 4-7 is semi-real data, 8-32767 is
+;; complex data.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	4	+1	8	+1	12	+1
+;;	+16K	...
+;;	2	...
+;;	+16K	...
+;;	16	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	2	+1	4	+1	6	+1
+;;	16K	...
+;;	8	...
+;;	...
+
+;; Do 1/2 eight_reals_fft_2 macros
+;; Do 1/2 nop_two_two_complex_fft_2 macros
+;; Do 1 four_complex_fft macros
+;;	distance between fft data elements is 1
+
+;; Do 4094 more four_complex_fft macros
+;;	distance between fft data elements is 1
+;;	do 2047 macros each processing 16 data values
+
+	mov	rdi, sincos6		;; Load sin/cos pointer
+
+;; Execute the proper middle step
+
+	cmp	ffttype, 2
+	jl	xpass2_13_levels_real_1
+	jg	xpass2_13_levels_real_3
+
+xpass2_13_levels_real_2:
+	s2cl_eight_reals_with_square_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 2048, 64, 1, rcx, 1, 32
+baa0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+baa:	s2cl_four_complex_with_square rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, baa			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, baa			;; Test loop counter
+	loops	16, baa0		;; Test loop counter
+	bump	rsi, -32*dist128+64	;; Next source pointer
+	loops	2, baa0			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+	jmp	xpass2_13_real_unfft
+
+xpass2_13_levels_real_1:
+	s2cl_eight_reals_fft_2_final rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 2048, 64, 1, rcx, 1, 32
+bab0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+bab:	s2cl_four_complex_fft_final rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bab			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, bab			;; Test loop counter
+	loops	16, bab0		;; Test loop counter
+	bump	rsi, -32*dist128+64	;; Next source pointer
+	loops	2, bab0			;; Test outer loop counter
+	jmp	xpass2_13_real_done
+
+xpass2_13_levels_real_3:
+	mov	rbp, DIST_TO_MULSRCARG
+	s2cl_eight_reals_with_mult_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 2048, 64, 1, rcx, 1, 32
+bac0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+bac:	s2cl_four_complex_with_mult rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bac			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, bac			;; Test loop counter
+	loops	16, bac0		;; Test loop counter
+	bump	rsi, -32*dist128+64	;; Next source pointer
+	loops	2, bac0			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+	jmp	xpass2_13_real_unfft
+
+xpass2_13_levels_real_4:
+	mov	rbp, DIST_TO_MULSRCARG
+	mov	rdi, sincos6		;; Load sin/cos pointer
+	mov	rcx, DATA_PREFETCH	;; Load prefetch pointer
+	s2cl_eight_reals_with_mulf_2 rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops_init_prefetch 2048, 64, 1, rcx, 1, 32
+	xtouch	[rcx]			;; Preload the TLBs
+bad0:	xtouch	[rcx+4096-128]		;; Preload the TLBs
+bad:	s2cl_four_complex_with_mulf rsi, 4*64, 2*64
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, bad			;; Test loop counter
+	bump	rsi, -32*4*64+dist128	;; Next source pointer
+	loops	2, bad			;; Test loop counter
+	loops	16, bad0		;; Test loop counter
+	bump	rsi, -32*dist128+64	;; Next source pointer
+	loops	2, bad0			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 10,11
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	2	+1	4	+1	6	+1
+;;	16K	...
+;;	8	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	8	+1	16	+1	24	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	6	...
+;;	+16K	...
+;;	32	...
+;;	...
+
+;; Do 2 eight_reals_unfft_2 macros
+;; Do 2 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 4
+;;	do 1 macro processing 32 data values
+
+xpass2_13_real_unfft:
+	x4cl_eight_reals_unfft_2 rsi, 8*64, 2*64, 4*64
+
+;; Do 4092 four_complex_unfft macros
+;;	distance between fft data elements is 4
+;;	do 1023 macros each processing 32 data values
+
+	mov	rdi, sincos7		;; Load sin/cos pointer
+	loops_init 1024, 1, 16		;; 2 iters of 16 iters of 15 or 16
+c8b:	x4cl_four_complex_unfft rsi, 8*64, 2*64, 4*64, rdi
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	16, c8b			;; Test loop counter
+	bump	rsi, -16*8*64+dist128	;; Next source pointer
+	loops	32, c8b			;; Test loop counter
+	bump	rsi, -32*dist128+64	;; Next source pointer
+	loops	2, c8b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 8,9
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	8	+1	16	+1	24	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	6	...
+;;	+16K	...
+;;	32	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	32	+1	64	+1	96	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	30	...
+;;	+16K	...
+;;	128	...
+;;	...
+
+;; Do 8 eight_reals_unfft_2 macros
+;; Do 8 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 16
+;;	do 4 macros each processing 32 data values
+
+	loops_init 1024
+c6b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 8*64, 16*64
+	loops	4, c6b			;; Test loop counter
+
+;; Do 4080 four_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 1020 macros each processing 32 data values
+
+	mov	rdi, sincos8		;; Load sin/cos pointer
+	bump	rsi, -4*2*64+32*64	;; Load source pointer
+	loops_reset			;; 2 iters of 32 of 3 or 4 of 4
+c7b:	x4cl_four_complex_unfft rsi, 2*64, 8*64, 16*64, rdi
+	loops	4, c7b			;; Test inner loop counter
+	bump	rsi, -4*2*64+32*64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	4, c7b			;; Test loop counter
+	bump	rsi, -4*32*64+dist128	;; Next source pointer
+	loops	32, c7b			;; 32 iterations
+	bump	rsi, -32*dist128+64	;; Next source pointer
+	loops	2, c7b			;; Test outer loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 6,7
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	32	+1	64	+1	96	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	30	...
+;;	+16K	...
+;;	128	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	128	+1	256	+1	384	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	126	...
+;;	+16K	...
+;;	512	...
+;;	...
+
+;; Do 32 eight_reals_unfft_2 macros
+;; Do 32 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 64
+;;	do 16 macros each processing 32 data values
+
+	loops_init 1024
+c4b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 32*64, 64*64
+	loops	16, c4b			;; Test loop counter
+
+;; Do 4032 four_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 1008 macros each processing 32 data values
+
+	mov	rdi, sincos9		;; Load sin/cos pointer
+	bump	rsi, -16*2*64+dist128	;; Load source pointer
+	loops_reset			;; 2 iters of 31 or 32 iters of 16
+c5b:	x4cl_four_complex_unfft rsi, 2*64, 32*64, 64*64, rdi
+	loops	16, c5b			;; Test inner loop counter
+	bump	rsi, -16*2*64+dist128	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	32, c5b			;; Test loop counter
+	bump	rsi, -32*dist128+64	;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 4,5
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	128	+1	256	+1	384	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	126	...
+;;	+16K	...
+;;	512	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	512	+1	1024	+1	1536	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	510	...
+;;	+16K	...
+;;	2048	...
+;;	...
+
+;; Do 128 eight_reals_unfft_2 macros
+;; Do 128 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 256
+;;	do 64 macros each processing 32 data values
+
+	loops_init 1024
+c3c:	x4cl_eight_reals_unfft_2 rsi, 2*64, dist128, 2*dist128
+	loops	64, c3c			;; Test loop counter
+
+;; Do 3840 four_complex_unfft macros
+;;	distance between fft data elements is 256
+;;	do 960 macros each processing 32 data values
+
+	mov	rdi, sincos10		;; Load sin/cos pointer
+	bump	rsi, -64*2*64+4*dist128	;; Load source pointer
+	loops_reset			;; 2 iters of 7 or 8 iterations of 64
+c3d:	x4cl_four_complex_unfft rsi, 2*64, dist128, 2*dist128, rdi
+	loops	64, c3d			;; Test inner loop counter
+	bump	rsi, -64*2*64+4*dist128	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	8, c3d			;; Test loop counter
+	bump	rsi, -8*4*dist128+64	;; Next source pointer
+	loops	2, c3d			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT levels 2,3
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	512	+1	1024	+1	1536	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	510	...
+;;	+16K	...
+;;	2048	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	1	2048	+1	4096	+1	6144	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	2046	...
+;;	+16K	...
+;;	8192	...
+;;	...
+
+;; Do 512 eight_reals_unfft_2 macros
+;; Do 512 nop_two_two_complex_unfft_2 macros
+;;	distance between fft data elements is 1024
+;;	do 256 macros each processing 32 data values
+
+	loops_init 1024
+c2b:	x4cl_eight_reals_unfft_2 rsi, 2*64, 4*dist128, 8*dist128
+	loops	64, c2b			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	4, c2b			;; Test loop counter
+
+;; Do 3072 four_complex_unfft macros
+;;	distance between fft data elements is 1024
+;;	do 768 macros each processing 32 data values
+
+	bump	rsi, -4*dist128+16*dist128;; Next source pointer
+	mov	rdi, sincos11		;; Load sin/cos pointer
+	loops_reset			;; 2 iters of 1 or 2 iters of 4 of 64
+c3b:	x4cl_four_complex_unfft rsi, 2*64, 4*dist128, 8*dist128, rdi
+	loops	64, c3b			;; Test inner loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	4, c3b			;; Test loop counter
+	bump	rsi, -4*dist128+16*dist128;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*16*dist128+64	;; Next source pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rsi, -2*64		;; Restore source pointer
+
+;; Do inverse FFT level 1
+;; On input the 64-byte cache lines hold these data values:
+;;	0	1	2048	+1	4096	+1	6144	+1
+;;	+16K	...
+;;	2	...
+;;	...
+;;	2046	...
+;;	+16K	...
+;;	8192	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	8192	+4K	16384	+4K	24576	+4K
+;;	1	...
+;;	...
+;;	4095	...
+
+;; Do 2048 eight_reals_last_unfft macros
+;; Do 2048 two_two_complex_unfft macros
+;;	distance between fft data elements is 4096
+;;	do 1024 macros each processing 16 data values
+
+	loops_init 1024
+c1b:	s4cl_eight_reals_unfft_1 rsi, 2*64, 16*dist128, 64
+	loops	64, c1b			;; Test loop counter
+	bump	rsi, -64*2*64+dist128	;; Next source pointer
+	loops	16, c1b			;; Test loop counter
+
+xpass2_13_real_done:
+	end_timer 2
+	ENDM
+
+
+; *************** xmm-pass2-13-levels-complex macro ******************
+; This macro takes 2 groups of 8192 complex values, premultiplies them and
+; performs the final 13 levels of the FFT process, squares the
+; results, and does the first 13 levels of the inverse FFT.
+; NOTE: Rather than remembering 8192 multipliers we break them up
+; into 2048 groups of 4 columns.  By remembering these 2052 values we can
+; compute all 8192 multipliers using a single complex multiply.  These extra
+; complex multiplies can probably be done faster than the computer can read the
+; extra multipliers from memory (and are more likely stay in the L2 cache)
+
+hg_pass2_13_levels_complex MACRO
+	LOCAL	b1b, b2b0, b2b, b3b0, b3b, b4b, b5a0, b5a, b5b
+	LOCAL	b6a0, b6a, b6b0, b6b1, b6b, b6c0, b6c, b6d0, b6d1, b6d
+	LOCAL	c1b0, c1b, c2a, c2b, c3a, c3b0, c3b, c4b, c5b0, c5b
+	LOCAL	xpass2_13_levels_complex_1, xpass2_13_levels_complex_2
+	LOCAL	xpass2_13_levels_complex_3, xpass2_13_levels_complex_4
+	LOCAL	xpass2_13_levels_complex_unfft, xpass2_13_levels_complex_done
+
+;; Type 4 FFTs skip the forward FFT process
+
+	mov	rsi, DATA_ADDR		;; Load address of FFT data
+	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	ffttype, 4
+	je	xpass2_13_levels_complex_4
+
+;; Do FFT level 1,2
+;;
+;; We swizzle the data so that one set of data is in the high word of
+;; an xmm register, the other set is in the low word.  This means
+;; a distance of 16384 data values.
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+4K	8192	+4K	16384	+4K	24576	+4K
+;;	1	...
+;;	...
+;;	4095
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	2048	+16K	4096	+16K	6144	+16K
+;;	1	...
+;;	...
+;;	2047	...
+;;	8192	...
+;;	...
+
+;; Do 4096 four_complex_gpm_fft macros
+;;	distance between fft data elements is 2048
+;;	do 2048 macros each processing 16 data values
+
+	start_timer 4
+	mov	rdi, PREMULT_ADDR	;; The group multipliers
+	loops_init 2048
+;	mov	rcx, xsincos_complex	;; Prefetch pointer
+b1b:	s2cl_four_complex_gpm_fft rsi, 64, 16*dist128
+	L2prefetch128 [rsi+5*64]		;; Prefetch a few iterations ahead in
+	L2prefetch128 [rsi+16*dist128+5*64];; case they are not in the L2 cache
+	loops	16, b1b			;; Test inner loop counter
+	bump	rdi, XMM_PMD		;; Next group multiplier
+	L2prefetch128 [rdi+2*XMM_PMD]
+;	xtouch	[rcx]			;; Touch the sin/cos data to keep it
+;	bump	rcx, 96			;; in the L2 data cache
+	loops	8, b1b			;; Test loop counter
+	bump	rsi, -8*16*64+dist128	;; Next source pointer
+	loops	16, b1b			;; Test outer loop counter
+	bump	rsi, -16*dist128	;; Restore source pointer
+	end_timer 4
+
+;; Do FFT levels 3,4
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	2048	+16K	4096	+16K	6144	+16K
+;;	1	...
+;;	...
+;;	2047	...
+;;	8192	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	512	+16K	1024	+16K	1536	+16K
+;;	1	...
+;;	...
+;;	511	...
+;;	2048	...
+;;	...
+
+;; Do 4 groups of four_complex_fft_cpm macros
+;; To make things run faster we precompute the column multipliers times the
+;; 4 different sine/cosine multipliers we run into in this section.  This
+;; costs some memory but saves us some complex multiplies.
+
+;; Do 4096 four_complex_cpm_fft macros
+;;	distance between fft data elements is 512
+;;	do 512 macros each processing 64 data values
+
+	start_timer 5
+	mov	rcx, PREMULT_PREFETCH	;; Prefetch pointer
+	loops_init_prefetch 1024, 64, 2, rcx ;; 2 iters of 4 iters of 8 iters of 16
+	xtouch	[rcx]			;; Load first TLB
+b2b0:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+b2b:	x4cl_four_complex_cpm_fft rsi, 64, 4*dist128, 8*dist128, 16*XMM_PMD
+	bump	rdi, XMM_PMD		;; Next column premultiplier
+	loops	16, b2b			;; Test inner loop counter
+	bump	rdi, -16*XMM_PMD	;; Restore column premultiplier
+	loops	8, b2b			;; Test loop counter
+	bump	rsi, -8*16*64+dist128	;; Next source pointer
+	loops	4, b2b0			;; Test loop counter
+	bump	rsi, -4*dist128+16*dist128;; Next source pointer
+	bump	rdi, 32*XMM_PMD		;; Next set of premultipliers
+	bump	rcx, -8192		;; Back up so we prefetch only 24KB
+	loops	2, b2b			;; Test loop counter
+	bump	rsi, -2*16*dist128	;; Restore source pointer
+	end_timer 5
+
+;; Do FFT levels 5
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	512	+16K	1024	+16K	1536	+16K
+;;	1	...
+;;	...
+;;	511	...
+;;	2048	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	256	+16K	512	+16K	768	+16K
+;;	1	...
+;;	...
+;;	255	...
+;;	1024	...
+;;	...
+;;
+;; Do 4096 two_two_complex_fft macros
+;;	distance between fft data elements is 256
+;;	do 2048 macros each processing 16 data values
+
+;; Do FFT levels 6,7
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	256	+16K	512	+16K	768	+16K
+;;	1	...
+;;	...
+;;	255	...
+;;	1024	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	64	+16K	128	+16K	192	+16K
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+;;
+;; Do 4096 four_complex_fft macros
+;;	distance between fft data elements is 64
+;;	do 1024 macros each processing 32 data values
+
+;; Do this 8 cache lines at a time to maximize accessing data
+;; while it is in the L1 cache.
+
+	start_timer 6
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	mov	rdi, xsincos_complex	;; Load sin/cos pointers
+	mov	rbx, xsincos_complex
+	loops_init 2048			;; 4 iters of 2 of 64 of 8 cache lines
+
+	xtouch	[rcx]			;; Load first TLB
+b3b0:	xtouch	[rcx+4096-128]		;; Load two prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+
+b3b:	x2cl_two_complex_fft rsi, 64*64, 2*dist128, rdi
+	loops	2, b3b			;; Test loop counter
+	bump	rsi, -2*64*64+dist128	;; Next source pointer
+	loops	2, b3b			;; Loop twice
+	bump	rsi, -2*dist128		;; Restore source pointer
+	loops_undo 2*2
+
+b4b:	x4cl_four_complex_fft rsi, 2*dist128, 64*64, dist128, rbx
+	bump	rbx, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	2, b4b, 2		;; Test loop counter
+	L2prefetch128 [rcx]
+	bump	rcx, 128
+	bump	rbx, -2*2*XMM_SCD	;; Restore sine/cosine pointer
+
+	bump	rsi, -2*2*dist128+64	;; Next source pointer
+	loops	64, b3b			;; Test loop counter
+	bump	rsi, -64*64+4*dist128	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	bump	rbx, 2*2*XMM_SCD	;; Next sine/cosine pointer
+	bump	rcx, -64*128		;; Re-prefetch section
+	loops	2, b3b			;; Test loop counter
+	bump	rcx, 8192+128		;; Prefetch next section
+	loops	4, b3b0			;; Test loop counter
+	bump	rsi, -8*4*dist128	;; Restore source pointer
+	end_timer 6
+
+;; Do FFT levels 8,9
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	64	+16K	128	+16K	192	+16K
+;;	1	...
+;;	...
+;;	63	...
+;;	256	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	16	+16K	32	+16K	48	+16K
+;;	1	...
+;;	...
+;;	15	...
+;;	64	...
+;;	...
+;;
+;; Do 4096 four_complex_fft macros
+;;	distance between fft data elements is 16
+;;	do 1024 macros each processing 32 data values
+
+;; Do FFT levels 10,11
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	16	+16K	32	+16K	48	+16K
+;;	1	...
+;;	...
+;;	15	...
+;;	64	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	4	+16K	8	+16K	12	+16K
+;;	1	...
+;;	...
+;;	3	...
+;;	16	...
+;;	...
+;;
+;; Do 4096 four_complex_fft macros
+;;	distance between fft data elements is 4
+;;	do 1024 macros each processing 32 data values
+
+;; Do this 16 cache lines at a time to maximize accessing data
+;; while it is in the L1 cache.
+
+	start_timer 7
+	mov	rdi, xsincos_complex	;; Load sin/cos pointers
+	mov	rbx, xsincos_complex
+	loops_init_prefetch 1024, 64, 1, rcx ;; 8*2 iters of 4 of 16 cache lines
+
+b5a0:	xtouch	[rcx+4096-128]		;; Load two prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+
+b5a:	x4cl_four_complex_fft rsi, 4*64, 16*64, 32*64, rdi
+	loops	4, b5a			;; Test inner loop counter
+	bump	rsi, -4*4*64		;; Restore source pointer
+	loops_undo 4
+
+b5b:	x4cl_four_complex_fft rsi, 16*64, 4*64, 8*64, rbx
+	bump	rbx, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	4, b5b			;; Test inner loop counter
+	bump	rbx, -4*2*XMM_SCD	;; Restore sine/cosine pointer
+
+	bump	rsi, -4*16*64+64	;; Next source pointer
+	loops	4, b5a			;; Test loop counter
+	bump	rsi, -4*64+64*64	;; Next source pointer
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	bump	rbx, 4*2*XMM_SCD	;; Next sine/cosine pointer
+	loops	2, b5a			;; Test loop counter
+	bump	rsi, -2*64*64+dist128	;; Next source pointer
+	loops	2, b5a			;; Loop twice
+	bump	rcx, -64*128		;; Re-prefetch sections
+	loops	2, b5a			;; Test loop counter
+	bump	rcx, 8192+128		;; Prefetch next 2 sections
+	loops	8, b5a0			;; Test loop counter
+	bump	rsi, -32*dist128	;; Restore source pointer
+	end_timer 7
+
+;; Do FFT levels 12,13 as well as inverse FFT levels 12,13
+;;
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	4	+16K	8	+16K	12	+16K
+;;	1	...
+;;	...
+;;	3	...
+;;	16	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	2	+16K	4	+16K	6	+16K
+;;	1	...
+;;	8	...
+;;	...
+
+;; Do 4096 four_complex_fft macros
+;;	distance between fft data elements is 1
+;;	do 1024 macros each processing 32 data values
+
+;; Execute the right middle step
+
+	cmp	ffttype, 2
+	jl	xpass2_13_levels_complex_1
+	jg	xpass2_13_levels_complex_3
+
+xpass2_13_levels_complex_2:
+	start_timer 9
+	loops_init_prefetch 1024, 64, 1, rcx
+b6a0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+b6a:	x4cl_four_complex_with_square rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6a			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6a			;; Do 4 iters
+	bump	rcx, -64*128		;; Re-prefetch section
+	loops	2, b6a			;; Test loop counter
+	bump	rcx, (8192+128)		;; Prefetch next section
+	loops	4, b6a0			;; Test loop counter
+	bump	rsi, -32*dist128	;; Restore source pointer
+	end_timer 9
+	jmp	xpass2_13_levels_complex_unfft
+
+xpass2_13_levels_complex_1:
+	start_timer 9
+	loops_init_prefetch 1024, 64, 1, rcx
+b6b1:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6b0:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+b6b:	x4cl_four_complex_fft_final rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6b			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6b			;; Do 4 iters
+	bump	rcx, 128		;; Prefetch next section
+	loops	2, b6b0			;; Test loop counter
+	loops	4, b6b1			;; Test loop counter
+	end_timer 9
+	jmp	xpass2_13_levels_complex_done
+
+xpass2_13_levels_complex_3:
+	start_timer 9
+	mov	rbp, DIST_TO_MULSRCARG
+	loops_init_prefetch 1024, 64, 1, rcx
+b6c0:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+b6c:	x4cl_four_complex_with_mult rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6c			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6c			;; Do 4 iters
+	bump	rcx, -64*128		;; Re-prefetch section
+	loops	2, b6c			;; Test loop counter
+	bump	rcx, (8192+128)		;; Prefetch next section
+	loops	4, b6c0			;; Test loop counter
+	bump	rsi, -32*dist128	;; Restore source pointer
+	end_timer 9
+	jmp	xpass2_13_levels_complex_unfft
+
+xpass2_13_levels_complex_4:
+	start_timer 9
+	mov	rcx, DATA_PREFETCH	;; Prefetch pointer
+	mov	rbp, DIST_TO_MULSRCARG
+	loops_init_prefetch 1024, 64, 1, rcx
+	xtouch	[rcx]			;; Load first prefetch TLB
+b6d1:	mov	rdi, xsincos_complex	;; Load sin/cos pointer
+b6d0:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+b6d:	x4cl_four_complex_with_mulf rsi, 4*64, 64, 2*64
+	bump	rdi, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	32, b6d			;; Test inner loop counter
+	bump	rsi, -16*2*4*64+dist128	;; Next source pointer
+	loops	4, b6d			;; Do 4 iters
+	bump	rcx, 128		;; Prefetch next section
+	loops	2, b6d0			;; Test loop counter
+	loops	4, b6d1			;; Test loop counter
+	bump	rsi, -32*dist128	;; Restore source pointer
+	end_timer 9
+
+;; Do inverse FFT levels 10,11
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	2	+16K	4	+16K	6	+16K
+;;	1	...
+;;	8	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	8	+16K	16	+16K	24	+16K
+;;	1	...
+;;	...
+;;	7	...
+;;	32	...
+;;	...
+;;
+;; Do 4096 four_complex_unfft macros
+;;	distance between fft data elements is 4
+;;	do 1024 macros each processing 32 data values
+
+;; Do inverse FFT levels 8,9
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	8	+16K	16	+16K	24	+16K
+;;	1	...
+;;	...
+;;	7	...
+;;	32	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	32	+16K	64	+16K	96	+16K
+;;	1	...
+;;	...
+;;	31	...
+;;	128	...
+;;	...
+;;
+;; Do 4096 four_complex_unfft macros
+;;	distance between fft data elements is 16
+;;	do 1024 macros each processing 32 data values
+
+;; Do this 16 cache lines at a time to improve accessing data
+;; while it is in the L1 cache.
+
+xpass2_13_levels_complex_unfft:
+	start_timer 10
+	mov	rdi, xsincos_complex	;; Load sin/cos pointers
+	mov	rbx, xsincos_complex
+	loops_init_prefetch 1024, 64, 1, rcx
+
+c5b0:	xtouch	[rcx+4096-128]		;; Load two prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+
+c5b:	x4cl_four_complex_unfft rsi, 8*64, 2*64, 4*64, rbx
+	bump	rbx, XMM_SCD		;; Next sine/cosine pointer
+	loops	4, c5b			;; Test loop counter
+	bump	rsi, -4*8*64		;; Restore source pointer
+	bump	rbx, -4*XMM_SCD		;; Next sine/cosine pointer
+	loops_undo 4
+
+c4b:	x4cl_four_complex_unfft rsi, 2*64, 8*64, 16*64, rdi
+	loops	4, c4b			;; Test inner loop counter
+
+	bump	rsi, -4*2*64+64		;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rsi, -2*64+32*64	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	bump	rbx, 4*XMM_SCD		;; Next sine/cosine pointer
+	loops	4, c5b			;; Loop 4 times
+	bump	rsi, -4*32*64+dist128	;; Next source pointer
+	loops	2, c5b			;; Test loop counter
+	bump	rcx, -64*128		;; Re-prefetch section
+	loops	2, c5b			;; Test loop counter
+	bump	rcx, 8192+128		;; Prefetch next section
+	loops	8, c5b0			;; Test loop counter
+	bump	rsi, -32*dist128	;; Restore source pointer
+	end_timer 10
+
+;; Do inverse FFT levels 6,7
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	32	+16K	64	+16K	96	+16K
+;;	1	...
+;;	...
+;;	31	...
+;;	128	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	128	+16K	256	+16K	384	+16K
+;;	1	...
+;;	...
+;;	127	...
+;;	512	...
+;;	...
+;;
+;; Do 4096 four_complex_unfft macros
+;;	distance between fft data elements is 64
+;;	do 1024 macros each processing 32 data values
+
+;; Do inverse FFT levels 5
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	128	+16K	256	+16K	384	+16K
+;;	1	...
+;;	...
+;;	127	...
+;;	512	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	256	+16K	512	+16K	768	+16K
+;;	1	...
+;;	...
+;;	255	...
+;;	1024	...
+;;	...
+;;
+;; Do 2048 two_two_complex_unfft macros
+;;	distance between fft data elements is 64
+;;	do 2048 macros each processing 16 data values
+
+;; Do this 8 cache lines at a time to improve accessing data
+;; while it is in the L1 cache.
+
+	start_timer 11
+	mov	rdi, xsincos_complex	;; Load sin/cos pointers
+	mov	rbx, xsincos_complex
+	loops_init 2048
+
+c3b0:	xtouch	[rcx+4096-128]		;; Load two prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+
+c3b:	x4cl_four_complex_unfft rsi, dist128, 32*64, 64*64, rbx
+	bump	rbx, XMM_SCD		;; Next sine/cosine pointer
+	loops	2, c3b, 2		;; Test inner loop counter
+	L2prefetch128 [rcx]
+	bump	rcx, 128
+	bump	rsi, -2*dist128		;; Restore source pointer
+	bump	rbx, -2*XMM_SCD		;; Restore sine/cosine pointer
+	loops_undo 2*2
+
+c3a:	x2cl_two_complex_unfft rsi, 32*64, dist128
+	loops	4, c3a			;; Test inner loop counter
+
+	bump	rsi, -4*32*64+64	;; Next source pointer
+	loops	32, c3b			;; 32 iterations
+	bump	rsi, -32*64+2*dist128	;; Next source pointer
+	bump	rdi, XMM_SCD		;; Next sine/cosine pointer
+	bump	rbx, 2*XMM_SCD		;; Next sine/cosine pointer
+	loops	2, c3b			;; Test loop counter
+	bump	rcx, -64*128		;; Re-prefetch section
+	loops	2, c3b			;; Iterate if necessary
+	bump	rcx, 8192+128		;; Prefetch next section
+	loops	4, c3b0			;; Test loop counter
+	bump	rsi, -32*dist128	;; Restore source pointer
+	end_timer 11
+
+;; Do inverse FFT levels 3,4
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	256	+16K	512	+16K	768	+16K
+;;	1	...
+;;	...
+;;	255	...
+;;	1024	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+16K	1024	+16K	2048	+16K	3072	+16K
+;;	1	...
+;;	...
+;;	1023	...
+;;	4096	...
+;;	...
+
+;; Do 4 groups of 512 four_complex_fft macros (FFT levels 3,4)
+;; In this section we also apply the 4 column multipliers (actually three
+;; since the first column multiplier is always one).  To make things
+;; run faster we precompute the column multipliers times the 4 different
+;; sine/cosine multipliers we run into in this section.  This costs some
+;; memory but saves us some complex multiplies.
+
+;; Do 4096 four_complex_cpm_unfft macros
+;;	distance between fft data elements is 512
+;;	do 1024 macros each processing 32 data values
+
+	start_timer 13
+	mov	rdi, PREMULT_ADDR	;; Load column multipliers pointer
+	bump	rdi, 128*XMM_PMD	;; Load column multipliers pointer
+	loops_init_prefetch 1024, 64, 1, rcx ;; 4 iters of 2 iters of 8 iters of 16
+c2a:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+	xtouch	[rcx+2*4096-128]
+c2b:	x4cl_four_complex_cpm_unfft rsi, 64, 2*dist128, 4*dist128
+	bump	rdi, XMM_PMD		;; Next column premultiplier
+	loops	16, c2b			;; Test inner loop counter
+	bump	rdi, -16*XMM_PMD	;; Reset premultiplier pointer
+	loops	8, c2b			;; Test loop counter
+	bump	rsi, -128*64+dist128	;; Next source pointer
+	bump	rcx, -64*128		;; Reprefetch 8KB section
+	loops	2, c2b			;; Test loop counter
+	bump	rsi, -2*dist128+8*dist128;; Next source pointer
+	bump	rdi, 16*XMM_PMD		;; Next premultiplier pointer
+	bump	rcx, 8192+128		;; Next 8KB section to prefetch
+	loops	4, c2a			;; Test loop counter
+	bump	rsi, -4*8*dist128	;; Restore source pointer
+	end_timer 13
+
+;; Do inverse FFT levels 1,2
+;; On input the 64-byte cache lines hold these data values:
+;;	0	+16K	1024	+16K	2048	+16K	3072	+16K
+;;	1	...
+;;	...
+;;	1023	...
+;;	4096	...
+;;	...
+;; On output the 64-byte cache lines hold these data values:
+;;	0	+4K	8192	+4K	16384	+4K	24576	+4K
+;;	1	...
+;;	...
+;;	4095
+
+;; Do 1024 four_complex_gpm_unfft macros
+;;	distance between fft data elements is 2048
+;;	do 1024 macros each processing 32 data values
+
+	start_timer 14
+	mov	rcx, PREMULT_PREFETCH	;; Prefetch pointer
+	mov	rdi, PREMULT_ADDR	;; Load group multiplier pointer
+	loops_init_prefetch 1024, 64, 2, rcx ;; 8 iters of 8 iters of 16
+	xtouch	[rcx]			;; Load first prefetch TLB
+c1b0:	xtouch	[rcx+4096-128]		;; Load prefetch TLBs
+c1b:	s4cl_four_complex_gpm_unfft rsi, 64, 8*dist128, 16*dist128, 64*XMM_PMD
+	loops	16, c1b			;; Test inner loop counter
+	bump	rdi, XMM_PMD		;; Next set of multipliers
+	bump	rcx, -128		;; Backup so that we only prefetch 24KB
+	loops	8, c1b			;; Test middle loop counter
+	bump	rsi, -8*4*4*64+dist128	;; Next source pointer
+	loops	8, c1b0			;; Test outer loop counter
+	end_timer 14
+
+xpass2_13_levels_complex_done:
+	ENDM

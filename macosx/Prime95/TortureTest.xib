@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="14460.31" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
+    <dependencies>
+        <deployment identifier="macosx"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="14460.31"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <objects>
+        <customObject id="-2" userLabel="File's Owner" customClass="TortureTestController">
+            <connections>
+                <outlet property="window" destination="1" id="3"/>
+            </connections>
+        </customObject>
+        <customObject id="-1" userLabel="First Responder" customClass="FirstResponder"/>
+        <customObject id="-3" userLabel="Application" customClass="NSObject"/>
+        <window title="Run a Torture Test" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" hidesOnDeactivate="YES" animationBehavior="default" id="1" customClass="NSPanel">
+            <windowStyleMask key="styleMask" titled="YES" closable="YES" miniaturizable="YES" resizable="YES" utility="YES"/>
+            <windowPositionMask key="initialPositionMask" leftStrut="YES" bottomStrut="YES"/>
+            <rect key="contentRect" x="201" y="461" width="555" height="416"/>
+            <rect key="screenRect" x="0.0" y="0.0" width="1440" height="878"/>
+            <view key="contentView" id="2">
+                <rect key="frame" x="0.0" y="0.0" width="555" height="416"/>
+                <autoresizingMask key="autoresizingMask"/>
+                <subviews>
+                    <matrix verticalHuggingPriority="750" allowsEmptySelection="NO" id="12">
+                        <rect key="frame" x="20" y="233" width="441" height="133"/>
+                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                        <size key="cellSize" width="441" height="18"/>
+                        <size key="intercellSpacing" width="4" height="5"/>
+                        <buttonCell key="prototype" type="radio" title="Radio" imagePosition="left" alignment="left" inset="2" id="15">
+                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                            <font key="font" metaFont="system"/>
+                        </buttonCell>
+                        <cells>
+                            <column>
+                                <buttonCell type="radio" title="Smallest FFTs (tests L1/L2 caches, high power/heat/CPU stress)" imagePosition="left" alignment="left" state="on" tag="1" inset="2" id="13">
+                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <buttonCell type="radio" title="Small FFTs (tests L1/L2/L3 caches, maximum power/heat/CPU stress)" imagePosition="left" alignment="left" inset="2" id="14">
+                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                    <connections>
+                                        <binding destination="-2" name="enabled" keyPath="self.smallFFTsEnabled" id="A9y-IL-dKU"/>
+                                    </connections>
+                                </buttonCell>
+                                <buttonCell type="radio" title="Medium FFTs (tests L1/L2/L3/L4 caches)" imagePosition="left" alignment="left" inset="2" id="16">
+                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                    <connections>
+                                        <binding destination="-2" name="enabled" keyPath="self.mediumFFTsEnabled" id="7dv-YE-qof"/>
+                                    </connections>
+                                </buttonCell>
+                                <buttonCell type="radio" title="Large FFTs (stresses memory controller and RAM)" imagePosition="left" alignment="left" inset="2" id="17">
+                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <buttonCell type="radio" title="Blend (all of the above)" imagePosition="left" alignment="left" inset="2" id="oSP-ca-bZS">
+                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <buttonCell type="radio" title="Custom" imagePosition="left" alignment="left" inset="2" id="lNg-8p-z3e">
+                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                            </column>
+                        </cells>
+                        <connections>
+                            <binding destination="-2" name="selectedIndex" keyPath="tortureType" id="56"/>
+                        </connections>
+                    </matrix>
+                    <textField verticalHuggingPriority="750" id="18">
+                        <rect key="frame" x="25" y="379" width="248" height="17"/>
+                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Number of torture test threads to run:" id="19">
+                            <font key="font" metaFont="system"/>
+                            <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                            <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                        </textFieldCell>
+                    </textField>
+                    <textField verticalHuggingPriority="750" id="20">
+                        <rect key="frame" x="279" y="374" width="45" height="22"/>
+                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" drawsBackground="YES" id="21">
+                            <numberFormatter key="formatter" formatterBehavior="custom10_4" allowsFloats="NO" usesGroupingSeparator="NO" groupingSize="0" minimumIntegerDigits="0" maximumIntegerDigits="4" id="22">
+                                <nil key="negativeInfinitySymbol"/>
+                                <nil key="positiveInfinitySymbol"/>
+                            </numberFormatter>
+                            <font key="font" metaFont="system"/>
+                            <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                            <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                        </textFieldCell>
+                        <connections>
+                            <binding destination="-2" name="value" keyPath="numberOfThreads" previousBinding="pzG-Nl-gwi" id="RSl-JT-qMX">
+                                <dictionary key="options">
+                                    <integer key="NSConditionallySetsEnabled" value="1"/>
+                                </dictionary>
+                            </binding>
+                            <binding destination="-2" name="enabled" keyPath="numberOfThreadsEnabled" id="65"/>
+                            <binding destination="-2" name="maxValue" keyPath="numberOfThreadsMax" id="61"/>
+                            <binding destination="-2" name="minValue" keyPath="self.numberOfThreadsMin" previousBinding="61" id="pzG-Nl-gwi"/>
+                            <outlet property="nextKeyView" destination="12" id="Jxf-hi-Bk1"/>
+                        </connections>
+                    </textField>
+                    <box autoresizesSubviews="NO" borderType="line" title="Torture test settings" id="G54-7c-oY6">
+                        <rect key="frame" x="17" y="106" width="521" height="119"/>
+                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                        <view key="contentView" id="4IN-vY-SEe">
+                            <rect key="frame" x="1" y="1" width="519" height="103"/>
+                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                            <subviews>
+                                <textField verticalHuggingPriority="750" id="faI-qW-rdw">
+                                    <rect key="frame" x="150" y="74" width="57" height="22"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" drawsBackground="YES" id="ZdE-9q-avm">
+                                        <numberFormatter key="formatter" formatterBehavior="custom10_4" allowsFloats="NO" usesGroupingSeparator="NO" groupingSize="0" minimumIntegerDigits="0" maximumIntegerDigits="6" id="qZ8-Wk-ae2">
+                                            <nil key="negativeInfinitySymbol"/>
+                                            <nil key="positiveInfinitySymbol"/>
+                                        </numberFormatter>
+                                        <font key="font" metaFont="system"/>
+                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                        <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                    </textFieldCell>
+                                    <connections>
+                                        <binding destination="-2" name="enabled" keyPath="customSettingsEnabled" id="3b2-27-Efh"/>
+                                        <binding destination="-2" name="value" keyPath="minFFTSize" id="bBE-h6-5Na"/>
+                                        <outlet property="nextKeyView" destination="vkt-ZK-6Le" id="1Ao-WG-rlH"/>
+                                    </connections>
+                                </textField>
+                                <textField verticalHuggingPriority="750" id="8Rf-eF-PFW">
+                                    <rect key="frame" x="235" y="76" width="127" height="17"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Max FFT size (in K):" id="9VE-EH-H1A">
+                                        <font key="font" metaFont="system"/>
+                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                    </textFieldCell>
+                                </textField>
+                                <textField verticalHuggingPriority="750" id="vkt-ZK-6Le">
+                                    <rect key="frame" x="377" y="73" width="57" height="22"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" drawsBackground="YES" id="V4S-rI-pLR">
+                                        <numberFormatter key="formatter" formatterBehavior="custom10_4" allowsFloats="NO" usesGroupingSeparator="NO" groupingSize="0" minimumIntegerDigits="0" maximumIntegerDigits="6" id="S3B-mv-gBt">
+                                            <nil key="negativeInfinitySymbol"/>
+                                            <nil key="positiveInfinitySymbol"/>
+                                        </numberFormatter>
+                                        <font key="font" metaFont="system"/>
+                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                        <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                    </textFieldCell>
+                                    <connections>
+                                        <binding destination="-2" name="enabled" keyPath="customSettingsEnabled" id="kac-Ew-jba"/>
+                                        <binding destination="-2" name="value" keyPath="maxFFTSize" id="Gvw-Os-Cyc"/>
+                                        <outlet property="nextKeyView" destination="czl-rq-9UD" id="IZd-Ti-ADT"/>
+                                    </connections>
+                                </textField>
+                                <button id="czl-rq-9UD">
+                                    <rect key="frame" x="7" y="46" width="141" height="18"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <buttonCell key="cell" type="check" title="Run FFTs in-place" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="Yo2-ih-MGG">
+                                        <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                        <font key="font" metaFont="system"/>
+                                    </buttonCell>
+                                    <connections>
+                                        <binding destination="-2" name="enabled" keyPath="customSettingsEnabled" id="x7b-og-B4B"/>
+                                        <binding destination="-2" name="value" keyPath="runFFTsInPlace" id="rtm-1P-Anc"/>
+                                        <outlet property="nextKeyView" destination="LtK-QK-EO6" id="sf7-JN-koM"/>
+                                    </connections>
+                                </button>
+                                <textField verticalHuggingPriority="750" id="lOa-8g-APd">
+                                    <rect key="frame" x="190" y="45" width="154" height="17"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Memory to use (in MB):" id="JKM-ZG-5VE">
+                                        <font key="font" metaFont="system"/>
+                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                    </textFieldCell>
+                                </textField>
+                                <textField verticalHuggingPriority="750" id="LtK-QK-EO6">
+                                    <rect key="frame" x="360" y="43" width="77" height="22"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" drawsBackground="YES" id="Lec-ap-QYQ">
+                                        <numberFormatter key="formatter" formatterBehavior="custom10_4" allowsFloats="NO" usesGroupingSeparator="NO" groupingSize="0" minimumIntegerDigits="0" maximumIntegerDigits="6" id="Jj1-PR-lD1">
+                                            <nil key="negativeInfinitySymbol"/>
+                                            <nil key="positiveInfinitySymbol"/>
+                                        </numberFormatter>
+                                        <font key="font" metaFont="system"/>
+                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                        <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                    </textFieldCell>
+                                    <connections>
+                                        <binding destination="-2" name="enabled" keyPath="customMemoryEnabled" id="GjF-bd-HjO"/>
+                                        <binding destination="-2" name="value" keyPath="memoryToUse" id="hwL-E2-ZtY"/>
+                                        <outlet property="nextKeyView" destination="9RG-Pk-Ttf" id="9Gi-H9-382"/>
+                                    </connections>
+                                </textField>
+                                <textField verticalHuggingPriority="750" id="I3E-Af-t9b">
+                                    <rect key="frame" x="7" y="78" width="133" height="17"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Min FFT size (in K):" id="2fV-xM-OBp">
+                                        <font key="font" metaFont="system"/>
+                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                    </textFieldCell>
+                                </textField>
+                                <textField verticalHuggingPriority="750" id="viE-15-l4P">
+                                    <rect key="frame" x="7" y="17" width="250" height="17"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Time to run each FFT size (in minutes):" id="IVj-0a-zQ5">
+                                        <font key="font" metaFont="system"/>
+                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                    </textFieldCell>
+                                </textField>
+                                <textField verticalHuggingPriority="750" id="9RG-Pk-Ttf">
+                                    <rect key="frame" x="273" y="15" width="60" height="22"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" drawsBackground="YES" id="zda-2l-K3O">
+                                        <numberFormatter key="formatter" formatterBehavior="custom10_4" allowsFloats="NO" usesGroupingSeparator="NO" groupingSize="0" minimumIntegerDigits="0" maximumIntegerDigits="4" id="Wwg-EX-rpz">
+                                            <nil key="negativeInfinitySymbol"/>
+                                            <nil key="positiveInfinitySymbol"/>
+                                            <real key="minimum" value="1"/>
+                                        </numberFormatter>
+                                        <font key="font" metaFont="system"/>
+                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                        <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                    </textFieldCell>
+                                    <connections>
+                                        <binding destination="-2" name="enabled" keyPath="customSettingsEnabled" id="AXm-Wu-7mP"/>
+                                        <binding destination="-2" name="value" keyPath="timeToRunEachFFT" id="shl-fc-7FC"/>
+                                        <outlet property="nextKeyView" destination="34" id="prF-5F-dFm"/>
+                                    </connections>
+                                </textField>
+                            </subviews>
+                        </view>
+                    </box>
+                    <box autoresizesSubviews="NO" borderType="line" title="Run a Weaker Torture Test (not recommended)" id="23">
+                        <rect key="frame" x="17" y="50" width="521" height="52"/>
+                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                        <view key="contentView" id="rF5-g0-VuT">
+                            <rect key="frame" x="1" y="1" width="519" height="36"/>
+                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                            <subviews>
+                                <button id="34">
+                                    <rect key="frame" x="8" y="12" width="135" height="18"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <buttonCell key="cell" type="check" title="Disable AVX-512" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="35">
+                                        <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                        <font key="font" metaFont="system"/>
+                                    </buttonCell>
+                                    <connections>
+                                        <binding destination="-2" name="value" keyPath="self.disableAVX512" id="Tfh-09-bzR"/>
+                                        <binding destination="-2" name="enabled" keyPath="self.disableAVX512Enabled" id="e7g-IE-T5I"/>
+                                        <outlet property="nextKeyView" destination="5G5-Ph-jFp" id="E9c-jd-Ho7"/>
+                                    </connections>
+                                </button>
+                                <button id="5G5-Ph-jFp">
+                                    <rect key="frame" x="141" y="12" width="244" height="18"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <buttonCell key="cell" type="check" title="Disable AVX2 (fused multiply-add)" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="XLg-cQ-Wc6">
+                                        <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                        <font key="font" metaFont="system"/>
+                                    </buttonCell>
+                                    <connections>
+                                        <binding destination="-2" name="value" keyPath="self.disableFMA3" id="PhN-Km-ELw"/>
+                                        <binding destination="-2" name="enabled" keyPath="self.disableFMA3Enabled" id="b9P-va-4Je"/>
+                                        <outlet property="nextKeyView" destination="c7m-Jb-4Mr" id="Z60-YT-htz"/>
+                                    </connections>
+                                </button>
+                                <button id="c7m-Jb-4Mr">
+                                    <rect key="frame" x="389" y="12" width="112" height="18"/>
+                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                    <buttonCell key="cell" type="check" title="Disable AVX" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="ljP-rK-zsw">
+                                        <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                        <font key="font" metaFont="system"/>
+                                    </buttonCell>
+                                    <connections>
+                                        <binding destination="-2" name="enabled" keyPath="self.disableAVXEnabled" id="XAT-43-esN"/>
+                                        <binding destination="-2" name="value" keyPath="self.disableAVX" id="Rn1-fR-EIu"/>
+                                        <outlet property="nextKeyView" destination="4" id="NlV-FK-yfY"/>
+                                    </connections>
+                                </button>
+                            </subviews>
+                        </view>
+                    </box>
+                    <button verticalHuggingPriority="750" id="4">
+                        <rect key="frame" x="337" y="13" width="96" height="32"/>
+                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                        <buttonCell key="cell" type="push" title="Cancel" bezelStyle="rounded" alignment="center" state="on" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="7">
+                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                            <font key="font" metaFont="system"/>
+                        </buttonCell>
+                        <connections>
+                            <action selector="performClose:" target="1" id="10"/>
+                            <outlet property="nextKeyView" destination="5" id="9"/>
+                        </connections>
+                    </button>
+                    <button verticalHuggingPriority="750" id="5">
+                        <rect key="frame" x="445" y="13" width="96" height="32"/>
+                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                        <buttonCell key="cell" type="push" title="Run" bezelStyle="rounded" alignment="center" state="on" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="6">
+                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                            <font key="font" metaFont="system"/>
+                            <string key="keyEquivalent" base64-UTF8="YES">
+DQ
+</string>
+                            <connections>
+                                <action selector="ok:" target="-2" id="11"/>
+                            </connections>
+                        </buttonCell>
+                        <connections>
+                            <outlet property="nextKeyView" destination="4" id="8"/>
+                        </connections>
+                    </button>
+                </subviews>
+            </view>
+            <connections>
+                <outlet property="initialFirstResponder" destination="20" id="daS-a8-8fq"/>
+            </connections>
+            <point key="canvasLocation" x="657.5" y="-2529"/>
+        </window>
+    </objects>
+</document>

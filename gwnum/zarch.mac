@@ -1,0 +1,55 @@
+; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+
+;
+; Expand the command line architecture definition into its names and features
+;
+
+IF @INSTR(,%ARCH,<BLEND>) NE 0
+	zarch	TEXTEQU	<BLEND>
+	PREFETCHING = 64
+ELSEIF @INSTR(,%ARCH,<SKX>) NE 0
+	zarch	TEXTEQU	<SKX>
+	PREFETCHING = 64
+ELSEIF @INSTR(,%ARCH,<RYZEN_SUCCESSOR>) NE 0
+	zarch	TEXTEQU	<ZENPLUS>
+	PREFETCHING = 64
+ELSE
+	arch_not_given_on_command_line	
+ENDIF
+
+;
+; Macros used to conditionally eliminate some FFT implementations.
+; Using macros allows us change our minds and include these implementations
+; for a test build.
+;
+
+SKX	= 01h			; Assemble this FFT for Skylake-X architecture
+ZENPLUS	= 02h			; Assemble this FFT for some AMD future architecture
+
+;; Used to conditionally assemble FFT implementations for various CPU architectures
+buildfor MACRO archs, ops:vararg
+	IFB <archs>
+		local_archs = 0
+	ELSE
+		local_archs = archs
+	ENDIF
+	;; Conditionally assemble this FFT implementation
+	IF (@INSTR(,%zarch,<SKX>) NE 0) AND (local_archs AND SKX) NE 0
+	&ops
+	ENDIF
+	IF (@INSTR(,%zarch,<ZENPLUS>) NE 0) AND (local_archs AND ZENPLUS) NE 0
+	&ops
+	ENDIF
+	ENDM
+
+
+;; Used to conditionally assemble FFT implementations for various CPU architectures
+build421 MACRO archs4, archs2, archs1, ops:vararg
+	buildfor &archs4, &ops, 4
+	buildfor &archs2, &ops, 2
+	buildfor &archs1, &ops, 1
+	ENDM
+

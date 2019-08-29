@@ -1,0 +1,27 @@
+# Choose compiler switches 
+
+cl=cl /GF /W3 /MT /D_CRT_SECURE_NO_DEPRECATE /O2 /c
+cld=cl /GF /W3 /MT /D_CRT_SECURE_NO_DEPRECATE /DGDEBUG /Zi /c
+
+# Standard options
+copt=/I.. /I..\gwnum /I\libcurl /Ic:\hwloc-win32-build-2.0.4\include /Ic:\gmp
+
+# This line allows NMAKE to work as well
+
+all: ntprime.exe
+
+# Update the object files if necessary
+
+main.obj: main.c main.h prime95.h
+    $(cl) $(copt) main.c
+
+service.obj: service.c service.h
+    $(cl) $(copt) service.c
+
+prime.obj: prime.c prime95.h ..\commonc.c ..\commonb.c
+    $(cl) $(copt) prime.c
+
+# Update the executable file
+
+ntprime.exe: main.obj prime.obj service.obj
+    link @main.lnk

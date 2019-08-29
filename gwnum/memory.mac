@@ -1,0 +1,18 @@
+; Copyright 1998-2004 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+
+SCD = 48			;; Sizeof an entry in the sine/cosine tables
+PMD = 64			;; Sizeof an entry in premultiplier table
+NMD = 16			;; Sizeof a normalization entry
+
+;;
+;; Flatish memory model (x87 code only) - 64 pad bytes every 4KB
+;;
+
+flat_distances MACRO
+	dist1 =	16
+	dist256 = (4096+64)
+	ENDM
+

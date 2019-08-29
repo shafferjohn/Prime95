@@ -1,0 +1,78 @@
+; Copyright 1998-2009 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros take the basic FFT building blocks and build even
+; larger building blocks.
+;
+
+pf MACRO stmt:vararg
+	IFDEF PFETCH
+	&stmt
+	ENDIF
+	ENDM
+
+prefetch64 MACRO x
+	IFDEF PFETCH
+	prefetcht1 x
+	prefetcht1 x[32]
+	ENDIF
+	ENDM
+
+prefetch32 MACRO x
+	IFDEF PFETCH
+	prefetcht1 x
+	ENDIF
+	ENDM
+
+; *************** macros to expand 4 types of fft macros ******************
+
+;;
+;; Generate the 4 types of FFTs for the given run length.
+;; The 4 types are:
+;;	1) forward FFT,
+;;	2) square (forward FFT, multiply, inverse FFT)
+;;	3) multiply (forward FFT src1, multiply by src2, inverse FFT)
+;;	4) multiply (multiply src1 by src2, inverse FFT)
+;;
+
+fft	MACRO fft_length
+	fftgen	&fft_length
+	purge	fft&fft_length
+	ENDM
+
+fftclm	MACRO fft_length, clm
+	fftgen	&fft_length, clm
+	ENDM
+
+;;
+;; Do the forward FFT, squaring, and inverse FFT
+;;
+
+fftgen	MACRO fft_length, clm
+	PROCFP	fft&fft_length&clm
+	ad_prolog 0,0,rbx,rbp,rsi,rdi
+	mov	esi, DESTARG
+	mov	ebx, DIST_TO_FFTSRCARG
+	IFB <clm>
+	fft&fft_length
+	ELSE
+	fft&fft_length clm
+	ENDIF
+	ENDPP	fft&fft_length&clm
+	ENDM
+
+; Return from a type 1 FFT
+
+fft_1_ret MACRO
+	ad_epilog 0,0,rbx,rbp,rsi,rdi
+	ENDM
+
+; Return from a type 3 FFT - either jump to the common
+; error check or normalization code
+
+fft_3_ret MACRO
+	mov	eax, NORMRTN
+	call	eax
+	ad_epilog 0,0,rbx,rbp,rsi,rdi
+	ENDM

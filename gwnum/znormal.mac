@@ -1,0 +1,2701 @@
+; Copyright 2011-2019 - Mersenne Research, Inc.  All rights reserved.
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros efficiently implement the normalization to integers and multiplication by two-to-phi powers
+; using AVX-512F instructions for non-zero-padded FFTs.
+;
+
+; Utility macros used in normalization macros
+
+
+; Macro to collapse ZMM_MAXERR into one MAXERR double
+; zmm31 = maxerr 
+
+zcollapse_maxerr MACRO
+	vshuff64x2 zmm1, zmm31, zmm31, 00001011b ; Move top 256-bits to bottom
+	vmaxpd	zmm0, zmm31, zmm1		; We now have just 4 maxerr values
+	vshuff64x2 zmm1, zmm0, zmm0, 00000001b	; Move top 128-bits (of the 256-bits) to bottom
+	vmaxpd	zmm0, zmm0, zmm1		; We now have just 2 maxerr values
+	vshufpd	zmm1, zmm0, zmm0, 1		; Move top 64-bits (of the 128-bits) to bottom
+	vmaxsd	xmm0, xmm0, xmm1
+	vmovsd	MAXERR, xmm0			; Save new maxerr
+	ENDM
+
+;
+; These macros do the base-2 and non-base-2 roundings
+; zmmval - input: number to round, output: value to store in the FFT
+; zmmcarry - input: part of the next carry if mulbyconst set, output: the next carry
+;
+; zmm27 = ZMM_LARGE_BASE
+; zmm26 = ZMM_SMALL_BASE
+; zmm25 = ZMM_LARGE_BASE_INVERSE
+; zmm24 = ZMM_SMALL_BASE_INVERSE
+; zmm23 = ZMM_RNDVAL_TIMES_LARGE_BASE
+; zmm22 = ZMM_RNDVAL_TIMES_SMALL_BASE
+; zmm21 = ZMM_RNDVAL_OVER_LARGE_BASE
+; zmm20 = ZMM_RNDVAL_OVER_SMALL_BASE
+; zmm16,17 - temporary registers
+;
+
+;; BUG - should ttp zrounding use type 1b or type 3???  I think we should switch to type 1b
+
+; These macros round just one value in an ZMM register.  This is done
+; as part of the cleanup process where the final carry must be added
+; back into the results.  We use the full zmm register to avoid
+; depending on AVX512VL instructions.
+
+zrounding_single MACRO ttp, zmmval, zmmcarry, kblendmask
+ttp	zrounding_single_ttp zmmval, zmmcarry, kblendmask
+no ttp	zrounding_single_nottp zmmval, zmmcarry
+	ENDM
+
+zrounding_single_ttp MACRO zmmval, zmmcarry, kblendmask
+	vblendmpd zmm16 {kblendmask}, zmm20, zmm21	;; Create (RNDVAL / base - RNDVAL) constant used in next carry calculation
+	vblendmpd zmmcarry {kblendmask}, zmm24, zmm25	;; Create (1 / base) constant used in next carry calculation
+	zfmsubpd zmmcarry, zmmval, zmmcarry, zmm16	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	vblendmpd zmm16 {kblendmask}, zmm22, zmm23	;; Create (RNDVAL * base - RNDVAL) constant used new value calculations
+	vblendmpd zmm17 {kblendmask}, zmm26, zmm27	;; Create (base) constant used in new value calculation
+	zfmsubpd zmm16, zmmcarry, zmm17, zmm16		;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	vsubpd	zmmval, zmmval, zmm16			;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	ENDM
+
+zrounding_single_nottp MACRO zmmval, zmmcarry
+	zfmsubpd zmmcarry, zmmval, zmm24, zmm20		;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm16, zmmcarry, zmm26, zmm22		;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	vsubpd	zmmval, zmmval, zmm16			;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	ENDM
+
+;; Rotate the doubles in a ZMM register by one double.
+;; On input zmmreg1 is LSW (1 2 3 4 5 6 7 8) MSW
+;; On output zmmreg1 is (8 x x x x x x x) and zmmreg2 is (x 1 2 3 4 5 6 7) where x is ZMM_RNDVAL.
+;; On input zmm30 = ZMM_RNDVAL, k6 = 01010101b, k7 = 00000001b
+
+zrotate_carries_preload MACRO
+	mov	ebx, 00000001b * 256 + 01010101b
+	kmovw	k6, ebx
+	kshiftrw k7, k6, 8
+	ENDM
+
+zrotate_carries MACRO zmmreg1, zmmreg2
+	vshufpd zmmreg1, zmmreg1, zmmreg1, 01010101b	;; create (2 1 4 3 6 5 8 7)
+	vshuff64x2 zmmreg2, zmmreg1, zmmreg1, 10010011b	;; create (8 7 2 1 4 3 6 5)
+	vblendmpd zmmreg2 {k6}, zmmreg1, zmmreg2	;; create (8 1 2 3 4 5 6 7)
+	vblendmpd zmmreg1 {k7}, zmm30, zmmreg2		;; create (8 x x x x x x x)
+	vblendmpd zmmreg2 {k7}, zmmreg2, zmm30		;; create (x 1 2 3 4 5 6 7)
+	ENDM
+
+;; Like zrotate_carries, but output registers are reversed:
+;; On output zmmreg2 is (8 x x x x x x x) and zmmreg1 is (x 1 2 3 4 5 6 7)
+
+zrotate_carries2 MACRO zmmreg1, zmmreg2
+	vshufpd zmmreg1, zmmreg1, zmmreg1, 01010101b	;; create (2 1 4 3 6 5 8 7)
+	vshuff64x2 zmmreg2, zmmreg1, zmmreg1, 10010011b	;; create (8 7 2 1 4 3 6 5)
+	vblendmpd zmmreg2 {k6}, zmmreg1, zmmreg2	;; create (8 1 2 3 4 5 6 7)
+	vblendmpd zmmreg1 {k7}, zmmreg2, zmm30		;; create (x 1 2 3 4 5 6 7)
+	vblendmpd zmmreg2 {k7}, zmm30, zmmreg2		;; create (8 x x x x x x x)
+	ENDM
+
+;; Like zrotate_carries, but only one registers is output:
+;; On input zmmreg1 is LSW (1 2 3 4 5 6 7 8) MSW
+;; On output is (x 1 2 3 4 5 6 7)
+
+zrotate_carry MACRO zmmreg1, zmmreg2
+	vshufpd zmmreg1, zmmreg1, zmmreg1, 01010101b	;; create (2 1 4 3 6 5 8 7)
+	vshuff64x2 zmmreg2, zmmreg1, zmmreg1, 10010011b	;; create (8 7 2 1 4 3 6 5)
+	vblendmpd zmmreg2 {k6}, zmmreg1, zmmreg2	;; create (8 1 2 3 4 5 6 7)
+	vblendmpd zmmreg1 {k7}, zmmreg2, zmm30		;; create (x 1 2 3 4 5 6 7)
+	ENDM
+
+;
+; Now for the actual normalization macros!
+;
+
+; I compared several different ways to do normalization and carry propagation.
+; 1a) A straight-forward approach using two round-to-integer instructions where the big/little mask byte
+;     is used to build 2 constants: base and 1/base:
+;	zfmaddpd zmm4, zmm5, [rbp], zmm0	; 1-4	;; x = value * two-to-minus-phi + carry
+;	zfmaddpd zmm0, zmm4, zmm25, zmm30	; 5-8	;; y = x/base + RNDVAL
+;	vrndscale zmm4, zmm4, 0			; 5-12	;; xint = rnd(x)
+;	vsubpd	zmm0, zmm0, zmm30		; 9-12	;; next carry = rnd(y) = rnd(x/base) = y - RNDVAL
+;	zfnmaddpd zmm4, zmm0, zmm26, zmm4	; 13-16	;; new value = xint - rnd(y) * base
+;	vmulpd	zmm4, zmm4, [rbp+64]		; 17-20	;; new value = val * two-to-phi
+; 1b) Similar to 1a except we have longer latency and one fewer uop (vrndscale is 2 uops).
+;	zfmaddpd zmm4, zmm5, [rbp], zmm0	; 1-4	;; x = value * two-to-minus-phi + carry+RNDVAL
+;	vsubpd	zmm4, zmm4, zmm30		; 5-8	;; xint = rnd(x) = x - RNDVAL
+;	zfmaddpd zmm0, zmm4, zmm25, zmm30	; 9-12	;; next carry+RNDVAL = y = xint/base + RNDVAL
+;	vsubpd	zmm0, zmm0, zmm30		; 13-16	;; yint = rnd(y) = rnd(x/base) = y - RNDVAL
+;	zfnmaddpd zmm4, zmm0, zmm26, zmm4	; 17-20	;; new value = xint - yint * base
+;	vmulpd	zmm4, zmm4, [rbp+64]		; 21-24	;; new value = val * two-to-phi
+; 2) The base-2 code used in AVX FFTs.  In this case, carry has RNDVAL added to it.  This also uses the big/little
+;    mask byte to build 2 constants:  (base*RNDVAL - RNDVAL) and 1/base
+;	zfmaddpd zmm4, zmm5, [rbp], zmm0	; 1-4	;; x+RNDVAL = value * two-to-minus-phi + carry+RNDVAL
+;	vaddpd	zmm0, zmm4, zmm25		; 5-8	;; y = x+RNDVAL + (base*RNDVAL - RNDVAL) = x+base*RNDVAL = top bits of x + base*RNDVAL
+;	vaddpd	zmm6, zmm0, zmm4		; 9-12	;; z+RNDVAL = y - (base*RNDVAL - RNDVAL) = top bits of x + RNDVAL
+;	vmulpd	zmm0, zmm0, zmm26		; 10-13 ;; next carry = y * 1/base
+;	vsubpd	zmm4, zmm4, zmm6		; 13-16	;; new value = x+RNDVAL - z+RNDVAL
+;	vmulpd	zmm4, zmm4, [rbp+64]		; 17-20	;; new value = val * two-to-phi
+; 3) A new method that also has RNDVAL added into the carry and requires us to choose a RNDVAL such that it
+;    is divisible by base.  This method uses the big/little mask byte to build 4 constants:
+;    base, 1/base, (RNDVAL / base - RNDVAL), and (RNDVAL * base - RNDVAL)
+;	zfmaddpd zmm4, zmm5, [rbp], zmm0	; 1-4	;; x+RNDVAL = value * two-to-minus-phi + carry+RNDVAL
+;	zfmsubpd zmm0, zmm4, zmm25, zmm26	; 5-8	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+;	zfmsubpd zmm6, zmm0, zmm27, zmm27	; 9-12	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+;	vsubpd	zmm4, zmm4, zmm6		; 13-16	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+;	vmulpd	zmm4, zmm4, [rbp+64]		; 17-20	;; new value = val * two-to-phi
+
+; I chose method 1b because interleaving using 32 registers will let us hide the additional latency when compared to 1a and 2.
+; Plus this method works for both base-2 and non-base-2 cases.  In Skylake-X generating the 2 additional constants requires 2 uops
+; that compete with the FMA ports.
+
+; In the future we might chose method 3 because it is one fewer arithmetic operation.  For this to make sense
+; generating the two additional constants must be essentially free (not compete with the FMA ports).  Plus we need to
+; make sure the extra registers required for the extra constants do not interfere with perfect pipelining.
+
+; Also note that for rational FFTs, I chose method 3 because it is one fewer instruction and the extra constants are not needed.
+
+; Also note that for zero-pad FFTs, method 3 might be better because the calculated constants can be used twice.
+
+
+; *************** Top carry adjust macro ******************
+; This macro corrects the carry out of the topmost word when k is not 1.
+; The problem is the top carry is from b^ceil(logb(k)+n) rather than at k*b^n.
+; So we recompute the top carry by multiplying by b^ceil(logb(k)) and then
+; dividing by k.  The integer part is the new carry and the remainder is
+; added back to the top three words.
+; rsi = FFT data pointer (must be preserved)
+; rbp = two-to-phi multiplier pointer (must be preserved)
+; rdi = big/little pointer (must be preserved)
+; zmm0-2 = other carries that must be preserved
+; zmm4-7 = addsub carries that must be preserved
+; zmm30 = ZMM_RNDVAL (must be loaded by caller)
+
+; The two-pass scratch area case.  The top carry is loaded into xmm7 from the carries array.
+; On input:
+; rbp = points just past the last carry
+; zmm7 = last carries (the one we want is in the top word)
+znorm_top_carry_wpn MACRO
+	znorm_top_carry_cmn xmm7, 1
+	ENDM
+
+; The two-pass FFT in memory case.  The top carry is loaded into xmm1 from the carries array.
+; xmm1 = last carry
+znorm_top_carry_op_wpn MACRO
+	znorm_top_carry_cmn xmm1, 2
+	ENDM
+
+znorm_top_carry_cmn MACRO xreg, twopass
+	LOCAL	kok
+	cmp	TOP_CARRY_NEEDS_ADJUSTING, 1 ;; Does top carry need work?
+	jne	kok			;; Skip this code if K is 1
+
+	IF twopass EQ 1
+	vmovsd	xreg, Q [rbp-8]		;; Load the very last carry rather than trying to extract it from within zmm7
+	ENDIF
+
+	vsubsd	xreg, xreg, xmm30	;; Convert top carry out of int+RNDVAL state
+
+	;; We want to calculate carry * b^ceil(logb(k)) / k and
+	;; carry * b^ceil(logb(k)) % k.  This must be done very carefully as
+	;; carry * b^ceil(logb(k)) may not fit in 53 bits.
+
+	;; Here is a strategy that works for k values up to and including 34 bits.
+	;; We do lots of modulo k operations along the way to insure all intermediate
+	;; results are 51 bits or less.
+	;; Calculate y = carry % k.  This will fit in 34 bits.
+	;; Let z = b^ceil(logb(k)) % k.  Precalculate high_17_bits(z) and low_17_bits(z)
+	;; Remainder is (high_17_bits(z) * y % k * 2^17 + low_17_bits(z) * y) % k
+
+	vmovsd	xmm11, INVERSE_K
+	vmovsd	xmm12, K
+
+	vmulsd	xmm9, xreg, xmm11		;; Mul top carry by 1/k
+	vroundsd xmm9, xmm9, xmm9, 0		;; Integer part
+	zfnmaddsd xmm10, xmm9, xmm12, xreg	;; y = carry % k
+
+	vmulsd	xmm8, xmm10, CARRY_ADJUST1_HI	;; y * high_17_bits(z)
+	vmulsd	xmm9, xmm8, xmm11		;; Mul y * high_17_bits(z) by 1/k
+	vroundsd xmm9, xmm9, xmm9, 0		;; Integer part
+	zfnmaddsd xmm8, xmm9, xmm12, xmm8	;; y * high_17_bits(z) % k
+	vmulsd	xmm8, xmm8, TWO_TO_17		;; y * high_17_bits(z) % k * 2^17
+	zfmaddsd xmm8, xmm10, CARRY_ADJUST1_LO, xmm8 ;; y * low_17_bits(z) + (y * high_17_bits(z) % k * 2^17)
+
+	vmulsd	xmm9, xmm8, xmm11		;; Mul by 1/k
+	vroundsd xmm9, xmm9, xmm9, 0		;; Integer part
+	zfnmaddsd xmm8, xmm9, xmm12, xmm8	;; Remainder!!!
+
+	;; Finally calculate integer_part = (carry * b^ceil(logb(k)) - remainder) / k
+
+	zfmsubsd xreg, xreg, CARRY_ADJUST1, xmm8 ;; carry * b^ceil(logb(k)) - remainder
+	zfmaddsd xreg, xreg, xmm11, xmm30	;; Mul by 1/k, we now have integer part of top carry over k + RNDVAL
+
+	;; Now add the remainder to the top words
+
+	vmulsd	xmm8, xmm8, CARRY_ADJUST2	;; Shift remainder
+	vroundsd xmm9, xmm8, xmm8, 0		;; Integer part of shifted remainder
+	vsubsd	xmm8, xmm8, xmm9		;; Fractional part of shifted remainder
+
+	;; Two pass scratch area case
+	IF twopass EQ 1
+	mov	rsi, scratch_area		;; FFT data is in the scratch area
+	mov	eax, HIGH_SCRATCH1_OFFSET	;; Add integer part to top word
+	vaddsd	xmm9, xmm9, Q [rsi][rax]
+	vmovsd	Q [rsi][rax], xmm9
+	vmulsd	xmm8, xmm8, CARRY_ADJUST4	;; Shift fractional part
+	vroundsd xmm8, xmm8, xmm8, 0
+	mov	eax, HIGH_SCRATCH2_OFFSET	;; Add frac part to top-1 word
+	vaddsd	xmm8, xmm8, Q [rsi][rax]
+	vmovsd	Q [rsi][rax], xmm8
+	ENDIF
+
+	;; Two pass FFT data case
+	IF twopass EQ 2
+	mov	rsi, DESTARG			;; Address of FFT data
+	mov	eax, HIGH_WORD1_OFFSET		;; Add integer part to top word
+	vaddsd	xmm9, xmm9, Q [rsi][rax]
+	vmovsd	Q [rsi][rax], xmm9
+	vmulsd	xmm8, xmm8, CARRY_ADJUST4	;; Shift fractional part
+	vroundsd xmm8, xmm8, xmm8, 0
+	mov	eax, HIGH_WORD2_OFFSET		;; Add frac part to top-1 word
+	vaddsd	xmm8, xmm8, Q [rsi][rax]
+	vmovsd	Q [rsi][rax], xmm8
+	ENDIF
+
+	IF twopass EQ 1
+	vmovsd	Q [rbp-8], xreg			;; Save very last carry
+	ENDIF
+
+kok:
+	ENDM
+
+
+;;*******************************************************************************************
+;;				Macros for two pass FFTs
+;;*******************************************************************************************
+
+; For WPN macros, these registers are set on input:
+; rbp = pointer to carries
+; rdi = pointer to big/little flags
+; rsi = pointer to the FFT data (source #1)
+; r13 = source #3
+; r14 = distance between source #1 and source #2 (as well as source #3 and source #4)
+; r12 = pointer two-to-phi group multipliers
+; r8 = compressed biglit table
+; r10 = address of inverse group multipliers table
+; rdx = register to load biglit index (top 56-bits must be zero)
+; zmm0-zmm7 = carries
+; zmm31 = maxerr
+
+;; NOTE: We apply the inverse group multiplier here rather than the more proper zr8/12_last_unfft macros because we can
+;; apply the inverse multiplier here for free via FMA instructions.
+
+znorm_wpn_preload MACRO ttp, zero, echk, const
+no const no echk no ttp		znorm_wpn_noconst_noechk_nottp_preload zero
+no const no echk    ttp		znorm_wpn_noconst_noechk_ttp_preload zero
+no const    echk no ttp		znorm_wpn_noconst_echk_nottp_preload zero
+no const    echk    ttp		znorm_wpn_noconst_echk_ttp_preload zero
+   const no echk no ttp		znorm_wpn_const_noechk_nottp_preload
+   const no echk    ttp		znorm_wpn_const_noechk_ttp_preload
+   const    echk no ttp		znorm_wpn_const_echk_nottp_preload
+   const    echk    ttp		znorm_wpn_const_echk_ttp_preload
+	ENDM
+
+znorm_wpn MACRO ttp, zero, echk, const
+ttp	mov	dl, [rdi]	;; Load index into compressed biglit table
+
+no const no echk no ttp		znorm_wpn_noconst_noechk_nottp zero
+no const no echk    ttp		znorm_wpn_noconst_noechk_ttp zero
+no const    echk no ttp		znorm_wpn_noconst_echk_nottp zero
+no const    echk    ttp		znorm_wpn_noconst_echk_ttp zero
+   const no echk no ttp		znorm_wpn_const_noechk_nottp zero
+   const no echk    ttp		znorm_wpn_const_noechk_ttp zero
+   const    echk no ttp		znorm_wpn_const_echk_nottp zero
+   const    echk    ttp		znorm_wpn_const_echk_ttp zero
+	ENDM
+
+
+znorm_wpn_noconst_noechk_nottp_preload MACRO zero
+	vbroadcastsd zmm28, ZMM_SMALL_BASE			;; small_word_base
+	vbroadcastsd zmm27, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+	vbroadcastsd zmm26, ZMM_RNDVAL_TIMES_SMALL_BASE		;; RNDVAL * small_word_base - RNDVAL
+	vbroadcastsd zmm25, ZMM_RNDVAL_OVER_SMALL_BASE		;; RNDVAL / small_word_base - RNDVAL
+zero	vpxorq	zmm24, zmm24, zmm24				;; Zero
+	ENDM
+znorm_wpn_noconst_noechk_nottp MACRO zero
+
+;; BUG - should rsi+64 use zmm1 carry or zmm4 carry?  zpad code in _1d did not use zmm1
+;; but zgw_carries_wpn requires low and high carry to be next to each other. So we either use zmm1 here
+;; or change the way we load/store carries in inorm
+
+	vmovapd	zmm30, [r10+0*64]			;; Inverse group multiplier
+	zfmaddpd zmm8, [rsi], zmm30, zmm0	; 1-4	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm12, [rsi+64], zmm30, zmm4	; 1-4	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	vmovapd	zmm30, [r10+1*64]			;; Inverse group multiplier
+	zfmaddpd zmm9, [rsi+r14], zmm30, zmm1	; 2-5	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm13, [rsi+r14+64], zmm30, zmm5; 2-5	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	vmovapd	zmm30, [r10+2*64]			;; Inverse group multiplier
+	zfmaddpd zmm10, [r13], zmm30, zmm2	; 3-6	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm14, [r13+64], zmm30, zmm6	; 3-6	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	vmovapd	zmm30, [r10+3*64]			;; Inverse group multiplier
+	zfmaddpd zmm11, [r13+r14], zmm30, zmm3	; 4-7	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm15, [r13+r14+64], zmm30, zmm7; 4-7	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+
+	L1prefetchw rsi+128, L1PREFETCH_ALL
+	L1prefetchw rsi+64+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+128, L1PREFETCH_ALL
+	L1prefetchw r13+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+64+128, L1PREFETCH_ALL
+
+	zfmsubpd zmm0, zmm8, zmm27, zmm25	; 5-8	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm4, zmm12, zmm27, zmm25	; 5-8	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm1, zmm9, zmm27, zmm25	; 6-9	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm5, zmm13, zmm27, zmm25	; 6-9	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm2, zmm10, zmm27, zmm25	; 7-10	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm6, zmm14, zmm27, zmm25	; 7-10	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm3, zmm11, zmm27, zmm25	; 8-11	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm7, zmm15, zmm27, zmm25	; 8-11	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+
+	zfmsubpd zmm16, zmm0, zmm28, zmm26	; 9-12	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+no zero	zfmsubpd zmm20, zmm4, zmm28, zmm26	; 9-12	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm17, zmm1, zmm28, zmm26	; 10-13	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+no zero	zfmsubpd zmm21, zmm5, zmm28, zmm26	; 10-13	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm18, zmm2, zmm28, zmm26	; 11-14	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+no zero	zfmsubpd zmm22, zmm6, zmm28, zmm26	; 11-14	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm19, zmm3, zmm28, zmm26	; 12-15	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+no zero	zfmsubpd zmm23, zmm7, zmm28, zmm26	; 12-15	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+
+	vsubpd	zmm8, zmm8, zmm16		; 13-16	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+no zero	vsubpd	zmm12, zmm12, zmm20		; 13-16	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm9, zmm9, zmm17		; 14-17	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+no zero	vsubpd	zmm13, zmm13, zmm21		; 14-17	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm10, zmm10, zmm18		; 15-18	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+no zero	vsubpd	zmm14, zmm14, zmm22		; 15-18	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm11, zmm11, zmm19		; 16-19	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+no zero	vsubpd	zmm15, zmm15, zmm23		; 16-19	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+
+	zstore	[rsi], zmm8		;; Save value1
+no zero	zstore	[rsi+64], zmm12		;; Save value5
+zero	zstore	[rsi+64], zmm24		;; Save value5
+	zstore	[rsi+r14], zmm9		;; Save value2
+no zero	zstore	[rsi+r14+64], zmm13	;; Save value6
+zero	zstore	[rsi+r14+64], zmm24	;; Save value6
+	zstore	[r13], zmm10		;; Save value3
+no zero	zstore	[r13+64], zmm14		;; Save value7
+zero	zstore	[r13+64], zmm24		;; Save value7
+	zstore	[r13+r14], zmm11	;; Save value4
+no zero	zstore	[r13+r14+64], zmm15	;; Save value8
+zero	zstore	[r13+r14+64], zmm24	;; Save value8
+	ENDM
+
+
+znorm_wpn_noconst_echk_nottp_preload MACRO zero
+	vbroadcastsd zmm29, ZMM_ABSVAL
+	vbroadcastsd zmm28, ZMM_SMALL_BASE			;; small_word_base
+	vbroadcastsd zmm27, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+	vbroadcastsd zmm26, ZMM_RNDVAL_TIMES_SMALL_BASE		;; RNDVAL * small_word_base - RNDVAL
+	vbroadcastsd zmm25, ZMM_RNDVAL_OVER_SMALL_BASE		;; RNDVAL / small_word_base - RNDVAL
+zero	vpxorq	zmm24, zmm24, zmm24				;; Zero
+	ENDM
+znorm_wpn_noconst_echk_nottp MACRO zero
+
+	;; BUG - we could save some reloading of the values (at the "cost" of vmovapd instructions using zmm16-zmm24)
+
+	vmovapd	zmm30, [r10+0*64]			;; Inverse group multipliers
+	zfmaddpd zmm8, [rsi], zmm30, zmm0	; 1-4	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm12, [rsi+64], zmm30, zmm4	; 1-4	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	vmovapd	zmm23, [r10+1*64]			;; Inverse group multipliers
+	zfmaddpd zmm9, [rsi+r14], zmm23, zmm1	; 2-5	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm13, [rsi+r14+64], zmm23, zmm5; 2-5	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	vmovapd	zmm22, [r10+2*64]			;; Inverse group multipliers
+	zfmaddpd zmm10, [r13], zmm22, zmm2	; 3-6	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm14, [r13+64], zmm22, zmm6	; 3-6	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	vmovapd	zmm21, [r10+3*64]			;; Inverse group multipliers
+	zfmaddpd zmm11, [r13+r14], zmm21, zmm3	; 4-7	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm15, [r13+r14+64], zmm21, zmm7; 4-7	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+
+	vsubpd	zmm0, zmm8, zmm0		; 5-8	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm4, zmm12, zmm4		; 5-8	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm1, zmm9, zmm1		; 6-9	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm5, zmm13, zmm5		; 6-9	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm2, zmm10, zmm2		; 7-10	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm6, zmm14, zmm6		; 7-10	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm3, zmm11, zmm3		; 8-11	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm7, zmm15, zmm7		; 8-11	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+
+	zfnmaddpd zmm0, [rsi], zmm30, zmm0 	; 9-12	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm4, [rsi+64], zmm30, zmm4 	; 9-12	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm1, [rsi+r14], zmm23, zmm1 	; 10-13	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm5, [rsi+r14+64], zmm23, zmm5 ; 10-13;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm2, [r13], zmm22, zmm2 	; 11-14	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm6, [r13+64], zmm22, zmm6 	; 11-14	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm3, [r13+r14], zmm21, zmm3 	; 12-15	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm7, [r13+r14+64], zmm21, zmm7 ; 12-15;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+
+	L1prefetchw rsi+128, L1PREFETCH_ALL
+	L1prefetchw rsi+64+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+128, L1PREFETCH_ALL
+	L1prefetchw r13+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+64+128, L1PREFETCH_ALL
+
+	vpandq	zmm0, zmm0, zmm29		; 13	;; err = abs(err)
+	vpandq	zmm4, zmm4, zmm29		; 13	;; err = abs(err)
+	vpandq	zmm1, zmm1, zmm29		; 14	;; err = abs(err)
+	vpandq	zmm5, zmm5, zmm29		; 14	;; err = abs(err)
+	vpandq	zmm2, zmm2, zmm29		; 15	;; err = abs(err)
+	vpandq	zmm6, zmm6, zmm29		; 15	;; err = abs(err)
+	vpandq	zmm3, zmm3, zmm29		; 16	;; err = abs(err)
+	vpandq	zmm7, zmm7, zmm29		; 16	;; err = abs(err)
+
+;; BUG - Is there a better grouping available (use regs zmm16 up and interleave with the / base FMA instructions
+;; Use more maxerr accumulators?
+
+	vmaxpd	zmm31, zmm31, zmm0		; 17-20	;; accumulate maxerr
+	vmaxpd	zmm1, zmm1, zmm2		; 17-20	;; accumulate maxerr
+	vmaxpd	zmm3, zmm3, zmm4		; 18-21	;; accumulate maxerr
+	vmaxpd	zmm5, zmm5, zmm6		; 18-21	;; accumulate maxerr
+	vmaxpd	zmm31, zmm31, zmm7		; 21-24	;; accumulate maxerr
+	vmaxpd	zmm1, zmm1, zmm3		; 22-25	;; accumulate maxerr
+	vmaxpd	zmm31, zmm31, zmm5		; 25-28	;; accumulate maxerr
+	vmaxpd	zmm31, zmm31, zmm1		; 29-32	;; accumulate maxerr
+
+	zfmsubpd zmm0, zmm8, zmm27, zmm25	; 5-8	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm1, zmm9, zmm27, zmm25	; 5-8	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm2, zmm10, zmm27, zmm25	; 6-9	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm3, zmm11, zmm27, zmm25	; 6-9	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm4, zmm12, zmm27, zmm25	; 7-10	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm5, zmm13, zmm27, zmm25	; 7-10	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm6, zmm14, zmm27, zmm25	; 8-11	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm7, zmm15, zmm27, zmm25	; 8-11	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+
+	zfmsubpd zmm16, zmm0, zmm28, zmm26	; 9-12	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm17, zmm1, zmm28, zmm26	; 9-12	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm18, zmm2, zmm28, zmm26	; 10-13	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm19, zmm3, zmm28, zmm26	; 10-13	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+no zero	zfmsubpd zmm20, zmm4, zmm28, zmm26	; 11-14	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+no zero	zfmsubpd zmm21, zmm5, zmm28, zmm26	; 11-14	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+no zero	zfmsubpd zmm22, zmm6, zmm28, zmm26	; 12-15	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+no zero	zfmsubpd zmm23, zmm7, zmm28, zmm26	; 12-15	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+
+	vsubpd	zmm8, zmm8, zmm16		; 13-16	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm9, zmm9, zmm17		; 13-16	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm10, zmm10, zmm18		; 14-17	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm11, zmm11, zmm19		; 14-17	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+no zero	vsubpd	zmm12, zmm12, zmm20		; 15-18	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+no zero	vsubpd	zmm13, zmm13, zmm21		; 15-18	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+no zero	vsubpd	zmm14, zmm14, zmm22		; 16-19	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+no zero	vsubpd	zmm15, zmm15, zmm23		; 16-19	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+
+	zstore	[rsi], zmm8		;; Save value1
+	zstore	[rsi+r14], zmm9		;; Save value2
+	zstore	[r13], zmm10		;; Save value3
+	zstore	[r13+r14], zmm11	;; Save value4
+
+no zero	zstore	[rsi+64], zmm12		;; Save value5
+no zero	zstore	[rsi+r14+64], zmm13	;; Save value6
+no zero	zstore	[r13+64], zmm14		;; Save value7
+no zero	zstore	[r13+r14+64], zmm15	;; Save value8
+
+zero	zstore	[rsi+64], zmm24		;; Save value5
+zero	zstore	[rsi+r14+64], zmm24	;; Save value6
+zero	zstore	[r13+64], zmm24		;; Save value7
+zero	zstore	[r13+r14+64], zmm24	;; Save value8
+	ENDM
+
+
+znorm_wpn_const_noechk_nottp_preload MACRO
+	vbroadcastsd zmm30, ZMM_MULCONST			;; User's small multiplier for FFT result
+	vbroadcastsd zmm29, ZMM_RNDVAL				;; Rounding val = 3*2^51 + enough to make a multiple of base
+	vbroadcastsd zmm28, ZMM_SMALL_BASE			;; small_word_base
+	vbroadcastsd zmm27, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+	vbroadcastsd zmm26, ZMM_RNDVAL_TIMES_SMALL_BASE		;; RNDVAL * small_word_base - RNDVAL
+	vbroadcastsd zmm25, ZMM_RNDVAL_OVER_SMALL_BASE		;; RNDVAL / small_word_base - RNDVAL
+	ENDM
+znorm_wpn_const_noechk_nottp MACRO zero
+	vmovapd	zmm31, [r10+0*64]			;; Inverse group multipliers
+	zfmaddpd zmm8, [rsi], zmm31, zmm29	; 1-4	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm12, [rsi+64], zmm31, zmm29	; 1-4	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd	zmm31, [r10+1*64]			;; Inverse group multipliers
+	zfmaddpd zmm9, [rsi+r14], zmm31, zmm29	; 2-5	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm13, [rsi+r14+64], zmm31, zmm29; 2-5	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd	zmm31, [r10+2*64]			;; Inverse group multipliers
+	zfmaddpd zmm10, [r13], zmm31, zmm29	; 3-6	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm14, [r13+64], zmm31, zmm29	; 3-6	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd	zmm31, [r10+3*64]			;; Inverse group multipliers
+	zfmaddpd zmm11, [r13+r14], zmm31, zmm29	; 4-7	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm15, [r13+r14+64], zmm31, zmm29; 4-7	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+
+	L1prefetchw rsi+128, L1PREFETCH_ALL
+	L1prefetchw rsi+64+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+128, L1PREFETCH_ALL
+	L1prefetchw r13+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+64+128, L1PREFETCH_ALL
+
+	vsubpd	zmm8, zmm8, zmm29		; 5-8	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm12, zmm12, zmm29		; 5-8	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm9, zmm9, zmm29		; 6-9	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm13, zmm13, zmm29		; 6-9	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm10, zmm10, zmm29		; 7-10	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm14, zmm14, zmm29		; 7-10	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm11, zmm11, zmm29		; 8-11	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm15, zmm15, zmm29		; 8-11	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+
+	zfmaddpd zmm16, zmm8, zmm27, zmm29	; 9-12	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm20, zmm12, zmm27, zmm29	; 9-12	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm17, zmm9, zmm27, zmm29	; 10-13	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm21, zmm13, zmm27, zmm29	; 10-13	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm18, zmm10, zmm27, zmm29	; 11-14	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm22, zmm14, zmm27, zmm29	; 11-14	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm19, zmm11, zmm27, zmm29	; 12-15	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm23, zmm15, zmm27, zmm29	; 12-15	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+
+	vsubpd	zmm16, zmm16, zmm29		; 13-16	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm20, zmm20, zmm29		; 13-16	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm17, zmm17, zmm29		; 14-17	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm21, zmm21, zmm29		; 14-17	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm18, zmm18, zmm29		; 15-18	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm22, zmm22, zmm29		; 15-18	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm19, zmm19, zmm29		; 16-19	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm23, zmm23, zmm29		; 16-19	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+
+	zfnmaddpd zmm8, zmm16, zmm28, zmm8	; 17-20	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm12, zmm20, zmm28, zmm12	; 17-20	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm9, zmm17, zmm28, zmm9	; 18-21	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm13, zmm21, zmm28, zmm13	; 18-21	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm10, zmm18, zmm28, zmm10	; 19-22	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm14, zmm22, zmm28, zmm14	; 19-22	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm11, zmm19, zmm28, zmm11	; 20-23	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm15, zmm23, zmm28, zmm15	; 20-23	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+
+	zfmaddpd zmm8, zmm8, zmm30, zmm0	; 21-24	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm12, zmm12, zmm30, zmm4	; 21-24	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm9, zmm9, zmm30, zmm1	; 22-25	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm13, zmm13, zmm30, zmm5	; 22-25	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm10, zmm10, zmm30, zmm2	; 23-26	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm14, zmm14, zmm30, zmm6	; 23-26	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm11, zmm11, zmm30, zmm3	; 24-27	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm15, zmm15, zmm30, zmm7	; 24-27	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+
+	zfmsubpd zmm0, zmm8, zmm27, zmm25	; 25-28	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm4, zmm12, zmm27, zmm25	; 25-28	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm1, zmm9, zmm27, zmm25	; 26-29	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm5, zmm13, zmm27, zmm25	; 26-29	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm2, zmm10, zmm27, zmm25	; 27-30	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm6, zmm14, zmm27, zmm25	; 27-30	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm3, zmm11, zmm27, zmm25	; 28-31	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm7, zmm15, zmm27, zmm25	; 28-31	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+
+	zfmsubpd zmm24, zmm0, zmm28, zmm26	; 29-32	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm0, zmm16, zmm30, zmm0	; 29-32	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm16, zmm4, zmm28, zmm26	; 30-33	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm4, zmm20, zmm30, zmm4	; 30-33	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm20, zmm1, zmm28, zmm26	; 31-34	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm1, zmm17, zmm30, zmm1	; 31-34	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm17, zmm5, zmm28, zmm26	; 32-35	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm5, zmm21, zmm30, zmm5	; 32-35	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm21, zmm2, zmm28, zmm26	; 33-36	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm2, zmm18, zmm30, zmm2	; 33-36	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm18, zmm6, zmm28, zmm26	; 34-37	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm6, zmm22, zmm30, zmm6	; 34-37	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm22, zmm3, zmm28, zmm26	; 35-38	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm3, zmm19, zmm30, zmm3	; 35-38	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm19, zmm7, zmm28, zmm26	; 36-39	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm7, zmm23, zmm30, zmm7	; 36-39	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+
+	vsubpd	zmm8, zmm8, zmm24		; 37-40	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm12, zmm12, zmm16		; 37-40	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm9, zmm9, zmm20		; 38-41	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm13, zmm13, zmm17		; 38-41	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm10, zmm10, zmm21		; 39-42	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm14, zmm14, zmm18		; 39-42	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm11, zmm11, zmm22		; 40-43	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm15, zmm15, zmm19		; 40-43	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+
+	zstore	[rsi], zmm8		;; Save value1
+	zstore	[rsi+64], zmm12		;; Save value5
+	zstore	[rsi+r14], zmm9		;; Save value2
+	zstore	[rsi+r14+64], zmm13	;; Save value6
+	zstore	[r13], zmm10		;; Save value3
+	zstore	[r13+64], zmm14		;; Save value7
+	zstore	[r13+r14], zmm11	;; Save value4
+	zstore	[r13+r14+64], zmm15	;; Save value8
+	ENDM
+
+
+znorm_wpn_const_echk_nottp_preload MACRO
+	vbroadcastsd zmm30, ZMM_MULCONST			;; User's small multiplier for FFT result
+	vbroadcastsd zmm29, ZMM_RNDVAL				;; Rounding val = 3*2^51 + enough to make a multiple of base
+	vbroadcastsd zmm28, ZMM_SMALL_BASE			;; small_word_base
+	vbroadcastsd zmm27, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+	vbroadcastsd zmm26, ZMM_RNDVAL_TIMES_SMALL_BASE		;; RNDVAL * small_word_base - RNDVAL
+	vbroadcastsd zmm25, ZMM_RNDVAL_OVER_SMALL_BASE		;; RNDVAL / small_word_base - RNDVAL
+	ENDM
+znorm_wpn_const_echk_nottp MACRO zero
+	vmovapd	zmm24, [r10+0*64]			;; Inverse group multipliers
+	zfmaddpd zmm8, [rsi], zmm24, zmm29	; 1-4	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm12, [rsi+64], zmm24, zmm29	; 1-4	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd	zmm23, [r10+1*64]			;; Inverse group multipliers
+	zfmaddpd zmm9, [rsi+r14], zmm23, zmm29	; 2-5	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm13, [rsi+r14+64], zmm23, zmm29; 2-5	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd	zmm22, [r10+2*64]			;; Inverse group multipliers
+	zfmaddpd zmm10, [r13], zmm22, zmm29	; 3-6	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm14, [r13+64], zmm22, zmm29	; 3-6	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd	zmm21, [r10+3*64]			;; Inverse group multipliers
+	zfmaddpd zmm11, [r13+r14], zmm21, zmm29	; 4-7	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm15, [r13+r14+64], zmm21, zmm29; 4-7	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+
+	vsubpd	zmm8, zmm8, zmm29		; 5-8	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm12, zmm12, zmm29		; 5-8	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm9, zmm9, zmm29		; 6-9	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm13, zmm13, zmm29		; 6-9	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm10, zmm10, zmm29		; 7-10	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm14, zmm14, zmm29		; 7-10	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm11, zmm11, zmm29		; 8-11	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm15, zmm15, zmm29		; 8-11	;; rnd(FFTval) = (FFTval+RNDVAL) - RNDVAL
+
+	;; BUG - avoid the reload from memory by using vmovapd into register 16-23
+
+	zfnmaddpd zmm16, [rsi], zmm24, zmm8 	; 9-12	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfnmaddpd zmm20, [rsi+64], zmm24, zmm12 ; 9-12	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfnmaddpd zmm17, [rsi+r14], zmm23, zmm9	; 10-13	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfnmaddpd zmm23, [rsi+r14+64], zmm23, zmm13; 10-13;; err = rnd(FFTval) - value*inv_grp_mult
+	zfnmaddpd zmm18, [r13], zmm22, zmm10 	; 11-14	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfnmaddpd zmm22, [r13+64], zmm22, zmm14 ; 11-14	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfnmaddpd zmm19, [r13+r14], zmm21, zmm11; 12-15	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfnmaddpd zmm21, [r13+r14+64], zmm21, zmm15; 12-15 ;; err = rnd(FFTval) - value*inv_grp_mult
+
+	L1prefetchw rsi+128, L1PREFETCH_ALL
+	L1prefetchw rsi+64+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+128, L1PREFETCH_ALL
+	L1prefetchw r13+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+64+128, L1PREFETCH_ALL
+
+;; BUG - Is there a better grouping available (use reg zmm24 and interleave with the / base FMA instructions
+;; Use more maxerr accumulators?  Run this through IACA
+
+	vbroadcastsd zmm24, ZMM_ABSVAL
+	vpandq	zmm16, zmm16, zmm24		; 13	;; err = abs(err)
+	vpandq	zmm20, zmm20, zmm24		; 13	;; err = abs(err)
+	vmaxpd	zmm31, zmm31, zmm16		; 14-17	;; accumulate maxerr
+	vpandq	zmm17, zmm17, zmm24		; 14	;; err = abs(err)
+	vmaxpd	zmm20, zmm20, zmm17		; 15-18	;; accumulate maxerr
+	vpandq	zmm21, zmm21, zmm24		; 15	;; err = abs(err)
+	vpandq	zmm18, zmm18, zmm24		; 16	;; err = abs(err)
+	vpandq	zmm22, zmm22, zmm24		; 16	;; err = abs(err)
+	vmaxpd	zmm21, zmm21, zmm18		; 17-20	;; accumulate maxerr
+	vpandq	zmm19, zmm19, zmm24		; 17	;; err = abs(err)
+	vmaxpd	zmm22, zmm22, zmm19		; 18-21	;; accumulate maxerr
+	vpandq	zmm23, zmm23, zmm24		; 18	;; err = abs(err)
+	vmaxpd	zmm31, zmm31, zmm20		; 19-22	;; accumulate maxerr
+	vmaxpd	zmm21, zmm21, zmm23		; 21-24	;; accumulate maxerr
+	vmaxpd	zmm31, zmm31, zmm22		; 23-26	;; accumulate maxerr
+	vmaxpd	zmm31, zmm31, zmm21		; 27-30	;; accumulate maxerr
+
+	zfmaddpd zmm16, zmm8, zmm27, zmm29	; 9-12	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm17, zmm9, zmm27, zmm29	; 9-12	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm18, zmm10, zmm27, zmm29	; 10-13	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm19, zmm11, zmm27, zmm29	; 10-13	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm20, zmm12, zmm27, zmm29	; 11-14	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm21, zmm13, zmm27, zmm29	; 11-14	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm22, zmm14, zmm27, zmm29	; 12-15	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+	zfmaddpd zmm23, zmm15, zmm27, zmm29	; 12-15	;; HiFFTval+RNDVAL = rnd(FFTval) / base + RNDVAL
+
+	vsubpd	zmm16, zmm16, zmm29		; 13-16	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm17, zmm17, zmm29		; 13-16	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm18, zmm18, zmm29		; 14-17	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm19, zmm19, zmm29		; 14-17	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm20, zmm20, zmm29		; 15-18	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm21, zmm21, zmm29		; 15-18	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm22, zmm22, zmm29		; 16-19	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+	vsubpd	zmm23, zmm23, zmm29		; 16-19	;; rnd(HiFFTval) = (HiFFTval+RNDVAL) - RNDVAL
+
+	zfnmaddpd zmm8, zmm16, zmm28, zmm8	; 17-20	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm9, zmm17, zmm28, zmm9	; 17-20	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm10, zmm18, zmm28, zmm10	; 18-21	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm11, zmm19, zmm28, zmm11	; 18-21	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm12, zmm20, zmm28, zmm12	; 19-22	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm13, zmm21, zmm28, zmm13	; 19-22	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm14, zmm22, zmm28, zmm14	; 20-23	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm15, zmm23, zmm28, zmm15	; 20-23	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+
+	zfmaddpd zmm8, zmm8, zmm30, zmm0	; 21-24	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm9, zmm9, zmm30, zmm1	; 21-24	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm10, zmm10, zmm30, zmm2	; 22-25	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm11, zmm11, zmm30, zmm3	; 22-25	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm12, zmm12, zmm30, zmm4	; 23-26	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm13, zmm13, zmm30, zmm5	; 23-26	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm14, zmm14, zmm30, zmm6	; 24-27	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+	zfmaddpd zmm15, zmm15, zmm30, zmm7	; 24-27	;; x+RNDVAL = rnd(LoFFTval) * constant + carry+RNDVAL
+
+	zfmsubpd zmm0, zmm8, zmm27, zmm25	; 25-28	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm1, zmm9, zmm27, zmm25	; 25-28	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm2, zmm10, zmm27, zmm25	; 26-29	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm3, zmm11, zmm27, zmm25	; 26-29	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm4, zmm12, zmm27, zmm25	; 27-30	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm5, zmm13, zmm27, zmm25	; 27-30	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm6, zmm14, zmm27, zmm25	; 28-31	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm7, zmm15, zmm27, zmm25	; 28-31	;; carryLo+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+
+	zfmsubpd zmm24, zmm0, zmm28, zmm26	; 29-32	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm0, zmm16, zmm30, zmm0	; 29-32	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm16, zmm1, zmm28, zmm26	; 30-33	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm1, zmm17, zmm30, zmm1	; 30-33	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm17, zmm2, zmm28, zmm26	; 31-34	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm2, zmm18, zmm30, zmm2	; 31-34	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm18, zmm3, zmm28, zmm26	; 32-35	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm3, zmm19, zmm30, zmm3	; 32-35	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm19, zmm4, zmm28, zmm26	; 33-36	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm4, zmm20, zmm30, zmm4	; 33-36	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm20, zmm5, zmm28, zmm26	; 34-37	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm5, zmm21, zmm30, zmm5	; 34-37	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm21, zmm6, zmm28, zmm26	; 35-38	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm6, zmm22, zmm30, zmm6	; 35-38	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+	zfmsubpd zmm22, zmm7, zmm28, zmm26	; 36-39	;; y+RNDVAL = (carryLo+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmaddpd zmm7, zmm23, zmm30, zmm7	; 36-39	;; next carry+RNDVAL += rnd(HiFFTval) * constant + carryLo+RNDVAL
+
+	vsubpd	zmm8, zmm8, zmm24		; 37-40	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm9, zmm9, zmm16		; 37-40	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm10, zmm10, zmm17		; 38-41	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm11, zmm11, zmm18		; 38-41	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm12, zmm12, zmm19		; 39-42	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm13, zmm13, zmm20		; 39-42	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm14, zmm14, zmm21		; 40-43	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm15, zmm15, zmm22		; 40-43	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+
+	zstore	[rsi], zmm8		;; Save value1
+	zstore	[rsi+r14], zmm9		;; Save value2
+	zstore	[r13], zmm10		;; Save value3
+	zstore	[r13+r14], zmm11	;; Save value4
+	zstore	[rsi+64], zmm12		;; Save value5
+	zstore	[rsi+r14+64], zmm13	;; Save value6
+	zstore	[r13+64], zmm14		;; Save value7
+	zstore	[r13+r14+64], zmm15	;; Save value8
+	ENDM
+
+
+znorm_wpn_noconst_noechk_ttp_preload MACRO zero
+	vbroadcastsd zmm30, ZMM_RNDVAL				;; Rounding value
+	vbroadcastsd zmm29, ZMM_SMALL_BASE			;; small_word_base
+	vbroadcastsd zmm28, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+	vbroadcastsd zmm27, ZMM_LARGE_BASE			;; large_word_base
+	vbroadcastsd zmm26, ZMM_LARGE_BASE_INVERSE		;; 1 / large_word_base
+zero	vpxorq	zmm25, zmm25, zmm25				;; Zero
+	ENDM
+znorm_wpn_noconst_noechk_ttp MACRO zero
+	vmovapd	zmm8, [r10+0*64]			;; Inverse group multiplier
+	mov	rdx, [r8+rdx*4]				;; Load 8 big vs. little flags
+	kmovw	k1, edx				; 1	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm8, zmm8, [rsi], zmm0	; 1-4	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	shr	rdx, 16
+
+	vmovapd	zmm12, [r10+1*64]			;; Inverse group multiplier
+	kshiftrw k5, k1, 8			; 2
+	vblendmpd zmm0 {k1}, zmm28, zmm26	; 2	;; Create (1 / base) constant used in next carry calculation
+
+	zfmaddpd zmm12, zmm12, [rsi+64], zmm4	; 3-6	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	vblendmpd zmm4 {k5}, zmm28, zmm26	; 3	;; Create (1 / base) constant used in next carry calculation
+
+	vmovapd	zmm9, [r10+2*64]			;; Inverse group multiplier
+	kmovw	k2, edx				; 4	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm9, zmm9, [rsi+r14], zmm1	; 4-6	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	shr	rdx, 16
+
+	vmovapd	zmm13, [r10+3*64]			;; Inverse group multiplier
+	kshiftrw k6, k2, 8			; 5
+	vblendmpd zmm1 {k2}, zmm28, zmm26	; 5	;; Create (1 / base) constant used in next carry calculation
+
+	zfmaddpd zmm13, zmm13, [rsi+r14+64], zmm5; 6-9	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	vblendmpd zmm5 {k6}, zmm28, zmm26	; 6	;; Create (1 / base) constant used in next carry calculation
+
+	vmovapd	zmm10, [r10+4*64]			;; Inverse group multiplier
+	kmovw	k3, edx				; 7	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm10, zmm10, [r13], zmm2	; 7-10	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	shr	rdx, 16
+
+	vmovapd	zmm14, [r10+5*64]			;; Inverse group multiplier
+	kshiftrw k7, k3, 8			; 8
+	vblendmpd zmm2 {k3}, zmm28, zmm26	; 8	;; Create (1 / base) constant used in next carry calculation
+
+	zfmaddpd zmm14, zmm14, [r13+64], zmm6	; 9-12	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	vblendmpd zmm6 {k7}, zmm28, zmm26	; 9	;; Create (1 / base) constant used in next carry calculation
+
+	vmovapd	zmm11, [r10+6*64]			;; Inverse group multiplier
+	kmovw	k4, edx				; 10	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm11, zmm11, [r13+r14], zmm3	; 10-13	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	sub	rdx, rdx
+
+	vblendmpd zmm3 {k4}, zmm28, zmm26	; 11	;; Create (1 / base) constant used in next carry calculation
+	 vblendmpd zmm24 {k1}, zmm29, zmm27	; 11	;; Create (base) constant used in new value calculation
+
+	vmovapd	zmm15, [r10+7*64]			;; Inverse group multiplier
+	kshiftrw k1, k4, 8			; 12
+	zfmaddpd zmm15, zmm15, [r13+r14+64], zmm7; 12-15;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+
+	vblendmpd zmm7 {k1}, zmm28, zmm26	; 13	;; Create (1 / base) constant used in next carry calculation
+
+	vsubpd	zmm16, zmm8, zmm30		; 13-16	;; x = x+RNDVAL - RNDVAL
+	L1prefetchw rsi+128, L1PREFETCH_ALL
+	vsubpd	zmm20, zmm12, zmm30		; 14-17	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm17, zmm9, zmm30		; 14-17	;; x = x+RNDVAL - RNDVAL
+	L1prefetchw rsi+64+128, L1PREFETCH_ALL
+	vsubpd	zmm21, zmm13, zmm30		; 15-18	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm18, zmm10, zmm30		; 15-18	;; x = x+RNDVAL - RNDVAL
+	L1prefetchw rsi+r14+128, L1PREFETCH_ALL
+	vsubpd	zmm22, zmm14, zmm30		; 16-19	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm19, zmm11, zmm30		; 16-19	;; x = x+RNDVAL - RNDVAL
+	L1prefetchw rsi+r14+64+128, L1PREFETCH_ALL
+	vsubpd	zmm23, zmm15, zmm30		; 17-20	;; x = x+RNDVAL - RNDVAL
+
+	zfmaddpd zmm0, zmm16, zmm0, zmm30	; 17-20	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	L1prefetchw r13+128, L1PREFETCH_ALL
+	zfmaddpd zmm4, zmm20, zmm4, zmm30	; 18-21	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm1, zmm17, zmm1, zmm30	; 18-21	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	L1prefetchw r13+64+128, L1PREFETCH_ALL
+	zfmaddpd zmm5, zmm21, zmm5, zmm30	; 19-22	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm2, zmm18, zmm2, zmm30	; 19-22	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	L1prefetchw r13+r14+128, L1PREFETCH_ALL
+	zfmaddpd zmm6, zmm22, zmm6, zmm30	; 20-23	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm3, zmm19, zmm3, zmm30	; 20-23	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	L1prefetchw r13+r14+64+128, L1PREFETCH_ALL
+	zfmaddpd zmm7, zmm23, zmm7, zmm30	; 21-24	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+
+	vsubpd	zmm8, zmm0, zmm30		; 21-24	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+no zero	vsubpd	zmm12, zmm4, zmm30		; 22-25	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+	vsubpd	zmm9, zmm1, zmm30		; 22-25	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+no zero	vsubpd	zmm13, zmm5, zmm30		; 23-26	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+	vsubpd	zmm10, zmm2, zmm30		; 23-26	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+no zero	vsubpd	zmm14, zmm6, zmm30		; 24-27	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+	vsubpd	zmm11, zmm3, zmm30		; 24-27	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+no zero	vsubpd	zmm15, zmm7, zmm30		; 25-28	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+
+	zfnmaddpd zmm8, zmm8, zmm24, zmm16	; 25-28	;; new value = x - y * base
+
+no zero	vblendmpd zmm24 {k5}, zmm29, zmm27	; 26	;; Create (base) constant used in new value calculation
+	vblendmpd zmm16 {k2}, zmm29, zmm27	; 26	;; Create (base) constant used in new value calculation
+
+no zero	zfnmaddpd zmm12, zmm12, zmm24, zmm20	; 27-30	;; new value = x - y * base
+	zfnmaddpd zmm9, zmm9, zmm16, zmm17	; 27-30	;; new value = x - y * base
+
+no zero	vblendmpd zmm24 {k6}, zmm29, zmm27	; 28	;; Create (base) constant used in new value calculation
+	vblendmpd zmm16 {k3}, zmm29, zmm27	; 28	;; Create (base) constant used in new value calculation
+
+no zero	zfnmaddpd zmm13, zmm13, zmm24, zmm21	; 29-32	;; new value = x - y * base
+	zfnmaddpd zmm10, zmm10, zmm16, zmm18	; 29-32	;; new value = x - y * base
+	zstore	[rsi], zmm8			; 29	;; Save value1
+
+no zero	vblendmpd zmm24 {k7}, zmm29, zmm27	; 30	;; Create (base) constant used in new value calculation
+	vblendmpd zmm16 {k4}, zmm29, zmm27	; 30	;; Create (base) constant used in new value calculation
+
+no zero	vblendmpd zmm17 {k1}, zmm29, zmm27	; 31	;; Create (base) constant used in new value calculation
+no zero	zfnmaddpd zmm14, zmm14, zmm24, zmm22	; 31-34	;; new value = x - y * base
+no zero	zstore	[rsi+64], zmm12			; 31	;; Save value5
+zero	zstore	[rsi+64], zmm25			; 31	;; Save value5
+
+	zfnmaddpd zmm11, zmm11, zmm16, zmm19	; 32-35	;; new value = x - y * base
+no zero	zfnmaddpd zmm15, zmm15, zmm17, zmm23	; 32-35	;; new value = x - y * base
+
+	zstore	[rsi+r14], zmm9			; 32	;; Save value2
+no zero	zstore	[rsi+r14+64], zmm13		; 33	;; Save value6
+zero	zstore	[rsi+r14+64], zmm25		; 34	;; Save value6
+	zstore	[r13], zmm10			; 35	;; Save value3
+no zero	zstore	[r13+64], zmm14			; 36	;; Save value7
+zero	zstore	[r13+64], zmm25			; 37	;; Save value7
+	zstore	[r13+r14], zmm11		; 38	;; Save value4
+no zero	zstore	[r13+r14+64], zmm15		; 39	;; Save value8
+zero	zstore	[r13+r14+64], zmm25		; 40	;; Save value8
+	ENDM
+
+
+znorm_wpn_noconst_echk_ttp_preload MACRO zero
+	;; zmm31 reserved for maxerr
+	vbroadcastsd zmm30, ZMM_RNDVAL				;; Rounding value
+	vbroadcastsd zmm29, ZMM_SMALL_BASE			;; small_word_base
+	vbroadcastsd zmm28, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+	vbroadcastsd zmm27, ZMM_LARGE_BASE			;; large_word_base
+	vbroadcastsd zmm26, ZMM_LARGE_BASE_INVERSE		;; 1 / large_word_base
+	vbroadcastsd zmm25, ZMM_ABSVAL
+	ENDM
+znorm_wpn_noconst_echk_ttp MACRO zero
+	vmovapd	zmm16, [r10+0*64]			;; Inverse group multiplier
+	mov	rdx, [r8+rdx*4]				;; Load 8 big vs. little flags
+	kmovw	k1, edx				; 1	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm8, zmm16, [rsi], zmm0	; 1-4	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	shr	rdx, 16
+
+	vmovapd	zmm17, [r10+2*64]			;; Inverse group multiplier
+	kmovw	k2, edx				; 2	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm9, zmm17, [rsi+r14], zmm1	; 2-5	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	shr	rdx, 16
+
+	vmovapd	zmm18, [r10+4*64]			;; Inverse group multiplier
+	kmovw	k3, edx				; 3	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm10, zmm18, [r13], zmm2	; 3-6	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	shr	rdx, 16
+
+	vmovapd	zmm19, [r10+6*64]			;; Inverse group multiplier
+	kmovw	k4, edx				; 4	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm11, zmm19, [r13+r14], zmm3	; 4-7	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+	sub	rdx, rdx
+
+	vmovapd	zmm20, [r10+1*64]			;; Inverse group multiplier
+	kshiftrw k5, k1, 8			; 5
+	zfmaddpd zmm12, zmm20, [rsi+64], zmm4	; 5-8	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+
+	vmovapd	zmm21, [r10+3*64]			;; Inverse group multiplier
+	kshiftrw k6, k2, 8			; 6
+	zfmaddpd zmm13, zmm21, [rsi+r14+64], zmm5; 6-9	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+
+	vmovapd	zmm22, [r10+5*64]			;; Inverse group multiplier
+	kshiftrw k7, k3, 8			; 7
+	zfmaddpd zmm14, zmm22, [r13+64], zmm6	; 7-10	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+
+	vmovapd	zmm23, [r10+7*64]			;; Inverse group multiplier
+	zfmaddpd zmm15, zmm23, [r13+r14+64], zmm7; 4-7	;; x+RNDVAL = carry+RNDVAL + value*inv_grp_mult
+
+	vsubpd	zmm0, zmm8, zmm0		; 5-8	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm1, zmm9, zmm1		; 5-8	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm2, zmm10, zmm2		; 6-9	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm3, zmm11, zmm3		; 6-9	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm4, zmm12, zmm4		; 7-10	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm5, zmm13, zmm5		; 7-10	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm6, zmm14, zmm6		; 8-11	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+	vsubpd	zmm7, zmm15, zmm7		; 8-11	;; tmp = x+RNDVAL - carry+RNDVAL = rnd(value*inv_grp_mult)
+
+	zfnmaddpd zmm0, zmm16, [rsi], zmm0 	; 9-12	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm1, zmm17, [rsi+r14], zmm1 	; 9-12	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm2, zmm18, [r13], zmm2 	; 10-13	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm3, zmm19, [r13+r14], zmm3 	; 10-13	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm4, zmm20, [rsi+64], zmm4 	; 11-14	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm5, zmm21, [rsi+r14+64], zmm5 ; 11-14 ;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm6, zmm22, [r13+64], zmm6 	; 12-15	;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+	zfnmaddpd zmm7, zmm23, [r13+r14+64], zmm7 ; 12-15 ;; err = rnd(value*inv_grp_mult) - value*inv_grp_mult
+
+	L1prefetchw rsi+128, L1PREFETCH_ALL
+	L1prefetchw rsi+64+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+128, L1PREFETCH_ALL
+	L1prefetchw r13+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+64+128, L1PREFETCH_ALL
+
+	vpandq	zmm0, zmm0, zmm25		; 13	;; err = abs(err)
+	vpandq	zmm1, zmm1, zmm25		; 13	;; err = abs(err)
+	vpandq	zmm2, zmm2, zmm25		; 14	;; err = abs(err)
+	vpandq	zmm3, zmm3, zmm25		; 14	;; err = abs(err)
+	vpandq	zmm4, zmm4, zmm25		; 15	;; err = abs(err)
+	vpandq	zmm5, zmm5, zmm25		; 15	;; err = abs(err)
+	vpandq	zmm6, zmm6, zmm25		; 16	;; err = abs(err)
+	vpandq	zmm7, zmm7, zmm25		; 16	;; err = abs(err)
+
+;; BUG - Is there a better grouping available (use regs zmm16 up and interleave with the / base FMA instructions
+;; Use more maxerr accumulators?  IACA says we're OK, are we in real life?
+
+	vmaxpd	zmm31, zmm31, zmm0		; 14-17	;; accumulate maxerr
+	vmaxpd	zmm1, zmm1, zmm2		; 14-17	;; accumulate maxerr
+	vmaxpd	zmm3, zmm3, zmm4		; 15-18	;; accumulate maxerr
+	vmaxpd	zmm5, zmm5, zmm6		; 16-19	;; accumulate maxerr
+	vmaxpd	zmm31, zmm31, zmm7		; 17-20??	;; accumulate maxerr
+	vmaxpd	zmm1, zmm1, zmm3		; 17-20??	;; accumulate maxerr
+	vmaxpd	zmm31, zmm31, zmm5		; 18-21??	;; accumulate maxerr
+	vmaxpd	zmm31, zmm31, zmm1		; 18-21??	;; accumulate maxerr
+
+	vsubpd	zmm16, zmm8, zmm30		; 5-8	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm17, zmm9, zmm30		; 5-8	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm18, zmm10, zmm30		; 6-9	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm19, zmm11, zmm30		; 6-9	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm20, zmm12, zmm30		; 7-10	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm21, zmm13, zmm30		; 7-10	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm22, zmm14, zmm30		; 8-11	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm23, zmm15, zmm30		; 8-11	;; x = x+RNDVAL - RNDVAL
+
+	vblendmpd zmm0 {k1}, zmm28, zmm26	; 9	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm0, zmm16, zmm0, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	vblendmpd zmm1 {k2}, zmm28, zmm26	; 9	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm1, zmm17, zmm1, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	vblendmpd zmm2 {k3}, zmm28, zmm26	; 10	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm2, zmm18, zmm2, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	vblendmpd zmm3 {k4}, zmm28, zmm26	; 10	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm3, zmm19, zmm3, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	vblendmpd zmm4 {k5}, zmm28, zmm26	; 11	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm4, zmm20, zmm4, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	vblendmpd zmm5 {k6}, zmm28, zmm26	; 11	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm5, zmm21, zmm5, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	vblendmpd zmm6 {k7}, zmm28, zmm26	; 12	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm6, zmm22, zmm6, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	 vblendmpd zmm24 {k1}, zmm29, zmm27	; 12	;; Create (base) constant used in new value calculation
+	kshiftrw k1, k4, 8			; 12
+	vblendmpd zmm7 {k1}, zmm28, zmm26	; 12	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm7, zmm23, zmm7, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+
+	vsubpd	zmm8, zmm0, zmm30		; 13-16	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+	vsubpd	zmm9, zmm1, zmm30		; 13-16	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+	vsubpd	zmm10, zmm2, zmm30		; 14-17	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+	vsubpd	zmm11, zmm3, zmm30		; 14-17	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+no zero	vsubpd	zmm12, zmm4, zmm30		; 15-18	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+no zero	vsubpd	zmm13, zmm5, zmm30		; 15-18	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+no zero	vsubpd	zmm14, zmm6, zmm30		; 16-19	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+no zero	vsubpd	zmm15, zmm7, zmm30		; 16-19	;; y = rnd(x/base) = y+RNDVAL - RNDVAL
+
+	zfnmaddpd zmm8, zmm8, zmm24, zmm16	; 17-20	;; new value = x - y * base
+	vblendmpd zmm24 {k2}, zmm29, zmm27	; 17	;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm9, zmm9, zmm24, zmm17	; 17-20	;; new value = x - y * base
+	vblendmpd zmm24 {k3}, zmm29, zmm27	; 17	;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm10, zmm10, zmm24, zmm18	; 18-21	;; new value = x - y * base
+	vblendmpd zmm24 {k4}, zmm29, zmm27	; 18	;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm11, zmm11, zmm24, zmm19	; 18-21	;; new value = x - y * base
+no zero	vblendmpd zmm24 {k5}, zmm29, zmm27	; 19	;; Create (base) constant used in new value calculation
+no zero	zfnmaddpd zmm12, zmm12, zmm24, zmm20	; 19-22	;; new value = x - y * base
+no zero	vblendmpd zmm24 {k6}, zmm29, zmm27	; 19	;; Create (base) constant used in new value calculation
+no zero	zfnmaddpd zmm13, zmm13, zmm24, zmm21	; 19-22	;; new value = x - y * base
+no zero	vblendmpd zmm24 {k7}, zmm29, zmm27	; 19	;; Create (base) constant used in new value calculation
+no zero	zfnmaddpd zmm14, zmm14, zmm24, zmm22	; 20-23	;; new value = x - y * base
+no zero	vblendmpd zmm24 {k1}, zmm29, zmm27	; 20	;; Create (base) constant used in new value calculation
+no zero	zfnmaddpd zmm15, zmm15, zmm24, zmm23	; 20-23	;; new value = x - y * base
+
+	zstore	[rsi], zmm8		;; Save value1
+	zstore	[rsi+r14], zmm9		;; Save value2
+	zstore	[r13], zmm10		;; Save value3
+	zstore	[r13+r14], zmm11	;; Save value4
+
+no zero	zstore	[rsi+64], zmm12		;; Save value5
+no zero	zstore	[rsi+r14+64], zmm13	;; Save value6
+no zero	zstore	[r13+64], zmm14		;; Save value7
+no zero	zstore	[r13+r14+64], zmm15	;; Save value8
+
+zero	vpxorq	zmm8, zmm8, zmm8	;; Zero
+zero	zstore	[rsi+64], zmm8		;; Save value5
+zero	zstore	[rsi+r14+64], zmm8	;; Save value6
+zero	zstore	[r13+64], zmm8		;; Save value7
+zero	zstore	[r13+r14+64], zmm8	;; Save value8
+	ENDM
+
+
+znorm_wpn_const_noechk_ttp_preload MACRO
+	vbroadcastsd zmm30, ZMM_RNDVAL				;; Rounding val = 3*2^51 + enough to make a multiple of base
+	vbroadcastsd zmm29, ZMM_SMALL_BASE			;; small_word_base
+	vbroadcastsd zmm28, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+	vbroadcastsd zmm27, ZMM_LARGE_BASE			;; large_word_base
+	vbroadcastsd zmm26, ZMM_LARGE_BASE_INVERSE		;; 1 / large_word_base
+	vbroadcastsd zmm25, ZMM_MULCONST			;; User's small multiplier for FFT result
+	ENDM
+znorm_wpn_const_noechk_ttp MACRO zero
+;;carry(0-7)
+	vmovapd	zmm16, [r10+0*64]			;; Inverse group multiplier
+	kmovw	k1, WORD PTR [r8+rdx*4+0]	; 1	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm16, zmm16, [rsi], zmm30	; 1-4	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd	zmm17, [r10+1*64]			;; Inverse group multiplier
+	kshiftrw k2, k1, 8			; 2	;; Load big/lit flags for the high FFT word
+	zfmaddpd zmm17, zmm17, [rsi+64], zmm30	; 2-5	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd	zmm18, [r10+2*64]			;; Inverse group multiplier
+	kmovw	k3, WORD PTR [r8+rdx*4+2]	; 3	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm18, zmm18, [rsi+r14], zmm30	; 3-6	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd	zmm19, [r10+3*64]			;; Inverse group multiplier
+	kshiftrw k4, k3, 8			; 4	;; Load big/lit flags for the high FFT word
+	zfmaddpd zmm19, zmm19, [rsi+r14+64], zmm30; 4-7	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+;;carry(0-7),value(12-15),FFTval+RNDVAL(16-19)
+	vsubpd	zmm16, zmm16, zmm30		; 5-8	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vblendmpd zmm8 {k1}, zmm28, zmm26	; 5	;; Create (1 / base) constant used in HiFFTval calculation
+	vsubpd	zmm17, zmm17, zmm30		; 6-9	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vblendmpd zmm9 {k2}, zmm28, zmm26	; 6	;; Create (1 / base) constant used in HiFFTval calculation
+	vsubpd	zmm18, zmm18, zmm30		; 7-10	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vblendmpd zmm10 {k3}, zmm28, zmm26	; 7	;; Create (1 / base) constant used in HiFFTval calculation
+	vsubpd	zmm19, zmm19, zmm30		; 8-11	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vblendmpd zmm11 {k4}, zmm28, zmm26	; 8	;; Create (1 / base) constant used in HiFFTval calculation
+;;carry(0-7),1/base(8-11),value(12-15),rnd(FFTval)(16-19)
+
+	zfmaddpd zmm12, zmm16, zmm8, zmm30	; 9-12	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	vblendmpd zmm20 {k1}, zmm29, zmm27	; 9	;; Create (base) constant used in LoFFTval calculation
+	zfmaddpd zmm13, zmm17, zmm9, zmm30	; 10-13	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	vblendmpd zmm21 {k2}, zmm29, zmm27	; 10	;; Create (base) constant used in LoFFTval calculation
+	zfmaddpd zmm14, zmm18, zmm10, zmm30	; 11-14	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	vblendmpd zmm22 {k3}, zmm29, zmm27	; 11	;; Create (base) constant used in LoFFTval calculation
+	zfmaddpd zmm15, zmm19, zmm11, zmm30	; 12-15	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	vblendmpd zmm23 {k4}, zmm29, zmm27	; 12	;; Create (base) constant used in LoFFTval calculation
+;;carry(0-7),1/base(8-11),HiFFTval+RNDVAL(12-15),rnd(FFTval)(16-19),base(20-23)
+	vsubpd	zmm12, zmm12, zmm30		; 13-16	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vsubpd	zmm13, zmm13, zmm30		; 14-17	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vsubpd	zmm14, zmm14, zmm30		; 15-18	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vsubpd	zmm15, zmm15, zmm30		; 16-19	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+;;carry(0-7),1/base(8-11),rnd(HiFFTval)(12-15),rnd(FFTval)(16-19),base(20-23)
+
+	L1prefetchw rsi+128, L1PREFETCH_ALL
+	L1prefetchw rsi+64+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+64+128, L1PREFETCH_ALL
+
+	zfnmaddpd zmm16, zmm12, zmm20, zmm16	; 17-20	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm17, zmm13, zmm21, zmm17	; 18-21	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm18, zmm14, zmm22, zmm18	; 19-22	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm19, zmm15, zmm23, zmm19	; 20-23	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+;;carry(0-7),1/base(8-11),rnd(HiFFTval)(12-15),rnd(LoFFTval)(16-19),base(20-23)
+
+;; Interleave the start of the next 4 values with the end of these 4 values
+	 kmovw	k1, WORD PTR [r8+rdx*4+4]	; 21	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm16, zmm16, zmm25, zmm0	; 21-24	;; x = rnd(LoFFTval) * constant + carry
+	 kshiftrw k2, k1, 8			; 22	;; Load big/lit flags for the high FFT word
+	zfmaddpd zmm17, zmm17, zmm25, zmm4	; 22-25	;; x = rnd(LoFFTval) * constant + carry
+	 kmovw	k3, WORD PTR [r8+rdx*4+6]	; 23	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm18, zmm18, zmm25, zmm1	; 23-26	;; x = rnd(LoFFTval) * constant + carry
+	 kshiftrw k4, k3, 8			; 24	;; Load big/lit flags for the high FFT word
+	zfmaddpd zmm19, zmm19, zmm25, zmm5	; 24-27	;; x = rnd(LoFFTval) * constant + carry
+;;carry(2367),1/base(8-11),rnd(HiFFTval)(12-15),x(16-19),base(20-23)
+
+	zfmaddpd zmm0, zmm16, zmm8, zmm30	; 25-28	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	 vmovapd zmm8, [r10+4*64]			;; Inverse group multiplier
+	 zfmaddpd zmm8, zmm8, [r13], zmm30	; 25-28	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm4, zmm17, zmm9, zmm30	; 26-29	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	 vmovapd zmm9, [r10+5*64]			;; Inverse group multiplier
+	 zfmaddpd zmm9, zmm9, [r13+64], zmm30 ; 26-29;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm1, zmm18, zmm10, zmm30	; 27-30	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	 vmovapd zmm10, [r10+6*64]			;; Inverse group multiplier
+	 zfmaddpd zmm10, zmm10, [r13+r14], zmm30; 27-30	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfmaddpd zmm5, zmm19, zmm11, zmm30	; 28-31	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	 vmovapd zmm11, [r10+7*64]			;; Inverse group multiplier
+	 zfmaddpd zmm11, zmm11, [r13+r14+64], zmm30; 28-31;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+;;y+RNDVAL(0415),carry(2367),nxt FFTval+RNDVAL(8-11),rnd(HiFFTval)(12-15),x(16-19),base(20-23)
+
+	vsubpd	zmm0, zmm0, zmm30		; 29-32	;; y = y+RNDVAL - RNDVAL
+	 vsubpd	zmm8, zmm8, zmm30		; 29-32	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vsubpd	zmm4, zmm4, zmm30		; 30-33	;; y = y+RNDVAL - RNDVAL
+	 vsubpd	zmm9, zmm9, zmm30		; 30-33	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vsubpd	zmm1, zmm1, zmm30		; 31-34	;; y = y+RNDVAL - RNDVAL
+	 vsubpd	zmm10, zmm10, zmm30		; 31-34	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vsubpd	zmm5, zmm5, zmm30		; 32-35	;; y = y+RNDVAL - RNDVAL
+	 vsubpd	zmm11, zmm11, zmm30		; 32-35	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+;;y(0415),carry(2367),nxt rnd(FFTval)(8-11),rnd(HiFFTval)(12-15),x(16-19),base(20-23)
+
+	zfnmaddpd zmm16, zmm0, zmm20, zmm16	; 33-36	;; new value = x - y * base
+	 vblendmpd zmm20 {k1}, zmm28, zmm26	; 33	;; Create (1 / base) constant used in HiFFTval calculation
+	zfnmaddpd zmm17, zmm4, zmm21, zmm17	; 34-37	;; new value = x - y * base
+	 vblendmpd zmm21 {k2}, zmm28, zmm26	; 34	;; Create (1 / base) constant used in HiFFTval calculation
+	zfnmaddpd zmm18, zmm1, zmm22, zmm18	; 35-38	;; new value = x - y * base
+	 vblendmpd zmm22 {k3}, zmm28, zmm26	; 35	;; Create (1 / base) constant used in HiFFTval calculation
+	zfnmaddpd zmm19, zmm5, zmm23, zmm19	; 36-39	;; new value = x - y * base
+	 vblendmpd zmm23 {k4}, zmm28, zmm26	; 36	;; Create (1 / base) constant used in HiFFTval calculation
+
+	zstore	[rsi], zmm16				;; Save value1
+	zfmaddpd zmm16, zmm8, zmm20, zmm30	; 37-40	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	zfmaddpd zmm0, zmm12, zmm25, zmm0	; 37-40	;; next carry = rnd(HiFFTval) * constant + y
+	zstore	[rsi+64], zmm17				;; Save value2
+	zfmaddpd zmm17, zmm9, zmm21, zmm30	; 38-41	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	zfmaddpd zmm4, zmm13, zmm25, zmm4	; 38-41	;; next carry = rnd(HiFFTval) * constant + y
+	zstore	[rsi+r14], zmm18			;; Save value3
+	zfmaddpd zmm18, zmm10, zmm22, zmm30	; 39-42	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	zfmaddpd zmm1, zmm14, zmm25, zmm1	; 39-42	;; next carry = rnd(HiFFTval) * constant + y
+	zstore	[rsi+r14+64], zmm19			;; Save value4
+	zfmaddpd zmm19, zmm11, zmm23, zmm30	; 40-43	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	zfmaddpd zmm5, zmm15, zmm25, zmm5	; 40-43	;; next carry = rnd(HiFFTval) * constant + y
+;;carry(0-7),HiFFTval+RNDVAL(16-19),rnd(FFTval)(8-11),1/base(20-23)
+
+	vsubpd	zmm16, zmm16, zmm30		; 41-44	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vblendmpd zmm12 {k1}, zmm29, zmm27	; 41	;; Create (base) constant used in LoFFTval calculation
+	vsubpd	zmm17, zmm17, zmm30		; 42-45	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vblendmpd zmm13 {k2}, zmm29, zmm27	; 42	;; Create (base) constant used in LoFFTval calculation
+	vsubpd	zmm18, zmm18, zmm30		; 43-46	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vblendmpd zmm14 {k3}, zmm29, zmm27	; 43	;; Create (base) constant used in LoFFTval calculation
+	vsubpd	zmm19, zmm19, zmm30		; 44-47	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vblendmpd zmm15 {k4}, zmm29, zmm27	; 44	;; Create (base) constant used in LoFFTval calculation
+;;carry(0-7),rnd(HiFFTval)(16-19),base(12-15),rnd(FFTval)(8-11),1/base(20-23)
+
+	L1prefetchw r13+128, L1PREFETCH_ALL
+	L1prefetchw r13+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+64+128, L1PREFETCH_ALL
+
+	zfnmaddpd zmm8, zmm16, zmm12, zmm8	; 45-48	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm9, zmm17, zmm13, zmm9	; 46-49	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm10, zmm18, zmm14, zmm10	; 47-50	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm11, zmm19, zmm15, zmm11	; 48-51	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+;;carry(0-7),rnd(HiFFTval)(16-19),base(12-15),rnd(Lofftval)(8-11),1/base(20-23)
+
+	zfmaddpd zmm8, zmm8, zmm25, zmm2	; 49-52	;; x = rnd(LoFFTval) * constant + carry
+	zfmaddpd zmm9, zmm9, zmm25, zmm6	; 50-53	;; x = rnd(LoFFTval) * constant + carry
+	zfmaddpd zmm10, zmm10, zmm25, zmm3	; 51-54	;; x = rnd(LoFFTval) * constant + carry
+	zfmaddpd zmm11, zmm11, zmm25, zmm7	; 52-55	;; x = rnd(LoFFTval) * constant + carry
+;;carry(4-7),rnd(HiFFTval)(16-19),base(12-15),x(8-11),1/base(20-23)
+	zfmaddpd zmm2, zmm8, zmm20, zmm30	; 53-56	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm6, zmm9, zmm21, zmm30	; 54-57	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm3, zmm10, zmm22, zmm30	; 55-58	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm7, zmm11, zmm23, zmm30	; 56-59	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+;;y+RNDVAL(0-3),carry(4-7),rnd(HiFFTval)(16-19),base(12-15),x(8-11)
+	vsubpd	zmm2, zmm2, zmm30		; 57-60	;; y = y+RNDVAL - RNDVAL
+	vsubpd	zmm6, zmm6, zmm30		; 58-61	;; y = y+RNDVAL - RNDVAL
+	vsubpd	zmm3, zmm3, zmm30		; 59-62	;; y = y+RNDVAL - RNDVAL
+	vsubpd	zmm7, zmm7, zmm30		; 60-63	;; y = y+RNDVAL - RNDVAL
+;;y(2637),carry(0145),rnd(HiFFTval)(16-19),base(12-15),x(8-11)
+	zfnmaddpd zmm8, zmm2, zmm12, zmm8	; 61-64	;; new value = x - y * base
+	zfmaddpd zmm2, zmm16, zmm25, zmm2	; 61-64	;; next carry = rnd(HiFFTval) * constant + y
+	zfnmaddpd zmm9, zmm6, zmm13, zmm9	; 62-65	;; new value = x - y * base
+	zfmaddpd zmm6, zmm17, zmm25, zmm6	; 62-65	;; next carry = rnd(HiFFTval) * constant + y
+	zfnmaddpd zmm10, zmm3, zmm14, zmm10	; 63-66	;; new value = x - y * base
+	zfmaddpd zmm3, zmm18, zmm25, zmm3	; 63-66	;; next carry = rnd(HiFFTval) * constant + y
+	zfnmaddpd zmm11, zmm7, zmm15, zmm11	; 64-67	;; new value = x - y * base
+	zfmaddpd zmm7, zmm19, zmm25, zmm7	; 64-67	;; next carry = rnd(HiFFTval) * constant + y
+;;nextcarry(0-3),carry(4-7),newvalue(8-11)
+
+	zstore	[r13], zmm8				;; Save value1
+	zstore	[r13+64], zmm9				;; Save value2
+	zstore	[r13+r14], zmm10			;; Save value3
+	zstore	[r13+r14+64], zmm11			;; Save value4
+	ENDM
+
+
+znorm_wpn_const_echk_ttp_preload MACRO
+	vbroadcastsd zmm30, ZMM_RNDVAL				;; Rounding val = 3*2^51 + enough to make a multiple of base
+	vbroadcastsd zmm29, ZMM_SMALL_BASE			;; small_word_base
+	vbroadcastsd zmm28, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+	vbroadcastsd zmm27, ZMM_LARGE_BASE			;; large_word_base
+	vbroadcastsd zmm26, ZMM_LARGE_BASE_INVERSE		;; 1 / large_word_base
+	vbroadcastsd zmm25, ZMM_MULCONST			;; User's small multiplier for FFT result
+	vbroadcastsd zmm24, ZMM_ABSVAL
+	ENDM
+znorm_wpn_const_echk_ttp MACRO zero
+;;carry(0-7)
+	vmovapd zmm12, [rsi]				;; Value
+	vmovapd	zmm20, [r10+0*64]			;; Inverse group multiplier
+	kmovw	k1, WORD PTR [r8+rdx*4+0]	; 1	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm16, zmm20, zmm12, zmm30	; 1-4	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd zmm13, [rsi+64]				;; Value
+	vmovapd	zmm21, [r10+1*64]			;; Inverse group multiplier
+	kshiftrw k2, k1, 8			; 2	;; Load big/lit flags for the high FFT word
+	zfmaddpd zmm17, zmm21, zmm13, zmm30	; 2-5	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd zmm14, [rsi+r14]			;; Value
+	vmovapd	zmm22, [r10+2*64]			;; Inverse group multiplier
+	kmovw	k3, WORD PTR [r8+rdx*4+2]	; 3	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	zfmaddpd zmm18, zmm22, zmm14, zmm30	; 3-6	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	vmovapd zmm15, [rsi+r14+64]			;; Value
+	vmovapd	zmm23, [r10+3*64]			;; Inverse group multiplier
+	kshiftrw k4, k3, 8			; 4	;; Load big/lit flags for the high FFT word
+	zfmaddpd zmm19, zmm23, zmm15, zmm30	; 4-7	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+;;carry(0-7),value(12-15),FFTval+RNDVAL(16-19),inv_grp_mult(20-23)
+	vsubpd	zmm16, zmm16, zmm30		; 5-8	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vblendmpd zmm8 {k1}, zmm28, zmm26	; 5	;; Create (1 / base) constant used in HiFFTval calculation
+	vsubpd	zmm17, zmm17, zmm30		; 6-9	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vblendmpd zmm9 {k2}, zmm28, zmm26	; 6	;; Create (1 / base) constant used in HiFFTval calculation
+	vsubpd	zmm18, zmm18, zmm30		; 7-10	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vblendmpd zmm10 {k3}, zmm28, zmm26	; 7	;; Create (1 / base) constant used in HiFFTval calculation
+	vsubpd	zmm19, zmm19, zmm30		; 8-11	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	vblendmpd zmm11 {k4}, zmm28, zmm26	; 8	;; Create (1 / base) constant used in HiFFTval calculation
+;;carry(0-7),1/base(8-11),value(12-15),rnd(FFTval)(16-19),inv_grp_mult(20-23)
+	zfnmaddpd zmm20, zmm20, zmm12, zmm16 	; 9-12	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfmaddpd zmm12, zmm16, zmm8, zmm30	; 9-12	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	zfnmaddpd zmm21, zmm21, zmm13, zmm17 	; 10-13	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfmaddpd zmm13, zmm17, zmm9, zmm30	; 10-13	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	zfnmaddpd zmm22, zmm22, zmm14, zmm18 	; 11-14	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfmaddpd zmm14, zmm18, zmm10, zmm30	; 11-14	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	zfnmaddpd zmm23, zmm23, zmm15, zmm19 	; 12-15	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfmaddpd zmm15, zmm19, zmm11, zmm30	; 12-15	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+;;carry(0-7),1/base(8-11),HiFFTval+RNDVAL(12-15),rnd(FFTval)(16-19),err(20-23)
+	vpandq	zmm20, zmm20, zmm24		; 13	;; err = abs(err)
+	vsubpd	zmm12, zmm12, zmm30		; 13-16	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vpandq	zmm21, zmm21, zmm24		; 14	;; err = abs(err)
+	vsubpd	zmm13, zmm13, zmm30		; 14-17	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vpandq	zmm22, zmm22, zmm24		; 15	;; err = abs(err)
+	vsubpd	zmm14, zmm14, zmm30		; 15-18	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vpandq	zmm23, zmm23, zmm24		; 16	;; err = abs(err)
+	vsubpd	zmm15, zmm15, zmm30		; 16-19	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+;;carry(0-7),1/base(8-11),rnd(HiFFTval)(12-15),rnd(FFTval)(16-19),err(20-23)
+
+	L1prefetchw rsi+128, L1PREFETCH_ALL
+	L1prefetchw rsi+64+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+128, L1PREFETCH_ALL
+	L1prefetchw rsi+r14+64+128, L1PREFETCH_ALL
+
+	vmaxpd	zmm22, zmm22, zmm20		; 17-20	;; accumulate maxerr
+	vblendmpd zmm20 {k1}, zmm29, zmm27	; 17	;; Create (base) constant used in LoFFTval calculation
+	vmaxpd	zmm23, zmm23, zmm21		; 18-21	;; accumulate maxerr
+	vblendmpd zmm21 {k2}, zmm29, zmm27	; 18	;; Create (base) constant used in LoFFTval calculation
+	zfnmaddpd zmm16, zmm12, zmm20, zmm16	; 19-22	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	vmaxpd	zmm31, zmm31, zmm22		; 22-25	;; accumulate maxerr
+	vblendmpd zmm22 {k3}, zmm29, zmm27	; 19	;; Create (base) constant used in LoFFTval calculation
+	zfnmaddpd zmm17, zmm13, zmm21, zmm17	; 20-23	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	vmaxpd	zmm31, zmm31, zmm23		; 26-29	;; accumulate maxerr
+	vblendmpd zmm23 {k4}, zmm29, zmm27	; 20	;; Create (base) constant used in LoFFTval calculation
+	zfnmaddpd zmm18, zmm14, zmm22, zmm18	; 21-24	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm19, zmm15, zmm23, zmm19	; 21-24	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+;;carry(0-7),1/base(8-11),rnd(HiFFTval)(12-15),rnd(Lofftval)(16-19),base(20-23)
+
+	 kmovw	k1, WORD PTR [r8+rdx*4+4]	; 22	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	 kshiftrw k2, k1, 8			; 23	;; Load big/lit flags for the high FFT word
+	zfmaddpd zmm16, zmm16, zmm25, zmm0	; 23-26	;; x = rnd(LoFFTval) * constant + carry
+	zfmaddpd zmm17, zmm17, zmm25, zmm4	; 24-27	;; x = rnd(LoFFTval) * constant + carry
+	zfmaddpd zmm18, zmm18, zmm25, zmm1	; 25-28	;; x = rnd(LoFFTval) * constant + carry
+	zfmaddpd zmm19, zmm19, zmm25, zmm5	; 25-28	;; x = rnd(LoFFTval) * constant + carry
+;;carry(2367),1/base(8-11),rnd(HiFFTval)(12-15),x(16-19),base(20-23)
+
+	 kmovw	k3, WORD PTR [r8+rdx*4+6]	; 26	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	 kshiftrw k4, k3, 8			; 27	;; Load big/lit flags for the high FFT word
+	zfmaddpd zmm0, zmm16, zmm8, zmm30	; 27-30	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm4, zmm17, zmm9, zmm30	; 28-31	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm1, zmm18, zmm10, zmm30	; 29-32	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm5, zmm19, zmm11, zmm30	; 29-32	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	 vmovapd zmm8, [r13]				;; Value
+	 vmovapd zmm9, [r13+64]				;; Value
+	 vmovapd zmm10, [r13+r14]			;; Value
+	 vmovapd zmm11, [r13+r14+64]			;; Value
+;;y+RNDVAL(0415),carry(2367),rnd(HiFFTval)(12-15),x(16-19),base(20-23)
+
+	vsubpd	zmm0, zmm0, zmm30		; 31-34	;; y = y+RNDVAL - RNDVAL
+	vsubpd	zmm4, zmm4, zmm30		; 32-35	;; y = y+RNDVAL - RNDVAL
+	vsubpd	zmm1, zmm1, zmm30		; 33-36	;; y = y+RNDVAL - RNDVAL
+	vsubpd	zmm5, zmm5, zmm30		; 33-36	;; y = y+RNDVAL - RNDVAL
+;;y(0415),carry(2367),rnd(HiFFTval)(12-15),x(16-19),base(20-23)
+
+;; Interleave the start of the next 4 values with the end of these 4 values
+	zfnmaddpd zmm16, zmm0, zmm20, zmm16	; 35-38	;; new value = x - y * base
+	 vmovapd zmm20, [r10+4*64]			;; Inverse group multiplier
+	zstore	[rsi], zmm16				;; Save value1
+	 zfmaddpd zmm16, zmm20, zmm8, zmm30	; 1-4	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfnmaddpd zmm17, zmm4, zmm21, zmm17	; 36-39	;; new value = x - y * base
+	 vmovapd zmm21, [r10+5*64]			;; Inverse group multiplier
+	zstore	[rsi+64], zmm17				;; Save value2
+	 zfmaddpd zmm17, zmm21, zmm9, zmm30	; 2-5	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfnmaddpd zmm18, zmm1, zmm22, zmm18	; 37-40	;; new value = x - y * base
+	 vmovapd zmm22, [r10+6*64]			;; Inverse group multiplier
+	zstore	[rsi+r14], zmm18			;; Save value3
+	 zfmaddpd zmm18, zmm22, zmm10, zmm30	; 3-6	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+	zfnmaddpd zmm19, zmm5, zmm23, zmm19	; 38-41	;; new value = x - y * base
+	 vmovapd zmm23, [r10+7*64]			;; Inverse group multiplier
+	zstore	[rsi+r14+64], zmm19			;; Save value4
+	 zfmaddpd zmm19, zmm23, zmm11, zmm30	; 4-7	;; FFTval+RNDVAL = RNDVAL + value*inv_grp_mult
+
+	 vsubpd	zmm16, zmm16, zmm30		; 5-8	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	 vsubpd	zmm17, zmm17, zmm30		; 6-9	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	 vsubpd	zmm18, zmm18, zmm30		; 7-10	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+	 vsubpd	zmm19, zmm19, zmm30		; 8-11	;; rnd(FFTval) = FFTval+RNDVAL - RNDVAL
+
+	zfmaddpd zmm0, zmm12, zmm25, zmm0	; 35-38	;; next carry = rnd(HiFFTval) * constant + y
+	 vblendmpd zmm12 {k1}, zmm28, zmm26	; 5	;; Create (1 / base) constant used in HiFFTval calculation
+	zfmaddpd zmm4, zmm13, zmm25, zmm4	; 36-39	;; next carry = rnd(HiFFTval) * constant + y
+	 vblendmpd zmm13 {k2}, zmm28, zmm26	; 6	;; Create (1 / base) constant used in HiFFTval calculation
+	zfmaddpd zmm1, zmm14, zmm25, zmm1	; 37-40	;; next carry = rnd(HiFFTval) * constant + y
+	 vblendmpd zmm14 {k3}, zmm28, zmm26	; 7	;; Create (1 / base) constant used in HiFFTval calculation
+	zfmaddpd zmm5, zmm15, zmm25, zmm5	; 38-41	;; next carry = rnd(HiFFTval) * constant + y
+	 vblendmpd zmm15 {k4}, zmm28, zmm26	; 8	;; Create (1 / base) constant used in HiFFTval calculation
+;;carry(0-7),value(8-11),1/base(12-15),rnd(FFTval)(16-19),inv_grp_mult(20-23)
+
+	zfnmaddpd zmm20, zmm20, zmm8, zmm16 	; 9-12	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfmaddpd zmm8, zmm16, zmm12, zmm30	; 9-12	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	zfnmaddpd zmm21, zmm21, zmm9, zmm17 	; 10-13	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfmaddpd zmm9, zmm17, zmm13, zmm30	; 10-13	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	zfnmaddpd zmm22, zmm22, zmm10, zmm18 	; 11-14	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfmaddpd zmm10, zmm18, zmm14, zmm30	; 11-14	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+	zfnmaddpd zmm23, zmm23, zmm11, zmm19 	; 12-15	;; err = rnd(FFTval) - value*inv_grp_mult
+	zfmaddpd zmm11, zmm19, zmm15, zmm30	; 12-15	;; HiFFTval+RNDVAL = rnd(FFTVAL) / base + RNDVAL
+;;carry(0-7),HiFFTval+RNDVAL(8-11),1/base(12-15),rnd(FFTval)(16-19),err(20-23)
+
+	L1prefetchw r13+128, L1PREFETCH_ALL
+	L1prefetchw r13+64+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+128, L1PREFETCH_ALL
+	L1prefetchw r13+r14+64+128, L1PREFETCH_ALL
+
+	vpandq	zmm20, zmm20, zmm24		; 13	;; err = abs(err)
+	vsubpd	zmm8, zmm8, zmm30		; 13-16	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vpandq	zmm21, zmm21, zmm24		; 14	;; err = abs(err)
+	vsubpd	zmm9, zmm9, zmm30		; 14-17	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vpandq	zmm22, zmm22, zmm24		; 15	;; err = abs(err)
+	vsubpd	zmm10, zmm10, zmm30		; 15-18	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+	vpandq	zmm23, zmm23, zmm24		; 16	;; err = abs(err)
+	vsubpd	zmm11, zmm11, zmm30		; 16-19	;; rnd(HiFFTval) = HiFFTval+RNDVAL - RNDVAL
+;;carry(0-7),rnd(HiFFTval)(8-11),1/base(12-15),rnd(FFTval)(16-19),err(20-23)
+
+	vmaxpd	zmm22, zmm22, zmm20		; 17-20	;; accumulate maxerr
+	vblendmpd zmm20 {k1}, zmm29, zmm27	; 17	;; Create (base) constant used in LoFFTval calculation
+	vmaxpd	zmm23, zmm23, zmm21		; 18-21	;; accumulate maxerr
+	vblendmpd zmm21 {k2}, zmm29, zmm27	; 18	;; Create (base) constant used in LoFFTval calculation
+	zfnmaddpd zmm16, zmm8, zmm20, zmm16	; 19-22	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	vmaxpd	zmm31, zmm31, zmm22		; 22-25	;; accumulate maxerr
+	vblendmpd zmm22 {k3}, zmm29, zmm27	; 19	;; Create (base) constant used in LoFFTval calculation
+	zfnmaddpd zmm17, zmm9, zmm21, zmm17	; 20-23	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	vmaxpd	zmm31, zmm31, zmm23		; 26-29	;; accumulate maxerr
+	vblendmpd zmm23 {k4}, zmm29, zmm27	; 20	;; Create (base) constant used in LoFFTval calculation
+	zfnmaddpd zmm18, zmm10, zmm22, zmm18	; 21-24	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+	zfnmaddpd zmm19, zmm11, zmm23, zmm19	; 21-24	;; rnd(LoFFTval) = rnd(FFTval) - rnd(HiFFTval)*base
+;;carry(0-7),rnd(HiFFTval)(8-11),1/base(12-15),rnd(Lofftval)(16-19),base(20-23)
+
+	zfmaddpd zmm16, zmm16, zmm25, zmm2	; 23-26	;; x = rnd(LoFFTval) * constant + carry
+	zfmaddpd zmm17, zmm17, zmm25, zmm6	; 24-27	;; x = rnd(LoFFTval) * constant + carry
+	zfmaddpd zmm18, zmm18, zmm25, zmm3	; 25-28	;; x = rnd(LoFFTval) * constant + carry
+	zfmaddpd zmm19, zmm19, zmm25, zmm7	; 25-28	;; x = rnd(LoFFTval) * constant + carry
+;;carry(4-7),rnd(HiFFTval)(8-11),1/base(12-15),x(16-19),base(20-23)
+	zfmaddpd zmm2, zmm16, zmm12, zmm30	; 27-30	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm6, zmm17, zmm13, zmm30	; 28-31	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm3, zmm18, zmm14, zmm30	; 29-32	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm7, zmm19, zmm15, zmm30	; 29-32	;; y+RNDVAL = x / base + RNDVAL = rnd(x/base)+RNDVAL
+;;y+RNDVAL(0-3),carry(4-7),rnd(HiFFTval)(8-11),x(16-19),base(20-23)
+	vsubpd	zmm2, zmm2, zmm30		; 31-34	;; y = y+RNDVAL - RNDVAL
+	vsubpd	zmm6, zmm6, zmm30		; 32-35	;; y = y+RNDVAL - RNDVAL
+	vsubpd	zmm3, zmm3, zmm30		; 33-36	;; y = y+RNDVAL - RNDVAL
+	vsubpd	zmm7, zmm7, zmm30		; 33-36	;; y = y+RNDVAL - RNDVAL
+;;y(0-3),carry(4-7),rnd(HiFFTval)(8-11),x(16-19),base(20-23)
+	zfnmaddpd zmm16, zmm2, zmm20, zmm16	; 35-38	;; new value = x - y * base
+	zfmaddpd zmm2, zmm8, zmm25, zmm2	; 35-38	;; next carry = rnd(HiFFTval) * constant + y
+	zfnmaddpd zmm17, zmm6, zmm21, zmm17	; 36-39	;; new value = x - y * base
+	zfmaddpd zmm6, zmm9, zmm25, zmm6	; 36-39	;; next carry = rnd(HiFFTval) * constant + y
+	zfnmaddpd zmm18, zmm3, zmm22, zmm18	; 38-41	;; new value = x - y * base
+	zfmaddpd zmm3, zmm10, zmm25, zmm3	; 37-40	;; next carry = rnd(HiFFTval) * constant + y
+	zfnmaddpd zmm19, zmm7, zmm23, zmm19	; 38-41	;; new value = x - y * base
+	zfmaddpd zmm7, zmm11, zmm25, zmm7	; 37-40	;; next carry = rnd(HiFFTval) * constant + y
+;;nextcarry(0-3),carry(4-7),newvalue(16-19)
+
+	zstore	[r13], zmm16				;; Save value1
+	zstore	[r13+64], zmm17				;; Save value2
+	zstore	[r13+r14], zmm18			;; Save value3
+	zstore	[r13+r14+64], zmm19			;; Save value4
+	ENDM
+
+
+;
+; These are common constants for add/sub/addsub/smalladd/smallmul macros both with and without zero-padding.
+;
+
+znorm_common_op_wpn_preload MACRO ttp
+	vbroadcastsd zmm30, ZMM_RNDVAL				;; Load the rounding value
+	vbroadcastsd zmm29, ZMM_SMALL_BASE			;; small_word_base
+	vbroadcastsd zmm28, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+ttp	vbroadcastsd zmm27, ZMM_LARGE_BASE			;; large_word_base
+ttp	vbroadcastsd zmm26, ZMM_LARGE_BASE_INVERSE		;; 1 / large_word_base
+	ENDM
+
+; *************** WPN normalized add/sub macro ******************
+; This macro adds or subtracts, then "normalizes" four pairs of loword/hiword FFT data values.  This involves
+; making sure integers are smaller than the maximum allowable integer, generating carries when necessary.
+; rsi = pointer to the first number
+; rcx = pointer to the second number
+; rbx = pointer to the destination
+; r12 = pointer to compressed biglit table
+; rdx = register used to load compressed biglit index
+; r13 = distance to source/dest #2
+; r14 = distance to source/dest #3
+; r15 = distance to source/dest #4
+; rdi = pointer to array of big vs. little flags
+; zmm0-7 = carries
+
+znorm_op_wpn_preload MACRO ttp
+no ttp	znorm_op_wpn_nottp_preload
+ttp	znorm_op_wpn_ttp_preload
+	ENDM
+
+znorm_op_wpn MACRO fop, ttp
+no ttp	znorm_op_wpn_nottp fop
+ttp	znorm_op_wpn_ttp fop
+	ENDM
+
+znorm_op_wpn_nottp_preload MACRO
+	vpxorq	zmm0, zmm0, zmm0		;; Start process with no carry
+	vpxorq	zmm1, zmm1, zmm1
+	vpxorq	zmm2, zmm2, zmm2
+	vpxorq	zmm3, zmm3, zmm3
+	vpxorq	zmm4, zmm4, zmm4
+	vpxorq	zmm5, zmm5, zmm5
+	vpxorq	zmm6, zmm6, zmm6
+	vpxorq	zmm7, zmm7, zmm7
+	ENDM
+
+znorm_op_wpn_nottp MACRO fop
+	vaddpd	zmm8, zmm0, [rcx]		; 1-4	;; x = value2 + carry
+	vaddpd	zmm9, zmm1, [rcx+r13]		; 1-4	;; x = value2 + carry
+	vaddpd	zmm10, zmm2, [rcx+r14]		; 2-5	;; x = value2 + carry
+	vaddpd	zmm11, zmm3, [rcx+r15]		; 2-5	;; x = value2 + carry
+	vaddpd	zmm12, zmm4, [rcx+64]		; 3-6	;; x = value2 + carry
+	vaddpd	zmm13, zmm5, [rcx+r13+64]	; 3-6	;; x = value2 + carry
+	vaddpd	zmm14, zmm6, [rcx+r14+64]	; 4-7	;; x = value2 + carry
+	vaddpd	zmm15, zmm7, [rcx+r15+64]	; 4-7	;; x = value2 + carry
+
+	fop	zmm8, zmm8, [rsi]		; 5-8	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm9, zmm9, [rsi+r13]		; 5-8	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm10, zmm10, [rsi+r14]		; 6-9	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm11, zmm11, [rsi+r15]		; 6-9	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm12, zmm12, [rsi+64]		; 7-10	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm13, zmm13, [rsi+r13+64]	; 7-10	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm14, zmm14, [rsi+r14+64]	; 8-11	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm15, zmm15, [rsi+r15+64]	; 8-11	;; Add/sub first number, x = (value2 op value1) + carry
+
+	zfmaddpd zmm0, zmm8, zmm28, zmm30	; 9-12	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm1, zmm9, zmm28, zmm30	; 9-12	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm2, zmm10, zmm28, zmm30	; 10-13	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm3, zmm11, zmm28, zmm30	; 10-13	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm4, zmm12, zmm28, zmm30	; 11-14	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm5, zmm13, zmm28, zmm30	; 11-14	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm6, zmm14, zmm28, zmm30	; 12-15	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm7, zmm15, zmm28, zmm30	; 12-15	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+
+	vsubpd	zmm0, zmm0, zmm30		; 13-16	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm1, zmm1, zmm30		; 13-16	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm2, zmm2, zmm30		; 14-17	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm3, zmm3, zmm30		; 14-17	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm4, zmm4, zmm30		; 15-18	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm5, zmm5, zmm30		; 15-18	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm6, zmm6, zmm30		; 16-19	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm7, zmm7, zmm30		; 16-19	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+
+	zfnmaddpd zmm8, zmm0, zmm29, zmm8	; 17-20	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm9, zmm1, zmm29, zmm9	; 17-20	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm10, zmm2, zmm29, zmm10	; 18-21	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm11, zmm3, zmm29, zmm11	; 18-21	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm12, zmm4, zmm29, zmm12	; 19-22	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm13, zmm5, zmm29, zmm13	; 19-22	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm14, zmm6, zmm29, zmm14	; 20-23	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm15, zmm7, zmm29, zmm15	; 20-23	;; new value = x - rnd(x/base)*base
+
+	zstore	[rbx], zmm8			;; Save value1
+	zstore	[rbx+r13], zmm9			;; Save value2
+	zstore	[rbx+r14], zmm10		;; Save value3
+	zstore	[rbx+r15], zmm11		;; Save value4
+	zstore	[rbx+64], zmm12			;; Save value5
+	zstore	[rbx+r13+64], zmm13		;; Save value6
+	zstore	[rbx+r14+64], zmm14		;; Save value7
+	zstore	[rbx+r15+64], zmm15		;; Save value8
+	ENDM
+
+znorm_op_wpn_ttp_preload MACRO
+	vpxorq	zmm0, zmm0, zmm0		;; Start process with no carry
+	vpxorq	zmm1, zmm1, zmm1
+	vpxorq	zmm2, zmm2, zmm2
+	vpxorq	zmm3, zmm3, zmm3
+	vpxorq	zmm4, zmm4, zmm4
+	vpxorq	zmm5, zmm5, zmm5
+	vpxorq	zmm6, zmm6, zmm6
+	vpxorq	zmm7, zmm7, zmm7
+	ENDM
+
+znorm_op_wpn_ttp MACRO fop
+	mov	dl, [rdi]			;; Load index into compressed biglit table
+
+	vaddpd	zmm8, zmm0, [rcx]		; 1-4	;; x = value2 + carry
+	vaddpd	zmm9, zmm1, [rcx+r13]		; 1-4	;; x = value2 + carry
+	vaddpd	zmm10, zmm2, [rcx+r14]		; 2-5	;; x = value2 + carry
+	vaddpd	zmm11, zmm3, [rcx+r15]		; 2-5	;; x = value2 + carry
+	vaddpd	zmm12, zmm4, [rcx+64]		; 3-6	;; x = value2 + carry
+	vaddpd	zmm13, zmm5, [rcx+r13+64]	; 3-6	;; x = value2 + carry
+	vaddpd	zmm14, zmm6, [rcx+r14+64]	; 4-7	;; x = value2 + carry
+	vaddpd	zmm15, zmm7, [rcx+r15+64]	; 4-7	;; x = value2 + carry
+
+	fop	zmm8, zmm8, [rsi]		; 5-8	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm9, zmm9, [rsi+r13]		; 5-8	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm10, zmm10, [rsi+r14]		; 6-9	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm11, zmm11, [rsi+r15]		; 6-9	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm12, zmm12, [rsi+64]		; 7-10	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm13, zmm13, [rsi+r13+64]	; 7-10	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm14, zmm14, [rsi+r14+64]	; 8-11	;; Add/sub first number, x = (value2 op value1) + carry
+	fop	zmm15, zmm15, [rsi+r15+64]	; 8-11	;; Add/sub first number, x = (value2 op value1) + carry
+
+	kmovw	k1, WORD PTR [r12+rdx*4+0]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm0 {k1}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm0, zmm8, zmm0, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k2, WORD PTR [r12+rdx*4+2]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm1 {k2}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm1, zmm9, zmm1, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k3, WORD PTR [r12+rdx*4+4]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm2 {k3}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm2, zmm10, zmm2, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k4, WORD PTR [r12+rdx*4+6]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm3 {k4}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm3, zmm11, zmm3, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k5, k1, 8
+	vblendmpd zmm4 {k5}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm4, zmm12, zmm4, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k6, k2, 8
+	vblendmpd zmm5 {k6}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm5, zmm13, zmm5, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k7, k3, 8
+	vblendmpd zmm6 {k7}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm6, zmm14, zmm6, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	 vblendmpd zmm24 {k1}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	kshiftrw k1, k4, 8
+	vblendmpd zmm7 {k1}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm7, zmm15, zmm7, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+
+	vsubpd	zmm0, zmm0, zmm30		; 13-16	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm1, zmm1, zmm30		; 13-16	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm2, zmm2, zmm30		; 14-17	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm3, zmm3, zmm30		; 14-17	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm4, zmm4, zmm30		; 15-18	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm5, zmm5, zmm30		; 15-18	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm6, zmm6, zmm30		; 16-19	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm7, zmm7, zmm30		; 16-19	;; y = rnd(x/base) = y - RNDVAL
+
+	zfnmaddpd zmm8, zmm0, zmm24, zmm8	; 17-20	;; new value = x - y * base
+	vblendmpd zmm24 {k2}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm9, zmm1, zmm24, zmm9	; 17-20	;; new value = x - y * base
+	vblendmpd zmm24 {k3}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm10, zmm2, zmm24, zmm10	; 18-21	;; new value = x - y * base
+	vblendmpd zmm24 {k4}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm11, zmm3, zmm24, zmm11	; 18-21	;; new value = x - y * base
+	vblendmpd zmm24 {k5}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm12, zmm4, zmm24, zmm12	; 19-22	;; new value = x - y * base
+	vblendmpd zmm24 {k6}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm13, zmm5, zmm24, zmm13	; 19-22	;; new value = x - y * base
+	vblendmpd zmm24 {k7}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm14, zmm6, zmm24, zmm14	; 20-23	;; new value = x - y * base
+	vblendmpd zmm24 {k1}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm15, zmm7, zmm24, zmm15	; 20-23	;; new value = x - y * base
+
+	zstore	[rbx], zmm8			;; Save value1
+	zstore	[rbx+r13], zmm9			;; Save value2
+	zstore	[rbx+r14], zmm10		;; Save value3
+	zstore	[rbx+r15], zmm11		;; Save value4
+	zstore	[rbx+64], zmm12			;; Save value5
+	zstore	[rbx+r13+64], zmm13		;; Save value6
+	zstore	[rbx+r14+64], zmm14		;; Save value7
+	zstore	[rbx+r15+64], zmm15		;; Save value8
+	ENDM
+
+;; Final step in the znorm_op process.  Write carries to the carries array (to be processed later)
+
+znorm_op_wpn_save_carries MACRO
+	mov	rbp, DATA_ADDR			; Address of carries array
+	vaddpd	zmm0, zmm0, zmm30		; Store carries in +RNDVAL format (to share share code with post-FFT normalize)
+	vaddpd	zmm1, zmm1, zmm30
+	vaddpd	zmm2, zmm2, zmm30
+	vaddpd	zmm3, zmm3, zmm30
+	vaddpd	zmm4, zmm4, zmm30
+	vaddpd	zmm5, zmm5, zmm30
+	vaddpd	zmm6, zmm6, zmm30
+	vaddpd	zmm7, zmm7, zmm30
+	zstore	[rbp+0*128], zmm0		; Save carry out of low word
+	zstore	[rbp+0*128+64], zmm4		; Save carry out of high word
+	zstore	[rbp+1*128], zmm1		; Save carry out of low word
+	zstore	[rbp+1*128+64], zmm5		; Save carry out of high word
+	zstore	[rbp+2*128], zmm2		; Save carry out of low word
+	zstore	[rbp+2*128+64], zmm6		; Save carry out of high word
+	zstore	[rbp+3*128], zmm3		; Save carry out of low word
+	zstore	[rbp+3*128+64], zmm7		; Save carry out of high word
+	ENDM
+
+; *************** WPN normalized add & sub macro ******************
+; This macro adds and subtracts, then "normalizes" four pairs of loword/hiword FFT data values.  This involves
+; making sure integers are smaller than the maximum allowable integer, generating carries when necessary.
+; rsi = pointer to the first number
+; rcx = pointer to the second number
+; rbx = pointer to destination1
+; rbp = pointer to destination2
+; r12 = pointer to compressed biglit table
+; rdx = register used to load compressed biglit index
+; r13 = distance to source/dest #2
+; r14 = distance to source/dest #3
+; r15 = distance to source/dest #4
+; rdi = pointer to array of big vs. little flags
+; zmm0-15 = carries
+
+znorm_addsub_wpn_preload MACRO ttp
+no ttp	znorm_addsub_wpn_nottp_preload
+ttp	znorm_addsub_wpn_ttp_preload
+	ENDM
+
+znorm_addsub_wpn MACRO ttp
+no ttp	znorm_addsub_wpn_nottp
+ttp	znorm_addsub_wpn_ttp
+	ENDM
+
+znorm_addsub_wpn_nottp_preload MACRO
+	vpxorq	zmm0, zmm0, zmm0		;; Start process with no carry
+	vpxorq	zmm1, zmm1, zmm1
+	vpxorq	zmm2, zmm2, zmm2
+	vpxorq	zmm3, zmm3, zmm3
+	vpxorq	zmm4, zmm4, zmm4
+	vpxorq	zmm5, zmm5, zmm5
+	vpxorq	zmm6, zmm6, zmm6
+	vpxorq	zmm7, zmm7, zmm7
+	vpxorq	zmm8, zmm8, zmm8
+	vpxorq	zmm9, zmm9, zmm9
+	vpxorq	zmm10, zmm10, zmm10
+	vpxorq	zmm11, zmm11, zmm11
+	vpxorq	zmm12, zmm12, zmm12
+	vpxorq	zmm13, zmm13, zmm13
+	vpxorq	zmm14, zmm14, zmm14
+	vpxorq	zmm15, zmm15, zmm15
+	ENDM
+
+znorm_addsub_wpn_nottp MACRO
+	vmovapd	zmm24, [rsi]			;; Load first number
+	vmovapd	zmm25, [rcx]			;; Load second number
+	vaddpd	zmm16, zmm24, zmm25		;; first + second number
+	vsubpd	zmm17, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+r13]		;; Load first number
+	vmovapd	zmm25, [rcx+r13]		;; Load second number
+	vaddpd	zmm18, zmm24, zmm25		;; first + second number
+	vsubpd	zmm19, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+64]			;; Load first number
+	vmovapd	zmm25, [rcx+64]			;; Load second number
+	vaddpd	zmm20, zmm24, zmm25		;; first + second number
+	vsubpd	zmm21, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+r13+64]		;; Load first number
+	vmovapd	zmm25, [rcx+r13+64]		;; Load second number
+	vaddpd	zmm22, zmm24, zmm25		;; first + second number
+	vsubpd	zmm23, zmm24, zmm25		;; first - second number
+
+	vaddpd	zmm16, zmm16, zmm0		; 1-4	;; x = value + carry
+	vaddpd	zmm17, zmm17, zmm1		; 1-4	;; x = value + carry
+	vaddpd	zmm18, zmm18, zmm2		; 2-5	;; x = value + carry
+	vaddpd	zmm19, zmm19, zmm3		; 2-5	;; x = value + carry
+	vaddpd	zmm20, zmm20, zmm4		; 3-6	;; x = value + carry
+	vaddpd	zmm21, zmm21, zmm5		; 3-6	;; x = value + carry
+	vaddpd	zmm22, zmm22, zmm6		; 4-7	;; x = value + carry
+	vaddpd	zmm23, zmm23, zmm7		; 4-7	;; x = value + carry
+
+	zfmaddpd zmm0, zmm16, zmm28, zmm30	; 5-8	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm1, zmm17, zmm28, zmm30	; 5-8	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm2, zmm18, zmm28, zmm30	; 6-9	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm3, zmm19, zmm28, zmm30	; 6-9	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm4, zmm20, zmm28, zmm30	; 7-10	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm5, zmm21, zmm28, zmm30	; 7-10	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm6, zmm22, zmm28, zmm30	; 8-11	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm7, zmm23, zmm28, zmm30	; 8-11	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+
+	vsubpd	zmm0, zmm0, zmm30		; 13-16	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm1, zmm1, zmm30		; 13-16	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm2, zmm2, zmm30		; 14-17	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm3, zmm3, zmm30		; 14-17	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm4, zmm4, zmm30		; 15-18	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm5, zmm5, zmm30		; 15-18	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm6, zmm6, zmm30		; 16-19	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm7, zmm7, zmm30		; 16-19	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+
+	zfnmaddpd zmm16, zmm0, zmm29, zmm16	; 17-20	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm17, zmm1, zmm29, zmm17	; 17-20	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm18, zmm2, zmm29, zmm18	; 18-21	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm19, zmm3, zmm29, zmm19	; 18-21	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm20, zmm4, zmm29, zmm20	; 19-22	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm21, zmm5, zmm29, zmm21	; 19-22	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm22, zmm6, zmm29, zmm22	; 20-23	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm23, zmm7, zmm29, zmm23	; 20-23	;; new value = x - rnd(x/base)*base
+
+	zstore	[rbx], zmm16			;; Save add value
+	zstore	[rbp], zmm17			;; Save subtract value
+	zstore	[rbx+r13], zmm18		;; Save add value
+	zstore	[rbp+r13], zmm19		;; Save subtract value
+	zstore	[rbx+64], zmm20			;; Save add value
+	zstore	[rbp+64], zmm21			;; Save subtract value
+	zstore	[rbx+r13+64], zmm22		;; Save add value
+	zstore	[rbp+r13+64], zmm23		;; Save subtract value
+
+	vmovapd	zmm24, [rsi+r14]		;; Load first number
+	vmovapd	zmm25, [rcx+r14]		;; Load second number
+	vaddpd	zmm16, zmm24, zmm25		;; first + second number
+	vsubpd	zmm17, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+r15]		;; Load first number
+	vmovapd	zmm25, [rcx+r15]		;; Load second number
+	vaddpd	zmm18, zmm24, zmm25		;; first + second number
+	vsubpd	zmm19, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+r14+64]		;; Load first number
+	vmovapd	zmm25, [rcx+r14+64]		;; Load second number
+	vaddpd	zmm20, zmm24, zmm25		;; first + second number
+	vsubpd	zmm21, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+r15+64]		;; Load first number
+	vmovapd	zmm25, [rcx+r15+64]		;; Load second number
+	vaddpd	zmm22, zmm24, zmm25		;; first + second number
+	vsubpd	zmm23, zmm24, zmm25		;; first - second number
+
+	vaddpd	zmm16, zmm16, zmm8		; 1-4	;; x = value + carry
+	vaddpd	zmm17, zmm17, zmm9		; 1-4	;; x = value + carry
+	vaddpd	zmm18, zmm18, zmm10		; 2-5	;; x = value + carry
+	vaddpd	zmm19, zmm19, zmm11		; 2-5	;; x = value + carry
+	vaddpd	zmm20, zmm20, zmm12		; 3-6	;; x = value + carry
+	vaddpd	zmm21, zmm21, zmm13		; 3-6	;; x = value + carry
+	vaddpd	zmm22, zmm22, zmm14		; 4-7	;; x = value + carry
+	vaddpd	zmm23, zmm23, zmm15		; 4-7	;; x = value + carry
+
+	zfmaddpd zmm8, zmm16, zmm28, zmm30	; 5-8	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm9, zmm17, zmm28, zmm30	; 5-8	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm10, zmm18, zmm28, zmm30	; 6-9	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm11, zmm19, zmm28, zmm30	; 6-9	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm12, zmm20, zmm28, zmm30	; 7-10	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm13, zmm21, zmm28, zmm30	; 7-10	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm14, zmm22, zmm28, zmm30	; 8-11	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+	zfmaddpd zmm15, zmm23, zmm28, zmm30	; 8-11	;; next carry+RNDVAL = x/base + RNDVAL = rnd(x/base)+RNDVAL
+
+	vsubpd	zmm8, zmm8, zmm30		; 13-16	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm9, zmm9, zmm30		; 13-16	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm10, zmm10, zmm30		; 14-17	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm11, zmm11, zmm30		; 14-17	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm12, zmm12, zmm30		; 15-18	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm13, zmm13, zmm30		; 15-18	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm14, zmm14, zmm30		; 16-19	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm15, zmm15, zmm30		; 16-19	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+
+	zfnmaddpd zmm16, zmm8, zmm29, zmm16	; 17-20	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm17, zmm9, zmm29, zmm17	; 17-20	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm18, zmm10, zmm29, zmm18	; 18-21	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm19, zmm11, zmm29, zmm19	; 18-21	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm20, zmm12, zmm29, zmm20	; 19-22	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm21, zmm13, zmm29, zmm21	; 19-22	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm22, zmm14, zmm29, zmm22	; 20-23	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm23, zmm15, zmm29, zmm23	; 20-23	;; new value = x - rnd(x/base)*base
+
+	zstore	[rbx+r14], zmm16		;; Save add value
+	zstore	[rbp+r14], zmm17		;; Save subtract value
+	zstore	[rbx+r15], zmm18		;; Save add value
+	zstore	[rbp+r15], zmm19		;; Save subtract value
+	zstore	[rbx+r14+64], zmm20		;; Save add value
+	zstore	[rbp+r14+64], zmm21		;; Save subtract value
+	zstore	[rbx+r15+64], zmm22		;; Save add value
+	zstore	[rbp+r15+64], zmm23		;; Save subtract value
+	ENDM
+
+znorm_addsub_wpn_ttp_preload MACRO
+	vpxorq	zmm0, zmm0, zmm0		;; Start process with no carry
+	vpxorq	zmm1, zmm1, zmm1
+	vpxorq	zmm2, zmm2, zmm2
+	vpxorq	zmm3, zmm3, zmm3
+	vpxorq	zmm4, zmm4, zmm4
+	vpxorq	zmm5, zmm5, zmm5
+	vpxorq	zmm6, zmm6, zmm6
+	vpxorq	zmm7, zmm7, zmm7
+	vpxorq	zmm8, zmm8, zmm8
+	vpxorq	zmm9, zmm9, zmm9
+	vpxorq	zmm10, zmm10, zmm10
+	vpxorq	zmm11, zmm11, zmm11
+	vpxorq	zmm12, zmm12, zmm12
+	vpxorq	zmm13, zmm13, zmm13
+	vpxorq	zmm14, zmm14, zmm14
+	vpxorq	zmm15, zmm15, zmm15
+	ENDM
+
+znorm_addsub_wpn_ttp MACRO
+	mov	dl, [rdi]			;; Load index into compressed biglit table
+
+	vmovapd	zmm24, [rsi]			;; Load first number
+	vmovapd	zmm25, [rcx]			;; Load second number
+	vaddpd	zmm16, zmm24, zmm25		;; first + second number
+	vsubpd	zmm17, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+r13]		;; Load first number
+	vmovapd	zmm25, [rcx+r13]		;; Load second number
+	vaddpd	zmm18, zmm24, zmm25		;; first + second number
+	vsubpd	zmm19, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+64]			;; Load first number
+	vmovapd	zmm25, [rcx+64]			;; Load second number
+	vaddpd	zmm20, zmm24, zmm25		;; first + second number
+	vsubpd	zmm21, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+r13+64]		;; Load first number
+	vmovapd	zmm25, [rcx+r13+64]		;; Load second number
+	vaddpd	zmm22, zmm24, zmm25		;; first + second number
+	vsubpd	zmm23, zmm24, zmm25		;; first - second number
+
+	vaddpd	zmm16, zmm16, zmm0		; 1-4	;; x = value + carry
+	vaddpd	zmm17, zmm17, zmm1		; 1-4	;; x = value + carry
+	vaddpd	zmm18, zmm18, zmm2		; 2-5	;; x = value + carry
+	vaddpd	zmm19, zmm19, zmm3		; 2-5	;; x = value + carry
+	vaddpd	zmm20, zmm20, zmm4		; 3-6	;; x = value + carry
+	vaddpd	zmm21, zmm21, zmm5		; 3-6	;; x = value + carry
+	vaddpd	zmm22, zmm22, zmm6		; 4-7	;; x = value + carry
+	vaddpd	zmm23, zmm23, zmm7		; 4-7	;; x = value + carry
+
+	kmovw	k1, WORD PTR [r12+rdx*4+0]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm1 {k1}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm0, zmm16, zmm1, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm1, zmm17, zmm1, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k2, WORD PTR [r12+rdx*4+2]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm3 {k2}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm2, zmm18, zmm3, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm3, zmm19, zmm3, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k3, k1, 8
+	vblendmpd zmm5 {k3}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm4, zmm20, zmm5, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm5, zmm21, zmm5, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k4, k2, 8
+	vblendmpd zmm7 {k4}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm6, zmm22, zmm7, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm7, zmm23, zmm7, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+
+	vsubpd	zmm0, zmm0, zmm30		; 13-16	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm1, zmm1, zmm30		; 13-16	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm2, zmm2, zmm30		; 14-17	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm3, zmm3, zmm30		; 14-17	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm4, zmm4, zmm30		; 15-18	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm5, zmm5, zmm30		; 15-18	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm6, zmm6, zmm30		; 16-19	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm7, zmm7, zmm30		; 16-19	;; y = rnd(x/base) = y - RNDVAL
+
+	vblendmpd zmm24 {k1}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm16, zmm0, zmm24, zmm16	; 17-20	;; new value = x - y * base
+	zfnmaddpd zmm17, zmm1, zmm24, zmm17	; 17-20	;; new value = x - y * base
+	vblendmpd zmm24 {k2}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm18, zmm2, zmm24, zmm18	; 18-21	;; new value = x - y * base
+	zfnmaddpd zmm19, zmm3, zmm24, zmm19	; 18-21	;; new value = x - y * base
+	vblendmpd zmm24 {k3}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm20, zmm4, zmm24, zmm20	; 19-22	;; new value = x - y * base
+	zfnmaddpd zmm21, zmm5, zmm24, zmm21	; 19-22	;; new value = x - y * base
+	vblendmpd zmm24 {k4}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm22, zmm6, zmm24, zmm22	; 20-23	;; new value = x - y * base
+	zfnmaddpd zmm23, zmm7, zmm24, zmm23	; 20-23	;; new value = x - y * base
+
+	zstore	[rbx], zmm16			;; Save add value
+	zstore	[rbp], zmm17			;; Save subtract value
+	zstore	[rbx+r13], zmm18		;; Save add value
+	zstore	[rbp+r13], zmm19		;; Save subtract value
+	zstore	[rbx+64], zmm20			;; Save add value
+	zstore	[rbp+64], zmm21			;; Save subtract value
+	zstore	[rbx+r13+64], zmm22		;; Save add value
+	zstore	[rbp+r13+64], zmm23		;; Save subtract value
+
+	vmovapd	zmm24, [rsi+r14]		;; Load first number
+	vmovapd	zmm25, [rcx+r14]		;; Load second number
+	vaddpd	zmm16, zmm24, zmm25		;; first + second number
+	vsubpd	zmm17, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+r15]		;; Load first number
+	vmovapd	zmm25, [rcx+r15]		;; Load second number
+	vaddpd	zmm18, zmm24, zmm25		;; first + second number
+	vsubpd	zmm19, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+r14+64]		;; Load first number
+	vmovapd	zmm25, [rcx+r14+64]		;; Load second number
+	vaddpd	zmm20, zmm24, zmm25		;; first + second number
+	vsubpd	zmm21, zmm24, zmm25		;; first - second number
+	vmovapd	zmm24, [rsi+r15+64]		;; Load first number
+	vmovapd	zmm25, [rcx+r15+64]		;; Load second number
+	vaddpd	zmm22, zmm24, zmm25		;; first + second number
+	vsubpd	zmm23, zmm24, zmm25		;; first - second number
+
+	vaddpd	zmm16, zmm16, zmm8		; 1-4	;; x = value + carry
+	vaddpd	zmm17, zmm17, zmm9		; 1-4	;; x = value + carry
+	vaddpd	zmm18, zmm18, zmm10		; 2-5	;; x = value + carry
+	vaddpd	zmm19, zmm19, zmm11		; 2-5	;; x = value + carry
+	vaddpd	zmm20, zmm20, zmm12		; 3-6	;; x = value + carry
+	vaddpd	zmm21, zmm21, zmm13		; 3-6	;; x = value + carry
+	vaddpd	zmm22, zmm22, zmm14		; 4-7	;; x = value + carry
+	vaddpd	zmm23, zmm23, zmm15		; 4-7	;; x = value + carry
+
+	kmovw	k1, WORD PTR [r12+rdx*4+4]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm9 {k1}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm8, zmm16, zmm9, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm9, zmm17, zmm9, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k2, WORD PTR [r12+rdx*4+6]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm11 {k2}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm10, zmm18, zmm11, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm11, zmm19, zmm11, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k3, k1, 8
+	vblendmpd zmm13 {k3}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm12, zmm20, zmm13, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm13, zmm21, zmm13, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k4, k2, 8
+	vblendmpd zmm15 {k4}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm14, zmm22, zmm15, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	zfmaddpd zmm15, zmm23, zmm15, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+
+	vsubpd	zmm8, zmm8, zmm30		; 13-16	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm9, zmm9, zmm30		; 13-16	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm10, zmm10, zmm30		; 14-17	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm11, zmm11, zmm30		; 14-17	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm12, zmm12, zmm30		; 15-18	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm13, zmm13, zmm30		; 15-18	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm14, zmm14, zmm30		; 16-19	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm15, zmm15, zmm30		; 16-19	;; y = rnd(x/base) = y - RNDVAL
+
+	vblendmpd zmm24 {k1}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm16, zmm8, zmm24, zmm16	; 17-20	;; new value = x - y * base
+	zfnmaddpd zmm17, zmm9, zmm24, zmm17	; 17-20	;; new value = x - y * base
+	vblendmpd zmm24 {k2}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm18, zmm10, zmm24, zmm18	; 18-21	;; new value = x - y * base
+	zfnmaddpd zmm19, zmm11, zmm24, zmm19	; 18-21	;; new value = x - y * base
+	vblendmpd zmm24 {k3}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm20, zmm12, zmm24, zmm20	; 19-22	;; new value = x - y * base
+	zfnmaddpd zmm21, zmm13, zmm24, zmm21	; 19-22	;; new value = x - y * base
+	vblendmpd zmm24 {k4}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm22, zmm14, zmm24, zmm22	; 20-23	;; new value = x - y * base
+	zfnmaddpd zmm23, zmm15, zmm24, zmm23	; 20-23	;; new value = x - y * base
+
+	zstore	[rbx+r14], zmm16		;; Save add value
+	zstore	[rbp+r14], zmm17		;; Save subtract value
+	zstore	[rbx+r15], zmm18		;; Save add value
+	zstore	[rbp+r15], zmm19		;; Save subtract value
+	zstore	[rbx+r14+64], zmm20		;; Save add value
+	zstore	[rbp+r14+64], zmm21		;; Save subtract value
+	zstore	[rbx+r15+64], zmm22		;; Save add value
+	zstore	[rbp+r15+64], zmm23		;; Save subtract value
+	ENDM
+
+;; Final step in the znorm_addsub process.  Write carries to the carries array (to be processed later)
+
+znorm_addsub_wpn_save_carries MACRO
+	mov	rbp, DATA_ADDR			; Address of add carries array
+	vaddpd	zmm0, zmm0, zmm30		; Store carries in +RNDVAL format (to share share code with post-FFT normalize)
+	vaddpd	zmm2, zmm2, zmm30
+	vaddpd	zmm4, zmm4, zmm30
+	vaddpd	zmm6, zmm6, zmm30
+	vaddpd	zmm8, zmm8, zmm30
+	vaddpd	zmm10, zmm10, zmm30
+	vaddpd	zmm12, zmm12, zmm30
+	vaddpd	zmm14, zmm14, zmm30
+	zstore	[rbp+0*128], zmm0		; Save carry out of low word
+	zstore	[rbp+0*128+64], zmm4		; Save carry out of high word
+	zstore	[rbp+1*128], zmm2		; Save carry out of low word
+	zstore	[rbp+1*128+64], zmm6		; Save carry out of high word
+	zstore	[rbp+2*128], zmm8		; Save carry out of low word
+	zstore	[rbp+2*128+64], zmm12		; Save carry out of high word
+	zstore	[rbp+3*128], zmm10		; Save carry out of low word
+	zstore	[rbp+3*128+64], zmm14		; Save carry out of high word
+
+	mov	rbp, PREMULT_ADDR		; Address of subtract carries array
+	vaddpd	zmm1, zmm1, zmm30		; Store carries in +RNDVAL format (to share share code with post-FFT normalize)
+	vaddpd	zmm3, zmm3, zmm30
+	vaddpd	zmm5, zmm5, zmm30
+	vaddpd	zmm7, zmm7, zmm30
+	vaddpd	zmm9, zmm9, zmm30
+	vaddpd	zmm11, zmm11, zmm30
+	vaddpd	zmm13, zmm13, zmm30
+	vaddpd	zmm15, zmm15, zmm30
+	zstore	[rbp+0*128], zmm1		; Save carry out of low word
+	zstore	[rbp+0*128+64], zmm5		; Save carry out of high word
+	zstore	[rbp+1*128], zmm3		; Save carry out of low word
+	zstore	[rbp+1*128+64], zmm7		; Save carry out of high word
+	zstore	[rbp+2*128], zmm9		; Save carry out of low word
+	zstore	[rbp+2*128+64], zmm13		; Save carry out of high word
+	zstore	[rbp+3*128], zmm11		; Save carry out of low word
+	zstore	[rbp+3*128+64], zmm15		; Save carry out of high word
+	ENDM
+
+
+; *************** WPN normalized small add macro ******************
+; This macro implements the smalladd with normalization feature by adding the
+; provided small value to the first FFT word and propagating any carries.
+; xmm5 = addin value
+; rsi = pointer to destination
+; NOTE: caller can assume xmm6,xmm7 are left untouched (for better prolog/epilog handling)
+
+;;BUG  -  convert smalladd to use the common_op preloads.  round values the same way add/sub/addsub do rather than using zrounding_single
+;;  (reconcile differences in which registers constants are loaded into)
+;; Then delete zrounding macros
+
+znorm_smalladd_wpn_preload MACRO ttp
+	vbroadcastsd zmm30, ZMM_RNDVAL				;; Load the rounding value
+ttp	vbroadcastsd zmm27, ZMM_LARGE_BASE			;; large_word_base
+	vbroadcastsd zmm26, ZMM_SMALL_BASE			;; small_word_base
+ttp	vbroadcastsd zmm25, ZMM_LARGE_BASE_INVERSE		;; 1 / large_word_base
+	vbroadcastsd zmm24, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+ttp	vbroadcastsd zmm23, ZMM_RNDVAL_TIMES_LARGE_BASE		;; RNDVAL * large_word_base - RNDVAL
+	vbroadcastsd zmm22, ZMM_RNDVAL_TIMES_SMALL_BASE		;; RNDVAL * small_word_base - RNDVAL
+ttp	vbroadcastsd zmm21, ZMM_RNDVAL_OVER_LARGE_BASE		;; RNDVAL / large_word_base - RNDVAL
+	vbroadcastsd zmm20, ZMM_RNDVAL_OVER_SMALL_BASE		;; RNDVAL / small_word_base - RNDVAL
+	ENDM
+
+znorm_smalladd_wpn MACRO ttp
+
+ttp	kmovw	k1, WORD PTR ZMM_FIRST_BIGLIT_VALUES ;; Load 8 big vs. little flags
+	vaddsd	xmm0, xmm5, [rsi]		;; x1 = value1 + smalladd value
+	vaddsd	xmm0, xmm0, xmm30
+	zrounding_single ttp, zmm0, zmm2, k1
+	vmovsd	Q [rsi], xmm0			;; Save value1
+
+	add	rsi, ZMM_SRC_INCR		;; Next source pointer
+ttp	kshiftrw k1, k1, 1			;; Next big vs. little flag
+	vaddsd	xmm0, xmm2, [rsi]		;; x2 = FFT data + carry
+	zrounding_single ttp, zmm0, zmm2, k1
+	vmovsd	Q [rsi], xmm0			;; Save value2
+
+	add	rsi, ZMM_SRC_INCR		;; Next source pointer
+ttp	kshiftrw k1, k1, 1			;; Next big vs. little flag
+	vaddsd	xmm0, xmm2, [rsi]		;; x3 = FFT data + carry
+	zrounding_single ttp, zmm0, zmm2, k1
+	vmovsd	Q [rsi], xmm0			;; Save value3
+
+	add	rsi, ZMM_SRC_INCR		;; Next source pointer
+ttp	kshiftrw k1, k1, 1			;; Next big vs. little flag
+	vaddsd	xmm0, xmm2, [rsi]		;; x4 = FFT data + carry
+	zrounding_single ttp, zmm0, zmm2, k1
+	vmovsd	Q [rsi], xmm0			;; Save value4
+
+	add	rsi, ZMM_SRC_INCR		;; Next source pointer
+	vsubsd	xmm2, xmm2, xmm30		;; Remove RNDVAL from carry
+	vaddsd	xmm0, xmm2, [rsi]		;; new value5 = FFT data + carry
+	vmovsd	Q [rsi], xmm0			;; Save value5
+	ENDM
+
+
+; *************** WPN normalized small mul macro ******************
+; This macro multiplies FFT data by a small value, then normalizes 4 loword/hiword pairs.
+; rsi = pointer to source
+; rbx = pointer to destination
+; r13 = distance to source/dest #2
+; r14 = distance to source/dest #3
+; r15 = distance to source/dest #4
+; r12 = pointer to compressed biglit table
+; rdx = register used to load compressed biglit index
+; rdi = pointer to array of big vs. little flags
+; zmm0-7 = carries
+; zmm31 = small multiplier value
+
+znorm_smallmul_wpn_preload MACRO ttp
+no ttp	znorm_smallmul_wpn_nottp_preload
+ttp	znorm_smallmul_wpn_ttp_preload
+	ENDM
+
+znorm_smallmul_wpn MACRO ttp
+no ttp	znorm_smallmul_wpn_nottp
+ttp	znorm_smallmul_wpn_ttp
+	ENDM
+
+znorm_smallmul_wpn_nottp_preload MACRO
+	vpxorq	zmm0, zmm0, zmm0		;; Start process with no carry
+	vpxorq	zmm1, zmm1, zmm1
+	vpxorq	zmm2, zmm2, zmm2
+	vpxorq	zmm3, zmm3, zmm3
+	vpxorq	zmm4, zmm4, zmm4
+	vpxorq	zmm5, zmm5, zmm5
+	vpxorq	zmm6, zmm6, zmm6
+	vpxorq	zmm7, zmm7, zmm7
+	ENDM
+
+znorm_smallmul_wpn_nottp MACRO
+	zfmaddpd zmm8, zmm31, [rsi], zmm0	; 1-4	;; x = value * mulconst + carry
+	zfmaddpd zmm9, zmm31, [rsi+r13], zmm1	; 1-4	;; x = value * mulconst + carry
+	zfmaddpd zmm10, zmm31, [rsi+r14], zmm2	; 2-5	;; x = value * mulconst + carry
+	zfmaddpd zmm11, zmm31, [rsi+r15], zmm3	; 2-5	;; x = value * mulconst + carry
+	zfmaddpd zmm12, zmm31, [rsi+64], zmm4	; 3-6	;; x = value * mulconst + carry
+	zfmaddpd zmm13, zmm31, [rsi+r13+64], zmm5; 3-6	;; x = value * mulconst + carry
+	zfmaddpd zmm14, zmm31, [rsi+r14+64], zmm6; 4-7	;; x = value * mulconst + carry
+	zfmaddpd zmm15, zmm31, [rsi+r15+64], zmm7; 4-7	;; x = value * mulconst + carry
+
+	zfmaddpd zmm0, zmm8, zmm28, zmm30	; 9-12	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm1, zmm9, zmm28, zmm30	; 9-12	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm2, zmm10, zmm28, zmm30	; 10-13	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm3, zmm11, zmm28, zmm30	; 10-13	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm4, zmm12, zmm28, zmm30	; 11-14	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm5, zmm13, zmm28, zmm30	; 11-14	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm6, zmm14, zmm28, zmm30	; 12-15	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+	zfmaddpd zmm7, zmm15, zmm28, zmm30	; 12-15	;; next carry+RNDVAL = (x/base + RNDVAL) = rnd(x/base)+RNDVAL
+
+	vsubpd	zmm0, zmm0, zmm30		; 13-16	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm1, zmm1, zmm30		; 13-16	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm2, zmm2, zmm30		; 14-17	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm3, zmm3, zmm30		; 14-17	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm4, zmm4, zmm30		; 15-18	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm5, zmm5, zmm30		; 15-18	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm6, zmm6, zmm30		; 16-19	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+	vsubpd	zmm7, zmm7, zmm30		; 16-19	;; next carry = (next carry+RNDVAL) - RNDVAL = rnd(x/base)
+
+	zfnmaddpd zmm8, zmm0, zmm29, zmm8	; 17-20	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm9, zmm1, zmm29, zmm9	; 17-20	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm10, zmm2, zmm29, zmm10	; 18-21	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm11, zmm3, zmm29, zmm11	; 18-21	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm12, zmm4, zmm29, zmm12	; 19-22	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm13, zmm5, zmm29, zmm13	; 19-22	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm14, zmm6, zmm29, zmm14	; 20-23	;; new value = x - rnd(x/base)*base
+	zfnmaddpd zmm15, zmm7, zmm29, zmm15	; 20-23	;; new value = x - rnd(x/base)*base
+
+	zstore	[rbx], zmm8			;; Save value1
+	zstore	[rbx+r13], zmm9			;; Save value2
+	zstore	[rbx+r14], zmm10		;; Save value3
+	zstore	[rbx+r15], zmm11		;; Save value4
+	zstore	[rbx+64], zmm12			;; Save value5
+	zstore	[rbx+r13+64], zmm13		;; Save value6
+	zstore	[rbx+r14+64], zmm14		;; Save value7
+	zstore	[rbx+r15+64], zmm15		;; Save value8
+	ENDM
+
+znorm_smallmul_wpn_ttp_preload MACRO
+	vpxorq	zmm0, zmm0, zmm0		;; Start process with no carry
+	vpxorq	zmm1, zmm1, zmm1
+	vpxorq	zmm2, zmm2, zmm2
+	vpxorq	zmm3, zmm3, zmm3
+	vpxorq	zmm4, zmm4, zmm4
+	vpxorq	zmm5, zmm5, zmm5
+	vpxorq	zmm6, zmm6, zmm6
+	vpxorq	zmm7, zmm7, zmm7
+	ENDM
+
+znorm_smallmul_wpn_ttp MACRO
+	mov	dl, [rdi]			;; Load index into compressed biglit table
+
+	zfmaddpd zmm8, zmm31, [rsi], zmm0	; 1-4	;; x = value * mulconst + carry
+	zfmaddpd zmm9, zmm31, [rsi+r13], zmm1	; 1-4	;; x = value * mulconst + carry
+	zfmaddpd zmm10, zmm31, [rsi+r14], zmm2	; 2-5	;; x = value * mulconst + carry
+	zfmaddpd zmm11, zmm31, [rsi+r15], zmm3	; 2-5	;; x = value * mulconst + carry
+	zfmaddpd zmm12, zmm31, [rsi+64], zmm4	; 3-6	;; x = value * mulconst + carry
+	zfmaddpd zmm13, zmm31, [rsi+r13+64], zmm5; 3-6	;; x = value * mulconst + carry
+	zfmaddpd zmm14, zmm31, [rsi+r14+64], zmm6; 4-7	;; x = value * mulconst + carry
+	zfmaddpd zmm15, zmm31, [rsi+r15+64], zmm7; 4-7	;; x = value * mulconst + carry
+
+	kmovw	k1, WORD PTR [r12+rdx*4+0]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm0 {k1}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm0, zmm8, zmm0, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k2, WORD PTR [r12+rdx*4+2]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm1 {k2}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm1, zmm9, zmm1, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k3, WORD PTR [r12+rdx*4+4]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm2 {k3}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm2, zmm10, zmm2, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k4, WORD PTR [r12+rdx*4+6]		;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm3 {k4}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm3, zmm11, zmm3, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k5, k1, 8
+	vblendmpd zmm4 {k5}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm4, zmm12, zmm4, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k6, k2, 8
+	vblendmpd zmm5 {k6}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm5, zmm13, zmm5, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k7, k3, 8
+	vblendmpd zmm6 {k7}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm6, zmm14, zmm6, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	 vblendmpd zmm24 {k1}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	kshiftrw k1, k4, 8
+	vblendmpd zmm7 {k1}, zmm28, zmm26		;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm7, zmm15, zmm7, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+
+	vsubpd	zmm0, zmm0, zmm30		; 13-16	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm1, zmm1, zmm30		; 13-16	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm2, zmm2, zmm30		; 14-17	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm3, zmm3, zmm30		; 14-17	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm4, zmm4, zmm30		; 15-18	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm5, zmm5, zmm30		; 15-18	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm6, zmm6, zmm30		; 16-19	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm7, zmm7, zmm30		; 16-19	;; y = rnd(x/base) = y - RNDVAL
+
+	zfnmaddpd zmm8, zmm0, zmm24, zmm8	; 17-20	;; new value = x - y * base
+	vblendmpd zmm24 {k2}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm9, zmm1, zmm24, zmm9	; 17-20	;; new value = x - y * base
+	vblendmpd zmm24 {k3}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm10, zmm2, zmm24, zmm10	; 18-21	;; new value = x - y * base
+	vblendmpd zmm24 {k4}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm11, zmm3, zmm24, zmm11	; 18-21	;; new value = x - y * base
+	vblendmpd zmm24 {k5}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm12, zmm4, zmm24, zmm12	; 19-22	;; new value = x - y * base
+	vblendmpd zmm24 {k6}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm13, zmm5, zmm24, zmm13	; 19-22	;; new value = x - y * base
+	vblendmpd zmm24 {k7}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm14, zmm6, zmm24, zmm14	; 20-23	;; new value = x - y * base
+	vblendmpd zmm24 {k1}, zmm29, zmm27		;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm15, zmm7, zmm24, zmm15	; 20-23	;; new value = x - y * base
+
+	zstore	[rbx], zmm8			;; Save value1
+	zstore	[rbx+r13], zmm9			;; Save value2
+	zstore	[rbx+r14], zmm10		;; Save value3
+	zstore	[rbx+r15], zmm11		;; Save value4
+	zstore	[rbx+64], zmm12			;; Save value5
+	zstore	[rbx+r13+64], zmm13		;; Save value6
+	zstore	[rbx+r14+64], zmm14		;; Save value7
+	zstore	[rbx+r15+64], zmm15		;; Save value8
+	ENDM
+
+;; Final step in the znorm_smallmul process.  Write carries to the carries array (to be processed later)
+
+znorm_smallmul_wpn_save_carries MACRO
+	mov	rbp, DATA_ADDR			; Address of carries array
+	vaddpd	zmm0, zmm0, zmm30		; Store carries in +RNDVAL format (to share share code with post-FFT normalize)
+	vaddpd	zmm1, zmm1, zmm30
+	vaddpd	zmm2, zmm2, zmm30
+	vaddpd	zmm3, zmm3, zmm30
+	vaddpd	zmm4, zmm4, zmm30
+	vaddpd	zmm5, zmm5, zmm30
+	vaddpd	zmm6, zmm6, zmm30
+	vaddpd	zmm7, zmm7, zmm30
+	zstore	[rbp+0*128], zmm0		; Save carry out of low word
+	zstore	[rbp+0*128+64], zmm4		; Save carry out of high word
+	zstore	[rbp+1*128], zmm1		; Save carry out of low word
+	zstore	[rbp+1*128+64], zmm5		; Save carry out of high word
+	zstore	[rbp+2*128], zmm2		; Save carry out of low word
+	zstore	[rbp+2*128+64], zmm6		; Save carry out of high word
+	zstore	[rbp+3*128], zmm3		; Save carry out of low word
+	zstore	[rbp+3*128+64], zmm7		; Save carry out of high word
+	ENDM
+
+
+; *************** WPN followup macros ******************
+
+; These macros finish the normalize process by adding back the carries from each pass 1 block.
+; Seven of the ZMM carries are shifted and added back in to the current block, one of the ZMM
+; section carries is applied to the next block.
+
+
+;; Rotate the entire carries array
+;; On output:
+;; xmm0 = last low half carry
+;; xmm1 = last high half carry
+;; rax,rbx,rbp trashed
+
+zrotate_carries_array MACRO
+	LOCAL	shuflp
+
+	mov	rbp, carries		;; Addr of the carries
+	mov	eax, addcount1		;; Load count of double cache lines in the carries array
+	mov	ebx, 1
+	kmovw	k7, ebx
+
+	vmovupd	zmm1, [rbp+0*64-8]	;; Load one trash double and first 7 low carries.  Offset is one double to effect a shift.
+shuflp:	vblendmpd zmm3 {k7}, zmm1, zmm0	;; Move previous low carry MSW (in LSW of zmm0) to this low carry LSW
+	vmovupd	zmm0, [rbp+1*64-8]	;; Load 7 high carries, offset by one double to effect a shift (LSW is low carry's MSW)
+					;; NOTE: must load high carries before saving the shifted low carries
+	zstore	[rbp+0*64], zmm3	;; Save shifted low carries
+	vblendmpd zmm4 {k7}, zmm0, zmm1	;; Move previous high carry MSW (in LSW of zmm1) to this high carry LSW
+	vmovupd	zmm1, [rbp+2*64-8]	;; Load next 7 low carries, offset by one double to effect a shift (LSW is high carry's MSW)
+					;; NOTE: must load next low carries before saving the shifted high carries
+	zstore	[rbp+1*64], zmm4	;; Save shifted high carries 
+	bump	rbp, 128		;; Next pair of carry cache line
+	dec	rax			;; Decrement count of cache lines
+	jnz	short shuflp
+	;; Here xmm0 contains last low half carry, xmm1 contains last high half carry
+	ENDM
+
+
+; This macro handles the last carry rotated out of the low half of the FFT and the last carry rotated out of the high half of the FFT.
+; xmm0 = last low half carry
+; xmm1 = last high half carry
+; rbp,rsi trashed
+
+zprocess_last_two_carries MACRO ttp
+	LOCAL	no_adjust
+	vmovsd	xmm30, ZMM_RNDVAL
+	;; Because of POSTFFT, squaring and multiply operations must adjust the top carry while the data
+	;; is in the scratch area.  For add/sub/addsub/smallmul operations, we adjust the top carry here
+ttp	cmp	add_sub_smallmul_op, 0		;; If this is an add/sub/smallmul operation, not a square/multiply, then do top carry adjust
+ttp	je	no_adjust			;; Jump if not an add/sub/smallmul operation
+ttp	znorm_top_carry_op_wpn			;; Adjust carry in xmm1 if k > 1
+no_adjust:
+	vsubsd	xmm1, xmm1, xmm30		;; Remove RNDVAL from last high carry
+	zfmaddsd xmm1, xmm1, ZMM_MINUS_C, xmm30 ;; Negate the last high carry, reapply RNDVAL
+	mov	rbp, carries			;; Reload carries array pointer
+	vmovsd	Q [rbp], xmm1			;; Move negated last high carry into first low carry
+	vmovsd	Q [rbp+64], xmm0		;; Move last low carry into first high carry
+	ENDM
+
+; Process four of the "rows" from the carries table for a two-pass FFT, where a "row" is low word / high word pair.
+; rbp = pointer to carries
+; rsi = pointer to the FFT data (source #1)
+; r13 = source #3
+; r14 = distance between source #1 and source #2 (as well as source #3 and source #4)
+; r12 = pointer to compressed biglit table
+; rdx = register to load compressed biglit index into
+; rdi = pointer to big/little flags
+; rax, r8, r9, r10 = scratch
+
+zadd_carry_rows_preload MACRO ttp
+no ttp	zadd_carry_rows_nottp_preload
+ttp	zadd_carry_rows_ttp_preload
+	ENDM
+
+zadd_carry_rows MACRO ttp
+no ttp	zadd_carry_rows_nottp
+ttp	zadd_carry_rows_ttp
+	ENDM
+
+zadd_carry_rows_nottp_preload MACRO
+	vbroadcastsd zmm30, ZMM_RNDVAL				;; Load the rounding value
+	vbroadcastsd zmm28, ZMM_SMALL_BASE			;; small_word_base
+	vbroadcastsd zmm27, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
+	vbroadcastsd zmm26, ZMM_RNDVAL_TIMES_SMALL_BASE		;; RNDVAL * small_word_base - RNDVAL
+	vbroadcastsd zmm25, ZMM_RNDVAL_OVER_SMALL_BASE		;; RNDVAL / small_word_base - RNDVAL
+	ENDM
+
+zadd_carry_rows_nottp MACRO
+	LOCAL	nz, cloop, done
+
+	vmovapd	zmm0, [rbp+0*128]		;; Load low carry word for source #1
+	vmovapd	zmm1, [rbp+1*128]		;; Load low carry word for source #2
+	vmovapd	zmm2, [rbp+2*128]		;; Load low carry word for source #3
+	vmovapd	zmm3, [rbp+3*128]		;; Load low carry word for source #4
+	vmovapd	zmm4, [rbp+0*128+64]		;; Load hi carry word for source #1
+	vmovapd	zmm5, [rbp+1*128+64]		;; Load hi carry word for source #2
+	vmovapd	zmm6, [rbp+2*128+64]		;; Load hi carry word for source #3
+	vmovapd	zmm7, [rbp+3*128+64]		;; Load hi carry word for source #4
+
+	cmp	zero_fft, 1			;; Are we zeroing high words?
+	jne	short nz			;; No, leave top carry alone
+	vmovapd	zmm4, zmm30			;; Yes, don't add carries into upper words
+	vmovapd	zmm5, zmm30			;; Yes, don't add carries into upper words
+	vmovapd	zmm6, zmm30			;; Yes, don't add carries into upper words
+	vmovapd	zmm7, zmm30			;; Yes, don't add carries into upper words
+nz:
+
+	mov	r8, rsi				;; Save pointers
+	mov	r10, r13
+	mov	al, 7				;; Spread carry over a max of 8 words
+
+	;; The following rounding code is copied almost verbatim from znorm_wpn_noconst_noechk_nottp
+cloop:
+	vaddpd	zmm8, zmm0, [rsi]		; 1-4	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm9, zmm1, [rsi+r14]		; 1-4	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm10, zmm2, [r13]		; 2-5	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm11, zmm3, [r13+r14]		; 2-5	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm12, zmm4, [rsi+64]		; 3-6	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm13, zmm5, [rsi+r14+64]	; 3-6	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm14, zmm6, [r13+64]		; 4-7	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm15, zmm7, [r13+r14+64]	; 4-7	;; x+RNDVAL = carry+RNDVAL + value
+
+	zfmsubpd zmm0, zmm8, zmm27, zmm25	; 5-8	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm1, zmm9, zmm27, zmm25	; 5-8	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm2, zmm10, zmm27, zmm25	; 6-9	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm3, zmm11, zmm27, zmm25	; 6-9	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm4, zmm12, zmm27, zmm25	; 7-10	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm5, zmm13, zmm27, zmm25	; 7-10	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm6, zmm14, zmm27, zmm25	; 8-11	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+	zfmsubpd zmm7, zmm15, zmm27, zmm25	; 8-11	;; next carry+RNDVAL = (x+RNDVAL) / base - (RNDVAL / base - RNDVAL) = rnd(x/base)+RNDVAL
+
+	zfmsubpd zmm16, zmm0, zmm28, zmm26	; 9-12	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm17, zmm1, zmm28, zmm26	; 9-12	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm18, zmm2, zmm28, zmm26	; 10-13	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm19, zmm3, zmm28, zmm26	; 10-13	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm20, zmm4, zmm28, zmm26	; 11-14	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm21, zmm5, zmm28, zmm26	; 11-14	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm22, zmm6, zmm28, zmm26	; 12-15	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+	zfmsubpd zmm23, zmm7, zmm28, zmm26	; 12-15	;; y+RNDVAL = (next carry+RNDVAL) * base - (RNDVAL * base - RNDVAL) = rnd(x/base)*base+RNDVAL
+
+	vsubpd	zmm8, zmm8, zmm16		; 13-16	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm9, zmm9, zmm17		; 13-16	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm10, zmm10, zmm18		; 14-17	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm11, zmm11, zmm19		; 14-17	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm12, zmm12, zmm20		; 15-18	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm13, zmm13, zmm21		; 15-18	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm14, zmm14, zmm22		; 16-19	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+	vsubpd	zmm15, zmm15, zmm23		; 16-19	;; new value = x+RNDVAL - y+RNDVAL = x - rnd(x/base)*base
+
+	zstore	[rsi], zmm8			;; Save value1
+	zstore	[rsi+r14], zmm9			;; Save value2
+	zstore	[r13], zmm10			;; Save value3
+	zstore	[r13+r14], zmm11		;; Save value4
+	zstore	[rsi+64], zmm12			;; Save value5
+	zstore	[rsi+r14+64], zmm13		;; Save value6
+	zstore	[r13+64], zmm14			;; Save value7
+	zstore	[r13+r14+64], zmm15		;; Save value8
+
+	vcmpneqpd k1, zmm0, zmm30		;; Are any non-zero carries remaining to propagate?
+	vcmpneqpd k2, zmm1, zmm30
+	vcmpneqpd k3, zmm2, zmm30
+	vcmpneqpd k4, zmm3, zmm30
+	korw	k5, k1, k2
+	korw	k6, k3, k4
+	vcmpneqpd k1, zmm4, zmm30		;; Are any non-zero carries remaining to propagate?
+	vcmpneqpd k2, zmm5, zmm30
+	vcmpneqpd k3, zmm6, zmm30
+	vcmpneqpd k4, zmm7, zmm30
+	korw	k1, k1, k2
+	korw	k2, k3, k4
+	korw	k3, k5, k6
+	korw	k4, k1, k2
+	kortestw k3, k4
+	jz	done				;; If carries not found then we're done
+
+	add	rsi, pass2blkdst		;; Next FFT data ptr source #1
+	add	r13, pass2blkdst		;; Next FFT data ptr source #3
+	sub	al, 1				;; Decrement propagation count
+	jne	cloop				;; Repeat carry propagation loop
+
+	;; Do eighth and last iteration without propagating carries out
+
+	vsubpd	zmm0, zmm0, zmm30		;; Remove RNDVAL from carries
+	vsubpd	zmm1, zmm1, zmm30
+	vsubpd	zmm2, zmm2, zmm30
+	vsubpd	zmm3, zmm3, zmm30
+	vsubpd	zmm4, zmm4, zmm30
+	vsubpd	zmm5, zmm5, zmm30
+	vsubpd	zmm6, zmm6, zmm30
+	vsubpd	zmm7, zmm7, zmm30
+	vaddpd	zmm8, zmm0, [rsi]		;; Values1 += carry
+	vaddpd	zmm9, zmm1, [rsi+r14]		;; Values2 += carry
+	vaddpd	zmm10, zmm2, [r13]		;; Values3 += carry
+	vaddpd	zmm11, zmm3, [r13+r14]		;; Values4 += carry
+	vaddpd	zmm12, zmm4, [rsi+64]		;; Values5 += carry
+	vaddpd	zmm13, zmm5, [rsi+r14+64]	;; Values6 += carry
+	vaddpd	zmm14, zmm6, [r13+64]		;; Values7 += carry
+	vaddpd	zmm15, zmm7, [r13+r14+64]	;; Values8 += carry
+	zstore	[rsi], zmm8			;; Save value1
+	zstore	[rsi+r14], zmm9			;; Save value2
+	zstore	[r13], zmm10			;; Save value3
+	zstore	[r13+r14], zmm11		;; Save value4
+	zstore	[rsi+64], zmm12			;; Save value5
+	zstore	[rsi+r14+64], zmm13		;; Save value6
+	zstore	[r13+64], zmm14			;; Save value7
+	zstore	[r13+r14+64], zmm15		;; Save value8
+
+done:	mov	rsi, r8				;; Restore pointers
+	mov	r13, r10
+
+	zstore	[rbp+0*128], zmm30		;; Reset carries array to RNDVAL
+	zstore	[rbp+0*128+64], zmm30
+	zstore	[rbp+1*128], zmm30
+	zstore	[rbp+1*128+64], zmm30
+	zstore	[rbp+2*128], zmm30
+	zstore	[rbp+2*128+64], zmm30
+	zstore	[rbp+3*128], zmm30
+	zstore	[rbp+3*128+64], zmm30
+	ENDM
+
+
+zadd_carry_rows_ttp_preload MACRO
+	vbroadcastsd zmm30, ZMM_RNDVAL			;; Rounding value
+	vbroadcastsd zmm29, ZMM_SMALL_BASE		;; small_word_base
+	vbroadcastsd zmm28, ZMM_SMALL_BASE_INVERSE	;; 1 / small_word_base
+	vbroadcastsd zmm27, ZMM_LARGE_BASE		;; large_word_base
+	vbroadcastsd zmm26, ZMM_LARGE_BASE_INVERSE	;; 1 / large_word_base
+	ENDM
+
+zadd_carry_rows_ttp MACRO
+	LOCAL	nz, cloop, done
+
+	vmovapd	zmm0, [rbp+0*128]		;; Load low carry word for source #1
+	vmovapd	zmm1, [rbp+1*128]		;; Load low carry word for source #2
+	vmovapd	zmm2, [rbp+2*128]		;; Load low carry word for source #3
+	vmovapd	zmm3, [rbp+3*128]		;; Load low carry word for source #4
+	vmovapd	zmm4, [rbp+0*128+64]		;; Load hi carry word for source #1
+	vmovapd	zmm5, [rbp+1*128+64]		;; Load hi carry word for source #2
+	vmovapd	zmm6, [rbp+2*128+64]		;; Load hi carry word for source #3
+	vmovapd	zmm7, [rbp+3*128+64]		;; Load hi carry word for source #4
+
+	cmp	zero_fft, 1			;; Are we zeroing high words?
+	jne	short nz			;; No, leave top carry alone
+	vmovapd	zmm4, zmm30			;; Yes, don't add carries into upper words
+	vmovapd	zmm5, zmm30			;; Yes, don't add carries into upper words
+	vmovapd	zmm6, zmm30			;; Yes, don't add carries into upper words
+	vmovapd	zmm7, zmm30			;; Yes, don't add carries into upper words
+nz:
+
+	mov	r8, rsi				;; Save pointers
+	mov	r9, rdi
+	mov	r10, r13
+	mov	al, 7				;; Spread carry over a max of 8 words
+
+	;; The following rounding code is copied almost verbatim from znorm_wpn_noconst_noechk_ttp
+cloop:
+	mov	dl, [rdi]			;; Load index into compressed biglit table
+	vaddpd	zmm8, zmm0, [rsi]		; 1-4	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm9, zmm1, [rsi+r14]		; 1-4	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm10, zmm2, [r13]		; 2-5	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm11, zmm3, [r13+r14]		; 2-5	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm12, zmm4, [rsi+64]		; 3-6	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm13, zmm5, [rsi+r14+64]	; 3-6	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm14, zmm6, [r13+64]		; 4-7	;; x+RNDVAL = carry+RNDVAL + value
+	vaddpd	zmm15, zmm7, [r13+r14+64]	; 4-7	;; x+RNDVAL = carry+RNDVAL + value
+
+	vsubpd	zmm16, zmm8, zmm30		; 5-8	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm17, zmm9, zmm30		; 5-8	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm18, zmm10, zmm30		; 6-9	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm19, zmm11, zmm30		; 6-9	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm20, zmm12, zmm30		; 7-10	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm21, zmm13, zmm30		; 7-10	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm22, zmm14, zmm30		; 8-11	;; x = x+RNDVAL - RNDVAL
+	vsubpd	zmm23, zmm15, zmm30		; 8-11	;; x = x+RNDVAL - RNDVAL
+
+	kmovw	k1, WORD PTR [r12+rdx*4+0]	; 9	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm0 {k1}, zmm28, zmm26	; 9	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm0, zmm16, zmm0, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k2, WORD PTR [r12+rdx*4+2]	; 9	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm1 {k2}, zmm28, zmm26	; 9	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm1, zmm17, zmm1, zmm30	; 9-12	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k3, WORD PTR [r12+rdx*4+4]	; 10	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm2 {k3}, zmm28, zmm26	; 10	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm2, zmm18, zmm2, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kmovw	k4, WORD PTR [r12+rdx*4+6]	; 10	;; Load 2 big vs. little flags (16-bit load - we use 8-bits)
+	vblendmpd zmm3 {k4}, zmm28, zmm26	; 10	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm3, zmm19, zmm3, zmm30	; 10-13	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k5, k1, 8			; 11
+	vblendmpd zmm4 {k5}, zmm28, zmm26	; 11	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm4, zmm20, zmm4, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k6, k2, 8			; 11
+	vblendmpd zmm5 {k6}, zmm28, zmm26	; 11	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm5, zmm21, zmm5, zmm30	; 11-14	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	kshiftrw k7, k3, 8			; 12
+	vblendmpd zmm6 {k7}, zmm28, zmm26	; 12	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm6, zmm22, zmm6, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+	 vblendmpd zmm24 {k1}, zmm29, zmm27	; 12	;; Create (base) constant used in new value calculation
+	kshiftrw k1, k4, 8			; 12
+	vblendmpd zmm7 {k1}, zmm28, zmm26	; 12	;; Create (1 / base) constant used in next carry calculation
+	zfmaddpd zmm7, zmm23, zmm7, zmm30	; 12-15	;; y+RNDVAL = x / base + RNDVAL (next carry+RNDVAL)
+
+	vsubpd	zmm8, zmm0, zmm30		; 13-16	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm9, zmm1, zmm30		; 13-16	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm10, zmm2, zmm30		; 14-17	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm11, zmm3, zmm30		; 14-17	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm12, zmm4, zmm30		; 15-18	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm13, zmm5, zmm30		; 15-18	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm14, zmm6, zmm30		; 16-19	;; y = rnd(x/base) = y - RNDVAL
+	vsubpd	zmm15, zmm7, zmm30		; 16-19	;; y = rnd(x/base) = y - RNDVAL
+
+	zfnmaddpd zmm8, zmm8, zmm24, zmm16	; 17-20	;; new value = x - y * base
+	vblendmpd zmm24 {k2}, zmm29, zmm27	; 17	;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm9, zmm9, zmm24, zmm17	; 17-20	;; new value = x - y * base
+	vblendmpd zmm24 {k3}, zmm29, zmm27	; 17	;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm10, zmm10, zmm24, zmm18	; 18-21	;; new value = x - y * base
+	vblendmpd zmm24 {k4}, zmm29, zmm27	; 18	;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm11, zmm11, zmm24, zmm19	; 18-21	;; new value = x - y * base
+	vblendmpd zmm24 {k5}, zmm29, zmm27	; 18	;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm12, zmm12, zmm24, zmm20	; 19-22	;; new value = x - y * base
+	vblendmpd zmm24 {k6}, zmm29, zmm27	; 19	;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm13, zmm13, zmm24, zmm21	; 19-22	;; new value = x - y * base
+	vblendmpd zmm24 {k7}, zmm29, zmm27	; 19	;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm14, zmm14, zmm24, zmm22	; 20-23	;; new value = x - y * base
+	vblendmpd zmm24 {k1}, zmm29, zmm27	; 20	;; Create (base) constant used in new value calculation
+	zfnmaddpd zmm15, zmm15, zmm24, zmm23	; 20-23	;; new value = x - y * base
+
+	zstore	[rsi], zmm8			;; Save value1
+	zstore	[rsi+r14], zmm9			;; Save value2
+	zstore	[r13], zmm10			;; Save value3
+	zstore	[r13+r14], zmm11		;; Save value4
+	zstore	[rsi+64], zmm12			;; Save value5
+	zstore	[rsi+r14+64], zmm13		;; Save value6
+	zstore	[r13+64], zmm14			;; Save value7
+	zstore	[r13+r14+64], zmm15		;; Save value8
+
+	vcmpneqpd k1, zmm0, zmm30		;; Are any non-zero carries remaining to propagate?
+	vcmpneqpd k2, zmm1, zmm30
+	vcmpneqpd k3, zmm2, zmm30
+	vcmpneqpd k4, zmm3, zmm30
+	korw	k5, k1, k2
+	korw	k6, k3, k4
+	vcmpneqpd k1, zmm4, zmm30		;; Are any non-zero carries remaining to propagate?
+	vcmpneqpd k2, zmm5, zmm30
+	vcmpneqpd k3, zmm6, zmm30
+	vcmpneqpd k4, zmm7, zmm30
+	korw	k1, k1, k2
+	korw	k2, k3, k4
+	korw	k3, k5, k6
+	korw	k4, k1, k2
+	kortestw k3, k4
+	jz	done				;; If carries not found then we're done
+
+	add	rsi, pass2blkdst		;; Next FFT data ptr
+	add	r13, pass2blkdst		;; Next FFT data ptr source #3
+	bump	rdi, 1				;; Bump big/lit ptr the same amount we bump it in inorm macro
+	sub	al, 1				;; Decrement propagation count
+	jne	cloop				;; Repeat carry propagation loop
+
+	;; Do eighth and last iteration without propagating carries out
+
+	vsubpd	zmm0, zmm0, zmm30		;; Remove RNDVAL from carries
+	vsubpd	zmm1, zmm1, zmm30
+	vsubpd	zmm2, zmm2, zmm30
+	vsubpd	zmm3, zmm3, zmm30
+	vsubpd	zmm4, zmm4, zmm30
+	vsubpd	zmm5, zmm5, zmm30
+	vsubpd	zmm6, zmm6, zmm30
+	vsubpd	zmm7, zmm7, zmm30
+	vaddpd	zmm8, zmm0, [rsi]		;; Values1 += carry
+	vaddpd	zmm9, zmm1, [rsi+r14]		;; Values2 += carry
+	vaddpd	zmm10, zmm2, [r13]		;; Values3 += carry
+	vaddpd	zmm11, zmm3, [r13+r14]		;; Values4 += carry
+	vaddpd	zmm12, zmm4, [rsi+64]		;; Values5 += carry
+	vaddpd	zmm13, zmm5, [rsi+r14+64]	;; Values6 += carry
+	vaddpd	zmm14, zmm6, [r13+64]		;; Values7 += carry
+	vaddpd	zmm15, zmm7, [r13+r14+64]	;; Values8 += carry
+	zstore	[rsi], zmm8			;; Save value1
+	zstore	[rsi+r14], zmm9			;; Save value2
+	zstore	[r13], zmm10			;; Save value3
+	zstore	[r13+r14], zmm11		;; Save value4
+	zstore	[rsi+64], zmm12			;; Save value5
+	zstore	[rsi+r14+64], zmm13		;; Save value6
+	zstore	[r13+64], zmm14			;; Save value7
+	zstore	[r13+r14+64], zmm15		;; Save value8
+
+done:	mov	rsi, r8				;; Restore pointers
+	mov	rdi, r9
+	mov	r13, r10
+
+	zstore	[rbp+0*128], zmm30		;; Reset carries array to RNDVAL
+	zstore	[rbp+0*128+64], zmm30
+	zstore	[rbp+1*128], zmm30
+	zstore	[rbp+1*128+64], zmm30
+	zstore	[rbp+2*128], zmm30
+	zstore	[rbp+2*128+64], zmm30
+	zstore	[rbp+3*128], zmm30
+	zstore	[rbp+3*128+64], zmm30
+	ENDM
+

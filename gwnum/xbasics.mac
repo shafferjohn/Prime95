@@ -1,0 +1,397 @@
+; Copyright 2001-2017 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros implement basic SSE2 building blocks that will be used by
+; all FFT types.  This file contains the default definitions which
+; are optimized for the Core 2 / Core i7 architecture.  Optimized versions
+; of these macros for other architectures can be found in other files.
+;
+
+;; The movaps instruction does the same thing as a movapd instruction
+;; but is one less byte.  The shorter instruction might improve decode
+;; bandwidth in some cases.  We use a macro, so that we can switch
+;; back to using movapd if a future chip imposes a penalty for loading
+;; packed doubles with the movaps instruction.
+
+xload	MACRO	reg, mem
+	movaps	reg, XPTR mem
+	ENDM
+
+xstore	MACRO	mem, reg
+	movaps	XPTR mem, reg
+	ENDM
+
+xcopy	MACRO	reg1, reg2
+	;; There is a HUGE penalty for using the shorter movaps instruction on AMD K8 machines.
+	;; Therefore, we use the longer movapd instruction for the BLEND architecture.
+	IF (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<BLEND>) NE 0)
+	movapd	reg1, reg2
+	ELSE
+	movaps	reg1, reg2
+	ENDIF
+	ENDM
+
+;;
+;; Common utility macros
+;;
+
+multwo	MACRO	r
+	mulpd	r, XMM_TWO
+	ENDM
+
+mulhalf	MACRO	r
+	mulpd	r, XMM_HALF
+	ENDM
+
+multwos	MACRO	r
+;	mulsd	r, Q XMM_TWO
+	addsd	r, r
+	ENDM
+
+mulhalfs MACRO	r
+	mulsd	r, Q XMM_HALF
+	ENDM
+
+; No noticeable difference between these two identical unpack instructions.
+; The P4 optimization manual lists a 2 clock latency difference
+;;
+;;SHUFPD uses Core 2 port 0 (competes with mulpd)
+;;SHUFPS uses Core 2 port 5 (but adds one clock latency to transfer data to integer unit)
+;;UNPCKHPD uses Core 2 port 0 (competes with mulpd)
+;;PUNPCKHQDQ uses Core 2 port 5 (but adds one clock latency to transfer data to integer unit)
+;;MOVLHPS and MOVHLPS uses Core 2 port 0 (competes with mulpd and requires SSE4.1)
+;; This implementation chooses the port 5 option as it under-utilized
+;;
+;; On AMD64 (K8 architecture, not the Phenom K10 architecture), punpckhqdq is grossly slow.
+
+unpckhi MACRO dest, src
+	IF (@INSTR(,%xarch,<P4>) NE 0) OR (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<K10>) NE 0) OR (@INSTR(,%xarch,<BLEND>) NE 0)
+	unpckhpd dest, src
+	ELSE
+	punpckhqdq dest, src
+	ENDIF
+	ENDM
+
+unpcklo MACRO dest, src
+	IF (@INSTR(,%xarch,<P4>) NE 0) OR (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<K10>) NE 0) OR (@INSTR(,%xarch,<BLEND>) NE 0)
+	unpcklpd dest, src
+	ELSE
+	punpcklqdq dest, src
+	ENDIF
+	ENDM
+
+;; Macros that load or store register(s) shuffling the data
+
+low_load MACRO reg, mem1, mem2
+	IF (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<K10>) NE 0)
+	movsd	reg, Q mem1
+	movhpd	reg, Q mem2
+	ELSE
+	xload	reg, XPTR mem1
+	unpcklo reg, XPTR mem2
+	ENDIF
+	ENDM
+
+high_load MACRO reg, mem1, mem2
+	IF (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<K10>) NE 0)
+	movsd	reg, Q mem1[8]
+	movhpd	reg, Q mem2[8]
+	ELSE
+	xload	reg, XPTR mem2
+	movlpd	reg, Q mem1[8]
+	ENDIF
+	ENDM
+
+shuffle_load MACRO reglo, reghi, mem1, mem2
+	IF (@INSTR(,%xarch,<K8>) NE 0)
+	movsd	reglo, Q mem1
+	movsd	reghi, Q mem1[8]
+	movhpd	reglo, Q mem2
+	movhpd	reghi, Q mem2[8]
+	ELSE
+	xload	reglo, XPTR mem1
+	xload	reghi, XPTR mem2
+	unpcklo	reglo, reghi
+	movlpd	reghi, Q mem1[8]
+	ENDIF
+	ENDM
+
+shuffle_load_with_temp MACRO reglo, reghi, mem1, mem2, tmp
+	IF (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<K10>) NE 0)
+	shuffle_load reglo, reghi, mem1, mem2
+	ELSE
+	xload	reglo, XPTR mem1
+	xcopy	reghi, reglo
+	xload	tmp, XPTR mem2
+	unpcklo	reglo, tmp
+	unpckhi	reghi, tmp
+	ENDIF
+	ENDM
+
+shuffle_store MACRO mem1, mem2, reglo, reghi
+	movsd	Q mem1, reglo
+	movsd	Q mem1[8], reghi
+	unpckhi reglo, reghi
+	xstore	mem2, reglo
+	ENDM
+
+;; Like shuffle_store but mem1 has already been written to memory
+shuffle_store_partial MACRO mem1, mem2, reglo, reghi
+	xload	reglo, mem1
+	movsd	Q mem1[8], reghi
+	unpckhi reglo, reghi
+	xstore	mem2, reglo
+	ENDM
+
+;; Like shuffle_store but a temporary register is available
+shuffle_store_with_temp MACRO mem1, mem2, reglo, reghi, tmp
+	IF (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<K10>) NE 0)
+	shuffle_store mem1, mem2, reglo, reghi
+	ELSE
+	xcopy	tmp, reglo
+	unpcklo reglo, reghi
+	xstore	mem1, reglo
+	unpckhi tmp, reghi
+	xstore	mem2, tmp
+	ENDIF
+	ENDM
+
+;;
+;; Prefetching macros
+;;
+
+; Early Pentium 4's require preloading the TLBs before
+; prefetching cache lines
+
+xtouch	MACRO	addr
+	IF PREFETCHING NE 0
+	IF TLB_PRIMING NE 0
+	cmp	rsp, addr
+	ENDIF
+	ENDIF
+	ENDM
+
+; Macro to prefetch 128 bytes into the L2 cache.  NOTE:  AMD K8 and K10 only
+; supports prefetching to the L1 cache which is later evicted to the L2 cache.
+
+L2prefetch128 MACRO addr
+	IF PREFETCHING NE 0
+	IF (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<K10>) NE 0)
+	prefetchw addr
+	prefetchw addr[64]
+	ELSE
+	prefetcht1 addr
+	IF PREFETCHING NE 128
+	prefetcht1 addr[64]		;;; good for Core 2
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDM
+
+; Macro to prefetch a 64-byte line into the L1 cache (AMD only)
+; Note:  We use an ugly hack to not prefetch if loops_undo 
+; has been called.  This only happens when we have merged FFT levels
+; in pass 2.
+
+loops_undo_called = 0
+
+xprefetch MACRO addr
+	IF (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<K10>) NE 0)
+	IF loops_undo_called EQ 0
+	prefetch addr
+	ENDIF
+	ENDIF
+	ENDM
+xprefetchw MACRO addr
+	IF (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<K10>) NE 0)
+	IF loops_undo_called EQ 0
+	prefetchw addr
+	ENDIF
+	ENDIF
+	ENDM
+
+xxprefetch MACRO addr
+	IF (@INSTR(,%xarch,<K8>) NE 0) OR (@INSTR(,%xarch,<K10>) NE 0)
+	prefetch addr
+	ENDIF
+	ENDM
+
+;;
+;; Macros that do a complex squaring or multiplication
+;;
+
+xp_complex_square MACRO real, imag, tmp
+	xcopy	tmp, imag
+	mulpd	imag, real		;; imag * real
+	mulpd	real, real		;; real * real
+	mulpd	tmp, tmp		;; imag * imag
+	addpd	imag, imag		;; imag * real * 2 (new imag)
+	subpd	real, tmp		;; real^2 - imag^2 (new real)
+	ENDM
+
+xp_complex_mult MACRO real1, imag1, real2, imag2, tmp1, tmp2
+	xcopy	tmp1, real1
+	xcopy	tmp2, imag1
+	mulpd	real1, real2		;; real1 * real2
+	mulpd	tmp2, imag2		;; imag1 * imag2
+	mulpd	tmp1, imag2		;; real1 * imag2
+	mulpd	imag1, real2		;; real2 * imag1
+	subpd	real1, tmp2		;; real1*real2-imag1*imag2 (new real)
+	addpd	imag1, tmp1		;; real1*imag2+real2*imag1 (new imag)
+	ENDM
+
+xs_complex_square MACRO real, imag, tmp
+	movsd	tmp, imag
+	mulsd	tmp, tmp		;; imag * imag
+	mulsd	imag, real		;; imag * real
+	mulsd	real, real		;; real * real
+	subsd	real, tmp		;; real^2 - imag^2 (new real)
+	addsd	imag, imag		;; imag * real * 2 (new imag)
+	ENDM
+
+xs_complex_mult MACRO real1, imag1, real2, imag2, tmp1, tmp2
+	movsd	tmp1, real1
+	movsd	tmp2, imag1
+	mulsd	real1, real2		;; real1 * real2
+	mulsd	tmp2, imag2		;; imag1 * imag2
+	mulsd	tmp1, imag2		;; real1 * imag2
+	mulsd	imag1, real2		;; real2 * imag1
+	subsd	real1, tmp2		;; real1*real2-imag1*imag2 (new real)
+	addsd	imag1, tmp1		;; real1*imag2+real2*imag1 (new imag)
+	ENDM
+
+;; Perform the complex multiply step.
+
+xp4c_mulf MACRO r1,r2,r3,r4,r5,r6,r7,r8,m1,m2,m3,m4,m5,m6,m7,m8
+	xstore	XMM_TMP1, r7		;; Save r7
+	xstore	XMM_TMP2, r8		;; Save r8
+	xp_complex_mult r1, r2, XX m1[rbp], XX m2[rbp], r7, r8
+	xp_complex_mult r3, r4, XX m3[rbp], XX m4[rbp], r7, r8
+	xload	r7, XMM_TMP1 		;; Restore r7
+	xload	r8, XMM_TMP2	 	;; Restore r8
+	xstore	XMM_TMP1, r1		;; Save r1
+	xstore	XMM_TMP2, r2		;; Save r2
+	xp_complex_mult r5, r6, XX m5[rbp], XX m6[rbp], r1, r2
+	xp_complex_mult r7, r8, XX m7[rbp], XX m8[rbp], r1, r2
+	xload	r1, XMM_TMP1 		;; Restore r1
+	xload	r2, XMM_TMP2	 	;; Restore r2
+	ENDM
+
+xs4c_mulf MACRO r1,r2,r3,r4,r5,r6,r7,r8,m1,m2,m3,m4,m5,m6,m7,m8
+	movsd	Q XMM_TMP1, r7		;; Save r7
+	movsd	Q XMM_TMP2, r8		;; Save r8
+	xs_complex_mult r1, r2, Q m1[rbp], Q m2[rbp], r7, r8
+	xs_complex_mult r3, r4, Q m3[rbp], Q m4[rbp], r7, r8
+	movsd	r7, Q XMM_TMP1 		;; Restore r7
+	movsd	r8, Q XMM_TMP2	 	;; Restore r8
+	movsd	Q XMM_TMP1, r1		;; Save r1
+	movsd	Q XMM_TMP2, r2		;; Save r2
+	xs_complex_mult r5, r6, Q m5[rbp], Q m6[rbp], r1, r2
+	xs_complex_mult r7, r8, Q m7[rbp], Q m8[rbp], r1, r2
+	movsd	r1, Q XMM_TMP1 		;; Restore r1
+	movsd	r2, Q XMM_TMP2	 	;; Restore r2
+	ENDM
+
+;; Do the brute-force multiplication of the 7 words near the half-way point.
+;; These seven words were copied to an area 32-96 bytes before the FFT data.
+;; This is done for zero-padded FFTs only.
+
+xmult7	MACRO	src1, src2
+	LOCAL	nozpad
+	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
+	je	nozpad			;; No, skip 7 word multiply
+	movsd	xmm0, Q [src1-40]	;; Result0 = word0 * word0
+	mulsd	xmm0, Q [src2-40]
+	movsd	xmm1, Q [src1-48]	;;	   + word1 * word-1
+	mulsd	xmm1, Q [src2-72]
+	addsd	xmm0, xmm1
+	movsd	xmm2, Q [src1-56]	;;	   + word2 * word-2
+	mulsd	xmm2, Q [src2-80]
+	addsd	xmm0, xmm2
+	movsd	xmm3, Q [src1-64]	;;	   + word3 * word-3
+	mulsd	xmm3, Q [src2-88]
+	addsd	xmm0, xmm3
+	movsd	xmm1, Q [src1-72]	;;	   + word-1 * word1
+	mulsd	xmm1, Q [src2-48]
+	addsd	xmm0, xmm1
+	movsd	xmm2, Q [src1-80]	;;	   + word-2 * word2
+	mulsd	xmm2, Q [src2-56]
+	addsd	xmm0, xmm2
+	movsd	xmm3, Q [src1-88]	;;	   + word-3 * word3
+	mulsd	xmm3, Q [src2-64]
+	addsd	xmm0, xmm3
+	movsd	ZPAD0, xmm0
+
+	movsd	xmm0, Q [src1-40]	;; Result1 = word0 * word1
+	mulsd	xmm0, Q [src2-48]
+	movsd	xmm1, Q [src1-48]	;;	   + word1 * word0
+	mulsd	xmm1, Q [src2-40]
+	addsd	xmm0, xmm1
+	movsd	xmm2, Q [src1-56]	;;	   + word2 * word-1
+	mulsd	xmm2, Q [src2-72]
+	addsd	xmm0, xmm2
+	movsd	xmm3, Q [src1-64]	;;	   + word3 * word-2
+	mulsd	xmm3, Q [src2-80]
+	addsd	xmm0, xmm3
+	movsd	xmm2, Q [src1-72]	;;	   + word-1 * word2
+	mulsd	xmm2, Q [src2-56]
+	addsd	xmm0, xmm2
+	movsd	xmm3, Q [src1-80]	;;	   + word-2 * word3
+	mulsd	xmm3, Q [src2-64]
+	addsd	xmm0, xmm3
+	movsd	ZPAD1, xmm0
+
+	movsd	xmm0, Q [src1-40]	;; Result2 = word0 * word2
+	mulsd	xmm0, Q [src2-56]
+	movsd	xmm1, Q [src1-48]	;;	   + word1 * word1
+	mulsd	xmm1, Q [src2-48]
+	addsd	xmm0, xmm1
+	movsd	xmm2, Q [src1-56]	;;	   + word2 * word0
+	mulsd	xmm2, Q [src2-40]
+	addsd	xmm0, xmm2
+	movsd	xmm3, Q [src1-64]	;;	   + word3 * word-1
+	mulsd	xmm3, Q [src2-72]
+	addsd	xmm0, xmm3
+	movsd	xmm3, Q [src1-72]	;;	   + word-1 * word3
+	mulsd	xmm3, Q [src2-64]
+	addsd	xmm0, xmm3
+	movsd	ZPAD2, xmm0
+
+	movsd	xmm0, Q [src1-40]	;; Result3 = word0 * word3
+	mulsd	xmm0, Q [src2-64]
+	movsd	xmm1, Q [src1-48]	;;	   + word1 * word2
+	mulsd	xmm1, Q [src2-56]
+	addsd	xmm0, xmm1
+	movsd	xmm2, Q [src1-56]	;;	   + word2 * word1
+	mulsd	xmm2, Q [src2-48]
+	addsd	xmm0, xmm2
+	movsd	xmm3, Q [src1-64]	;;	   + word3 * word0
+	mulsd	xmm3, Q [src2-40]
+	addsd	xmm0, xmm3
+	movsd	ZPAD3, xmm0
+
+	movsd	xmm0, Q [src1-48]	;; Result4 = word1 * word3
+	mulsd	xmm0, Q [src2-64]
+	movsd	xmm1, Q [src1-56]	;;	   + word2 * word2
+	mulsd	xmm1, Q [src2-56]
+	addsd	xmm0, xmm1
+	movsd	xmm2, Q [src1-64]	;;	   + word3 * word1
+	mulsd	xmm2, Q [src2-48]
+	addsd	xmm0, xmm2
+	movsd	ZPAD4, xmm0
+
+	movsd	xmm0, Q [src1-56]	;; Result5 = word2 * word3
+	mulsd	xmm0, Q [src2-64]
+	movsd	xmm1, Q [src1-64]	;;	   + word3 * word2
+	mulsd	xmm1, Q [src2-56]
+	addsd	xmm0, xmm1
+	movsd	ZPAD5, xmm0
+
+	movsd	xmm0, Q [src1-64]	;; Result6 = word3 * word3
+	mulsd	xmm0, Q [src2-64]
+	movsd	ZPAD6, xmm0
+
+nozpad:
+	ENDM
+

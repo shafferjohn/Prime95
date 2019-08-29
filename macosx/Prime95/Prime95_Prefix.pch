@@ -1,0 +1,7 @@
+//
+// Prefix header for all source files of the 'Prime95' target in the 'Prime95' project
+//
+
+#ifdef __OBJC__
+    #import <Cocoa/Cocoa.h>
+#endif

@@ -1,0 +1,32 @@
+# Makefile for Haiku gwnum library
+#
+
+CC = gcc
+CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -O2 -march=i586 -malign-double
+
+CPP = g++
+CPPFLAGS = -I.. -I../qd -O2 -march=i586 -malign-double
+
+AR = ar
+
+HAIKUOBJS = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o ecmstag1.o
+
+LIB = gwnum.a
+
+#########################################################################
+
+$(LIB): $(HAIKUOBJS)
+	cp linux/gwnum.a .
+	$(AR) -rs $(LIB) $(HAIKUOBJS)
+
+clean:
+	rm -f $(HAIKUOBJS)
+
+distclean: clean
+	rm -f $(LIB)
+
+.c.o:
+	$(CC) $(CFLAGS) -c $<
+
+.cpp.o:
+	$(CPP) $(CPPFLAGS) -c $<

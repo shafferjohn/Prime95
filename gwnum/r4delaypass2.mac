@@ -1,0 +1,233 @@
+; Copyright 2009-2010 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros do the second pass of a radix-4 2 pass FFTs using SSE2 instructions.
+;
+
+INCLUDE r4pass2.mac
+
+;;
+;; Wrapper macros for the r4delay 2nd passes
+
+
+IFDEF  WONT_WORK_BECAUSE_NORMALIZE_ADD_SUB_CODE_EXPECTS_PASS2_IS_MULTIPLE_OF_8KB
+r4delay_pass2_192_levels_real MACRO
+;	r4_pass2_192_levels_real
+	ENDM
+
+r4delay_pass2_192_levels_complex MACRO
+	r4_pass2_192_levels_complex
+	ENDM
+ENDIF
+
+r4delay_pass2_8_levels_real MACRO
+	r4_pass2_8_levels_real
+	ENDM
+
+r4delay_pass2_8_levels_complex MACRO
+	r4_pass2_8_levels_complex
+	ENDM
+
+
+
+r4delay_pass2_768_levels_real MACRO
+	r4_pass2_768_levels_real
+	ENDM
+
+r4delay_pass2_768_levels_complex MACRO
+	r4_pass2_768_levels_complex
+	ENDM
+
+r4delay_pass2_10_levels_real MACRO
+	r4_pass2_10_levels_real
+	ENDM
+
+r4delay_pass2_10_levels_complex MACRO
+	r4_pass2_10_levels_complex
+	ENDM
+
+r4delay_pass2_1280_levels_real MACRO
+	r4_pass2_1280_levels_real
+	ENDM
+
+r4delay_pass2_1280_levels_complex MACRO
+	r4_pass2_1280_levels_complex
+	ENDM
+
+
+
+r4delay_pass2_1536_levels_real MACRO
+	r4_pass2_1536_levels_real
+	ENDM
+
+r4delay_pass2_1536_levels_complex MACRO
+	r4_pass2_1536_levels_complex
+	ENDM
+
+r4delay_pass2_11_levels_real MACRO
+	r4_pass2_11_levels_real
+	ENDM
+
+r4delay_pass2_11_levels_complex MACRO
+	r4_pass2_11_levels_complex
+	ENDM
+
+r4delay_pass2_2560_levels_real MACRO
+	r4_pass2_2560_levels_real
+	ENDM
+
+r4delay_pass2_2560_levels_complex MACRO
+	r4_pass2_2560_levels_complex
+	ENDM
+
+
+
+r4delay_pass2_2304_levels_real MACRO
+	r4_pass2_2304_levels_real
+	ENDM
+
+r4delay_pass2_2304_levels_complex MACRO
+	r4_pass2_2304_levels_complex
+	ENDM
+
+r4delay_pass2_3072_levels_real MACRO
+	r4_pass2_3072_levels_real
+	ENDM
+
+r4delay_pass2_3072_levels_complex MACRO
+	r4_pass2_3072_levels_complex
+	ENDM
+
+r4delay_pass2_3840_levels_real MACRO
+	r4_pass2_3840_levels_real
+	ENDM
+
+r4delay_pass2_3840_levels_complex MACRO
+	r4_pass2_3840_levels_complex
+	ENDM
+
+r4delay_pass2_12_levels_real MACRO
+	r4_pass2_12_levels_real
+	ENDM
+
+r4delay_pass2_12_levels_complex MACRO
+	r4_pass2_12_levels_complex
+	ENDM
+
+r4delay_pass2_5120_levels_real MACRO
+	r4_pass2_5120_levels_real
+	ENDM
+
+r4delay_pass2_5120_levels_complex MACRO
+	r4_pass2_5120_levels_complex
+	ENDM
+
+r4delay_pass2_6400_levels_real MACRO
+	r4_pass2_6400_levels_real
+	ENDM
+
+r4delay_pass2_6400_levels_complex MACRO
+	r4_pass2_6400_levels_complex
+	ENDM
+
+
+
+r4delay_pass2_4608_levels_real MACRO
+	r4_pass2_4608_levels_real
+	ENDM
+
+r4delay_pass2_4608_levels_complex MACRO
+	r4_pass2_4608_levels_complex
+	ENDM
+
+r4delay_pass2_6144_levels_real MACRO
+	r4_pass2_6144_levels_real
+	ENDM
+
+r4delay_pass2_6144_levels_complex MACRO
+	r4_pass2_6144_levels_complex
+	ENDM
+
+r4delay_pass2_7680_levels_real MACRO
+	r4_pass2_7680_levels_real
+	ENDM
+
+r4delay_pass2_7680_levels_complex MACRO
+	r4_pass2_7680_levels_complex
+	ENDM
+
+r4delay_pass2_13_levels_real MACRO
+	r4_pass2_13_levels_real
+	ENDM
+
+r4delay_pass2_13_levels_complex MACRO
+	r4_pass2_13_levels_complex
+	ENDM
+
+r4delay_pass2_10240_levels_real MACRO
+	r4_pass2_10240_levels_real
+	ENDM
+
+r4delay_pass2_10240_levels_complex MACRO
+	r4_pass2_10240_levels_complex
+	ENDM
+
+r4delay_pass2_12800_levels_real MACRO
+	r4_pass2_12800_levels_real
+	ENDM
+
+r4delay_pass2_12800_levels_complex MACRO
+	r4_pass2_12800_levels_complex
+	ENDM
+
+
+
+r4delay_pass2_9216_levels_real MACRO
+	r4_pass2_9216_levels_real
+	ENDM
+
+r4delay_pass2_9216_levels_complex MACRO
+	r4_pass2_9216_levels_complex
+	ENDM
+
+r4delay_pass2_12288_levels_real MACRO
+	r4_pass2_12288_levels_real
+	ENDM
+
+r4delay_pass2_12288_levels_complex MACRO
+	r4_pass2_12288_levels_complex
+	ENDM
+
+r4delay_pass2_15360_levels_real MACRO
+	r4_pass2_15360_levels_real
+	ENDM
+
+r4delay_pass2_15360_levels_complex MACRO
+	r4_pass2_15360_levels_complex
+	ENDM
+
+r4delay_pass2_14_levels_real MACRO
+	r4_pass2_14_levels_real
+	ENDM
+
+r4delay_pass2_14_levels_complex MACRO
+	r4_pass2_14_levels_complex
+	ENDM
+
+r4delay_pass2_20480_levels_real MACRO
+	r4_pass2_20480_levels_real
+	ENDM
+
+r4delay_pass2_20480_levels_complex MACRO
+	r4_pass2_20480_levels_complex
+	ENDM
+
+r4delay_pass2_25600_levels_real MACRO
+	r4_pass2_25600_levels_real
+	ENDM
+
+r4delay_pass2_25600_levels_complex MACRO
+	r4_pass2_25600_levels_complex
+	ENDM
+

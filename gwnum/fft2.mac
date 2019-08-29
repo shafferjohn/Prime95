@@ -1,0 +1,266 @@
+; Copyright 1998-2007 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros take the basic FFT building blocks and build even
+; larger building blocks.
+;
+
+; ********************************************************
+; ********************************************************
+; ********************  FFT MACROS  **********************
+; ********************************************************
+; ********************************************************
+
+
+;; Perform a 5K-element FFT.  This is done in two passes.  Pass 1
+;; does 5 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft5120 MACRO
+	pass1levels5pfa5 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 6K-element FFT.  This is done in two passes.  Pass 1
+;; does 5 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft6144 MACRO
+	pass1levels5pfa6 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 6K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 5 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft6144p MACRO
+	pass1levels5complex3 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 7K-element FFT.  This is done in two passes.  Pass 1
+;; does 5 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft7168 MACRO
+	pass1levels5pfa7 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 8K-element FFT.  This is done in two passes.  Pass 1
+;; does 5 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft8192 MACRO
+	pass1levels5pfa8 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 8K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 5 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft8192p MACRO
+	pass1levels5complex4 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 10K-element FFT.  This is done in two passes.  Pass 1
+;; does 6 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft10K MACRO
+	pass1levels6pfa5 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 12K-element FFT.  This is done in two passes.  Pass 1
+;; does 6 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft12K MACRO
+	pass1levels6pfa6 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 12K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 6 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft12Kp MACRO
+	pass1levels6complex3 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 14K-element FFT.  This is done in two passes.  Pass 1
+;; does 6 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft14K MACRO
+	pass1levels6pfa7 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 16K-element FFT.  This is done in two passes.  Pass 1
+;; does 6 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft16K MACRO
+	pass1levels6pfa8 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 16K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 6 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft16Kp MACRO
+	pass1levels6complex4 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 20K-element FFT.  This is done in two passes.  Pass 1
+;; does 7 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft20K MACRO
+	pass1levels7pfa5 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 24K-element FFT.  This is done in two passes.  Pass 1
+;; does 7 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft24K MACRO
+	pass1levels7pfa6 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 24K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 7 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft24Kp MACRO
+	pass1levels7complex3 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 28K-element FFT.  This is done in two passes.  Pass 1
+;; does 7 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft28K MACRO
+	pass1levels7pfa7 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 32K-element FFT.  This is done in two passes.  Pass 1
+;; does 7 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft32K MACRO
+	pass1levels7pfa8 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 32K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 7 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft32Kp MACRO
+	pass1levels7complex4 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 40K-element FFT.  This is done in two passes.  Pass 1
+;; does 8 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft40K MACRO
+	pass1levels8pfa5 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 48K-element FFT.  This is done in two passes.  Pass 1
+;; does 8 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft48K MACRO
+	pass1levels8pfa6 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 48K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 8 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft48Kp MACRO
+	pass1levels8complex3 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 56K-element FFT.  This is done in two passes.  Pass 1
+;; does 8 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft56K MACRO
+	pass1levels8pfa7 pass2_8_levels, 128, 4
+	ENDM
+
+;; Perform a 64K-element FFT.  This is done in two passes.  Pass 1
+;; does 8 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft64K MACRO
+	pass1levels8pfa8 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 64K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 8 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft64Kp MACRO
+	pass1levels8complex4 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 80K-element FFT.  This is done in two passes.  Pass 1
+;; does 9 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft80K MACRO
+	pass1levels9pfa5 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 96K-element FFT.  This is done in two passes.  Pass 1
+;; does 9 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft96K MACRO
+	pass1levels9pfa6 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 96K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 9 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft96Kp MACRO
+	pass1levels9complex3 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 112K-element FFT.  This is done in two passes.  Pass 1
+;; does 9 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft112K MACRO
+	pass1levels9pfa7 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 128K-element FFT.  This is done in two passes.  Pass 1
+;; does 9 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft128K MACRO
+	pass1levels9pfa8 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 128K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 9 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft128Kp MACRO
+	pass1levels9complex4 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 160K-element FFT.  This is done in two passes.  Pass 1
+;; does 10 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft160K MACRO
+	pass1levels10pfa5 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 192K-element FFT.  This is done in two passes.  Pass 1
+;; does 10 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft192K MACRO
+	pass1levels10pfa6 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 192K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 10 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft192Kp MACRO
+	pass1levels10complex3 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 224K-element FFT.  This is done in two passes.  Pass 1
+;; does 10 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft224K MACRO
+	pass1levels10pfa7 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 256K-element FFT.  This is done in two passes.  Pass 1
+;; does 10 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft256K MACRO
+	pass1levels10pfa8 pass2_8_levels, 128, 2
+	ENDM
+
+;; Perform a 256K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; does 10 levels, pass 2 uses common code to perform the last 8 levels.
+
+fft256Kp MACRO
+	pass1levels10complex4 pass2_8_levels, 128, 2
+	ENDM

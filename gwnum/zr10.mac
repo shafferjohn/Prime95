@@ -1,0 +1,1329 @@
+; Copyright 2018 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+
+;;
+;; All new macros for version 29 of gwnum.  Do a radix-10 step in an FFT.
+;; The forward FFT macros multiply by the sin/cos values at the end of the macro
+;; and the inverse FFTs multiply by the sin/cos values at the start of the macro.
+;; We also implement the Daniel J. Bernstein (DJB) "exponent-1" idea to save sin/cos
+;; memory.
+;;
+
+
+;;
+;; ************************************* ten-complex-djbfft variants ******************************************
+;;
+
+;;; BUG - do we need to support more distance input arguments (since distance is divisible by 2)??  would allow more use of dist32?
+
+;; The standard version
+zr10_ten_complex_djbfft_preload MACRO
+	zr10_10c_djbfft_cmn_preload
+	ENDM
+zr10_ten_complex_djbfft MACRO srcreg,srcinc,d1,screg,scinc,maxrpt,L1pt,L1pd
+	zr10_10c_djbfft_cmn srcreg,0,srcinc,d1,noexec,screg,scinc,maxrpt,L1pt,L1pd
+	ENDM
+
+;; Like the standard version but uses optional [rbx] source addressing for first levels of pass 2
+zr10f_ten_complex_djbfft_preload MACRO
+	zr10_10c_djbfft_cmn_preload
+	ENDM
+zr10f_ten_complex_djbfft MACRO srcreg,srcinc,d1,screg,scinc,maxrpt,L1pt,L1pd
+	zr10_10c_djbfft_cmn srcreg,rbx,srcinc,d1,noexec,screg,scinc,maxrpt,L1pt,L1pd
+	ENDM
+
+; Like the standard version except vbroadcastsd is used to reduce sin/cos data
+zr10b_ten_complex_djbfft_preload MACRO
+	zr10_10c_djbfft_cmn_preload
+	ENDM
+zr10b_ten_complex_djbfft MACRO srcreg,srcinc,d1,screg,scinc,maxrpt,L1pt,L1pd
+	zr10_10c_djbfft_cmn srcreg,0,srcinc,d1,exec,screg,scinc,maxrpt,L1pt,L1pd
+	ENDM
+
+
+;; Common macro to operate on 10 complex values doing 3.322 levels of the FFT, applying
+;; the sin/cos multipliers afterwards.
+
+;; To calculate a 10-complex FFT in a brute force way (using a shorthand notation):
+;; c1 + c2 + ... + c10 * w^0000000000
+;; c1 + c2 + ... + c10 * w^0123456789
+;; c1 + c2 + ... + c10 * w^0246802468
+;; ...
+;; c1 + c2 + ... + c10 * w^0864208642
+;; c1 + c2 + ... + c10 * w^0987654231
+;;
+;; The sin/cos values (w = 10th root of unity) are:
+;; w^1 =  .809 + .588i
+;; w^2 =  .309 + .951i
+;; w^3 = -.309 + .951i
+;; w^4 = -.809 + .588i
+;; w^5 = -1
+
+;; Applying the sin/cos values above:
+;; reals:
+;; r1     +r2     +r3     +r4     +r5 + r6     +r7     +r8     +r9     +r10
+;; r1 +.809r2 +.309r3 -.309r4 -.809r5 - r6 -.809r7 -.309r8 +.309r9 +.809r10 -.588i2 -.951i3 -.951i4 -.588i5 +.588i7 +.951i8 +.951i9 +.588i10
+;; r1 +.309r2 -.809r3 -.809r4 +.309r5 + r6 +.309r7 -.809r8 -.809r9 +.309r10 -.951i2 -.588i3 +.588i4 +.951i5 -.951i7 -.588i8 +.588i9 +.951i10
+;; r1 -.309r2 -.809r3 +.809r4 +.309r5 - r6 +.309r7 +.809r8 -.809r9 -.309r10 -.951i2 +.588i3 +.588i4 -.951i5 +.951i7 -.588i8 -.588i9 +.951i10
+;; r1 -.809r2 +.309r3 +.309r4 -.809r5 + r6 -.809r7 +.309r8 +.309r9 -.809r10 -.588i2 +.951i3 -.951i4 +.588i5 -.588i7 +.951i8 -.951i9 +.588i10
+;; r1     -r2     +r3     -r4     +r5 - r6     +r7     -r8     +r9     -r10
+;; r1 -.809r2 +.309r3 +.309r4 -.809r5 + r6 -.809r7 +.309r8 +.309r9 -.809r10 +.588i2 -.951i3 +.951i4 -.588i5 +.588i7 -.951i8 +.951i9 -.588i10
+;; r1 -.309r2 -.809r3 +.809r4 +.309r5 - r6 +.309r7 +.809r8 -.809r9 -.309r10 +.951i2 -.588i3 -.588i4 +.951i5 -.951i7 +.588i8 +.588i9 -.951i10
+;; r1 +.309r2 -.809r3 -.809r4 +.309r5 + r6 +.309r7 -.809r8 -.809r9 +.309r10 +.951i2 +.588i3 -.588i4 -.951i5 +.951i7 +.588i8 -.588i9 -.951i10
+;; r1 +.809r2 +.309r3 -.309r4 -.809r5 - r6 -.809r7 -.309r8 +.309r9 +.809r10 +.588i2 +.951i3 +.951i4 +.588i5 -.588i7 -.951i8 -.951i9 -.588i10
+
+;; imaginarys:
+;;                                                                  +i1     +i2     +i3     +i4     +i5  +i6     +i7     +i8     +i9     +i10
+;; +.588r2 +.951r3 +.951r4 +.588r5 -.588r7 -.951r8 -.951r9 -.588r10 +i1 +.809i2 +.309i3 -.309i4 -.809i5  -i6 -.809i7 -.309i8 +.309i9 +.809i10
+;; +.951r2 +.588r3 -.588r4 -.951r5 +.951r7 +.588r8 -.588r9 -.951r10 +i1 +.309i2 -.809i3 -.809i4 +.309i5  +i6 +.309i7 -.809i8 -.809i9 +.309i10
+;; +.951r2 -.588r3 -.588r4 +.951r5 -.951r7 +.588r8 +.588r9 -.951r10 +i1 -.309i2 -.809i3 +.809i4 +.309i5  -i6 +.309i7 +.809i8 -.809i9 -.309i10
+;; +.588r2 -.951r3 +.951r4 -.588r5 +.588r7 -.951r8 +.951r9 -.588r10 +i1 -.809i2 +.309i3 +.309i4 -.809i5  +i6 -.809i7 +.309i8 +.309i9 -.809i10
+;;                                                                  +i1     -i2     +i3     -i4     +i5  -i6     +i7     -i8     +i9     -i10
+;; -.588r2 +.951r3 -.951r4 +.588r5 -.588r7 +.951r8 -.951r9 +.588r10 +i1 -.809i2 +.309i3 +.309i4 -.809i5  +i6 -.809i7 +.309i8 +.309i9 -.809i10
+;; -.951r2 +.588r3 +.588r4 -.951r5 +.951r7 -.588r8 -.588r9 +.951r10 +i1 -.309i2 -.809i3 +.809i4 +.309i5  -i6 +.309i7 +.809i8 -.809i9 -.309i10
+;; -.951r2 -.588r3 +.588r4 +.951r5 -.951r7 -.588r8 +.588r9 +.951r10 +i1 +.309i2 -.809i3 -.809i4 +.309i5  +i6 +.309i7 -.809i8 -.809i9 +.309i10
+;; -.588r2 -.951r3 -.951r4 -.588r5 +.588r7 +.951r8 +.951r9 +.588r10 +i1 +.809i2 +.309i3 -.309i4 -.809i5  -i6 -.809i7 -.309i8 +.309i9 +.809i10
+
+;; Massive rearranging, we get:
+;;R1 = (r1+r6)     +((r2+r7)+(r5+r10))     +((r3+r8)+(r4+r9))
+;;R3 = (r1+r6) +.309((r2+r7)+(r5+r10)) -.809((r3+r8)+(r4+r9)) -.951((i2+i7)-(i5+i10)) -.588((i3+i8)-(i4+i9))
+;;R9 = (r1+r6) +.309((r2+r7)+(r5+r10)) -.809((r3+r8)+(r4+r9)) +.951((i2+i7)-(i5+i10)) +.588((i3+i8)-(i4+i9))
+;;R5 = (r1+r6) -.809((r2+r7)+(r5+r10)) +.309((r3+r8)+(r4+r9)) -.588((i2+i7)-(i5+i10)) +.951((i3+i8)-(i4+i9))
+;;R7 = (r1+r6) -.809((r2+r7)+(r5+r10)) +.309((r3+r8)+(r4+r9)) +.588((i2+i7)-(i5+i10)) -.951((i3+i8)-(i4+i9))
+
+;;R6 = (r1-r6)     -((r2-r7)-(r5-r10))     +((r3-r8)-(r4-r9))
+;;R2 = (r1-r6) +.809((r2-r7)-(r5-r10)) +.309((r3-r8)-(r4-r9)) -.588((i2-i7)+(i5-i10)) -.951((i3-i8)+(i4-i9))
+;;R10= (r1-r6) +.809((r2-r7)-(r5-r10)) +.309((r3-r8)-(r4-r9)) +.588((i2-i7)+(i5-i10)) +.951((i3-i8)+(i4-i9))
+;;R4 = (r1-r6) -.309((r2-r7)-(r5-r10)) -.809((r3-r8)-(r4-r9)) -.951((i2-i7)+(i5-i10)) +.588((i3-i8)+(i4-i9))
+;;R8 = (r1-r6) -.309((r2-r7)-(r5-r10)) -.809((r3-r8)-(r4-r9)) +.951((i2-i7)+(i5-i10)) -.588((i3-i8)+(i4-i9))
+
+;;I1 = (i1+i6)     +((i2+i7)+(i5+i10))     +((i3+i8)+(i4+i9))
+;;I3 = (i1+i6) +.309((i2+i7)+(i5+i10)) -.809((i3+i8)+(i4+i9)) +.951((r2+r7)-(r5+r10)) +.588((r3+r8)-(r4+r9))
+;;I9 = (i1+i6) +.309((i2+i7)+(i5+i10)) -.809((i3+i8)+(i4+i9)) -.951((r2+r7)-(r5+r10)) -.588((r3+r8)-(r4+r9))
+;;I5 = (i1+i6) -.809((i2+i7)+(i5+i10)) +.309((i3+i8)+(i4+i9)) +.588((r2+r7)-(r5+r10)) -.951((r3+r8)-(r4+r9))
+;;I7 = (i1+i6) -.809((i2+i7)+(i5+i10)) +.309((i3+i8)+(i4+i9)) -.588((r2+r7)-(r5+r10)) +.951((r3+r8)-(r4+r9))
+
+;;I6 = (i1-i6)     -((i2-i7)-(i5-i10))     +((i3-i8)-(i4-i9))
+;;I2 = (i1-i6) +.809((i2-i7)-(i5-i10)) +.309((i3-i8)-(i4-i9)) +.588((r2-r7)+(r5-r10)) +.951((r3-r8)+(r4-r9))
+;;I10= (i1-i6) +.809((i2-i7)-(i5-i10)) +.309((i3-i8)-(i4-i9)) -.588((r2-r7)+(r5-r10)) -.951((r3-r8)+(r4-r9))
+;;I4 = (i1-i6) -.309((i2-i7)-(i5-i10)) -.809((i3-i8)-(i4-i9)) +.951((r2-r7)+(r5-r10)) -.588((r3-r8)+(r4-r9))
+;;I8 = (i1-i6) -.309((i2-i7)-(i5-i10)) -.809((i3-i8)-(i4-i9)) -.951((r2-r7)+(r5-r10)) +.588((r3-r8)+(r4-r9))
+
+zr10_10c_djbfft_cmn_preload MACRO
+	vbroadcastsd zmm31, ZMM_P309		;; .309
+	vbroadcastsd zmm30, ZMM_P809		;; .809
+	vbroadcastsd zmm29, ZMM_P588_P951	;; .588/.951
+	vbroadcastsd zmm28, ZMM_P951		;; .951
+	ENDM
+
+zr10_10c_djbfft_cmn MACRO srcreg,srcoff,srcinc,d1,bcast,screg,scinc,maxrpt,L1pt,L1pd
+	vmovapd	zmm1, [srcreg+srcoff+d1]	;; R2
+	vmovapd	zmm6, [srcreg+srcoff+6*d1]	;; R7
+	vaddpd	zmm20, zmm1, zmm6		;; R2+R7						; 1-4		n 11
+	vsubpd	zmm1, zmm1, zmm6		;; R2-R7						; 1-4		n 23
+
+	vmovapd	zmm4, [srcreg+srcoff+4*d1]	;; R5
+	vmovapd	zmm9, [srcreg+srcoff+9*d1]	;; R10
+	vaddpd	zmm6, zmm4, zmm9		;; R5+R10						; 2-5		n 11
+	vsubpd	zmm4, zmm4, zmm9		;; R5-R10						; 2-5		n 23
+
+	vmovapd	zmm11, [srcreg+srcoff+d1+64]	;; I2
+	vmovapd	zmm16, [srcreg+srcoff+6*d1+64]	;; I7
+	vaddpd	zmm9, zmm11, zmm16		;; I2+I7						; 3-6		n 12
+	vsubpd	zmm11, zmm11, zmm16		;; I2-I7						; 3-6		n 24
+
+	vmovapd	zmm14, [srcreg+srcoff+4*d1+64]	;; I5
+	vmovapd	zmm19, [srcreg+srcoff+9*d1+64]	;; I10
+	vaddpd	zmm16, zmm14, zmm19		;; I5+I10						; 4-7		n 12
+	vsubpd	zmm14, zmm14, zmm19		;; I5-I10						; 4-7		n 24
+
+	vmovapd	zmm12, [srcreg+srcoff+2*d1+64]	;; I3
+	vmovapd	zmm17, [srcreg+srcoff+7*d1+64]	;; I8
+	vaddpd	zmm19, zmm12, zmm17		;; I3+I8						; 5-8		n 13
+	vsubpd	zmm12, zmm12, zmm17		;; I3-I8						; 5-8		n 29
+
+	vmovapd	zmm13, [srcreg+srcoff+3*d1+64]	;; I4
+	vmovapd	zmm18, [srcreg+srcoff+8*d1+64]	;; I9
+	vaddpd	zmm17, zmm13, zmm18		;; I4+I9						; 6-9		n 13
+	vsubpd	zmm13, zmm13, zmm18		;; I4-I9						; 6-9		n 29
+
+	vmovapd	zmm2, [srcreg+srcoff+2*d1]	;; R3
+	vmovapd	zmm7, [srcreg+srcoff+7*d1]	;; R8
+	vaddpd	zmm18, zmm2, zmm7		;; R3+R8						; 7-10		n 14
+	vsubpd	zmm2, zmm2, zmm7		;; R3-R8						; 7-10		n 28
+
+	vmovapd	zmm3, [srcreg+srcoff+3*d1]	;; R4
+	vmovapd	zmm8, [srcreg+srcoff+8*d1]	;; R9
+	vaddpd	zmm7, zmm3, zmm8		;; R4+R9						; 8-11		n 14
+	vsubpd	zmm3, zmm3, zmm8		;; R4-R9						; 8-11		n 28
+
+	vmovapd	zmm0, [srcreg+srcoff]		;; R1
+	vmovapd	zmm5, [srcreg+srcoff+5*d1]	;; R6
+	vaddpd	zmm8, zmm0, zmm5		;; R1+R6						; 9-12		n 15
+	vsubpd	zmm0, zmm0, zmm5		;; R1-R6						; 9-12		n 34
+
+	vmovapd	zmm10, [srcreg+srcoff+64]	;; I1
+	vmovapd	zmm15, [srcreg+srcoff+5*d1+64]	;; I6
+	vaddpd	zmm5, zmm10, zmm15		;; I1+I6						; 10-13		n 16
+	vsubpd	zmm10, zmm10, zmm15		;; I1-I6						; 10-13		n 35
+
+	L1prefetchw srcreg+L1pd, L1pt
+	vaddpd	zmm15, zmm20, zmm6		;; r2++ = (r2+r7) + (r5+r10)				; 11-14		n 15
+	vsubpd	zmm20, zmm20, zmm6		;; r2+- = (r2+r7) - (r5+r10)				; 11-14		n 19
+	L1prefetchw srcreg+64+L1pd, L1pt
+	vaddpd	zmm6, zmm9, zmm16		;; i2++ = (i2+i7) + (i5+i10)				; 12-15		n 16
+	vsubpd	zmm9, zmm9, zmm16		;; i2+- = (i2+i7) - (i5+i10)				; 12-15		n 18
+
+	L1prefetchw srcreg+d1+L1pd, L1pt
+	vaddpd	zmm16, zmm19, zmm17		;; i3++ = (i3+i8) + (i4+i9)				; 13-16		n 21
+	vsubpd	zmm19, zmm19, zmm17		;; i3+- = (i3+i8) - (i4+i9)				; 13-16		n 18
+	L1prefetchw srcreg+d1+64+L1pd, L1pt
+	vaddpd	zmm17, zmm18, zmm7		;; r3++ = (r3+r8) + (r4+r9)				; 14-17		n 20
+	vsubpd	zmm18, zmm18, zmm7		;; r3+- = (r3+r8) - (r4+r9)				; 14-17		n 19
+
+	L1prefetchw srcreg+2*d1+L1pd, L1pt
+	vaddpd	zmm7, zmm8, zmm15		;; R1   = (r1+r6) + (r2++)				; 15-18		n 20
+	zfmaddpd zmm21, zmm15, zmm31, zmm8	;; R39r = (r1+r6) + .309(r2++)				; 15-18		n 20
+	L1prefetchw srcreg+2*d1+64+L1pd, L1pt
+	zfnmaddpd zmm15, zmm15, zmm30, zmm8	;; R57r = (r1+r6) - .809(r2++)				; 16-19		n 21
+	vaddpd	zmm8, zmm5, zmm6		;; I1   = (i1+i6) + (i2++)				; 16-19		n 21
+	L1prefetchw srcreg+3*d1+L1pd, L1pt
+	zfmaddpd zmm22, zmm6, zmm31, zmm5	;; I39i = (i1+i6) + .309(i2++)				; 17-20		n 22
+	zfnmaddpd zmm6, zmm6, zmm30, zmm5	;; I57i = (i1+i6) - .809(i2++)				; 17-20		n 22
+
+	L1prefetchw srcreg+3*d1+64+L1pd, L1pt
+	zfmaddpd zmm5, zmm19, zmm29, zmm9	;; R39i = (i2+-) + .588/.951(i3+-)			; 18-21		n 30
+	zfmsubpd zmm9, zmm9, zmm29, zmm19	;; R57i = .588/.951(i2+-) - (i3+-)			; 18-21		n 32
+	L1prefetchw srcreg+4*d1+L1pd, L1pt
+	zfmaddpd zmm19, zmm18, zmm29, zmm20	;; I39r = (r2+-) + .588/.951(r3+-)			; 19-22		n 31
+	zfmsubpd zmm20, zmm20, zmm29, zmm18	;; I57r = .588/.951(r2+-) - (r3+-)			; 19-22		n 33
+
+	L1prefetchw srcreg+4*d1+64+L1pd, L1pt
+	vaddpd	zmm7, zmm7, zmm17		;; R1   = R1 + (r3++)					; 20-23
+	zfnmaddpd zmm21, zmm17, zmm30, zmm21	;; R39r = R39r - .809(r3++)				; 20-23		n 25
+	L1prefetchw srcreg+5*d1+L1pd, L1pt
+	zfmaddpd zmm15, zmm17, zmm31, zmm15	;; R57r = R57r + .309(r3++)				; 21-24		n 26
+	vaddpd	zmm8, zmm8, zmm16		;; I1   = I1 + (i3++)					; 21-24
+	L1prefetchw srcreg+5*d1+64+L1pd, L1pt
+	zfnmaddpd zmm22, zmm16, zmm30, zmm22	;; I39i = I39i - .809(i3++)				; 22-25		n 26
+	zfmaddpd zmm6, zmm16, zmm31, zmm6	;; I57i = I57i + .309(i3++)				; 22-25		n 27
+
+	L1prefetchw srcreg+6*d1+L1pd, L1pt
+	vaddpd	zmm17, zmm1, zmm4		;; r2-+ = (r2-r7) + (r5-r10)				; 23-26		n 43
+	vsubpd	zmm1, zmm1, zmm4		;; r2-- = (r2-r7) - (r5-r10)				; 23-26		n 34
+	L1prefetchw srcreg+6*d1+64+L1pd, L1pt
+	vaddpd	zmm16, zmm11, zmm14		;; i2-+ = (i2-i7) + (i5-i10)				; 24-27		n 42
+	vsubpd	zmm11, zmm11, zmm14		;; i2-- = (i2-i7) - (i5-i10)				; 24-27		n 35
+
+no bcast vmovapd zmm27, [screg+1*128]		;; sine for R3/I3 and R9/I9 (w^2)
+bcast	vbroadcastsd zmm27, Q [screg+1*16]	;; sine for R3/I3 and R9/I9
+	vmulpd	zmm21, zmm21, zmm27		;; R39r = R39r * sine					; 25-28		n 30
+	vmulpd	zmm4, zmm28, zmm27		;; sine39 = .951 * sine					; 25-28		n 30
+	vmulpd	zmm22, zmm22, zmm27		;; I39i = I39i * sine					; 26-29		n 31
+	zstore	[srcreg], zmm7			;; Save R1						; 24
+no bcast vmovapd zmm27, [screg+3*128]		;; sine for R5/I5 and R7/I7 (w^4)
+bcast	vbroadcastsd zmm27, Q [screg+3*16]	;; sine for R5/I5 and R7/I7
+	vmulpd	zmm15, zmm15, zmm27		;; R57r = R57r * sine					; 26-29		n 32
+	vmulpd	zmm14, zmm28, zmm27		;; sine57 = .951 * sine					; 27-30		n 32
+	vmulpd	zmm6, zmm6, zmm27		;; I57i = I57i * sine					; 27-30		n 33
+	zstore	[srcreg+64], zmm8		;; Save I1						; 25
+
+	L1prefetchw srcreg+7*d1+L1pd, L1pt
+	vaddpd	zmm23, zmm2, zmm3		;; r3-+ = (r3-r8) + (r4-r9)				; 28-31		n 43
+	vsubpd	zmm2, zmm2, zmm3		;; r3-- = (r3-r8) - (r4-r9)				; 28-31		n 39
+	L1prefetchw srcreg+7*d1+64+L1pd, L1pt
+	vaddpd	zmm3, zmm12, zmm13		;; i3-+ = (i3-i8) + (i4-i9)				; 29-32		n 42
+	vsubpd	zmm12, zmm12, zmm13		;; i3-- = (i3-i8) - (i4-i9)				; 29-32		n 40
+
+	L1prefetchw srcreg+8*d1+L1pd, L1pt
+	zfnmaddpd zmm13, zmm5, zmm4, zmm21	;; R3 = R39r - .951*R39i				; 30-33		n 37
+	zfmaddpd zmm5, zmm5, zmm4, zmm21	;; R9 = R39r + .951*R39i				; 30-33		n 38
+	L1prefetchw srcreg+8*d1+64+L1pd, L1pt
+	zfmaddpd zmm21, zmm19, zmm4, zmm22	;; I3 = I39i + .951*I39r				; 31-34		n 37
+	zfnmaddpd zmm19, zmm19, zmm4, zmm22	;; I9 = I39i - .951*I39r				; 31-34		n 38
+	L1prefetchw srcreg+9*d1+L1pd, L1pt
+	zfnmaddpd zmm22, zmm9, zmm14, zmm15	;; R5 = R57r - .951*R57i				; 32-35		n 44
+	zfmaddpd zmm9, zmm9, zmm14, zmm15	;; R7 = R57r + .951*R57i				; 32-35		n 45
+	L1prefetchw srcreg+9*d1+64+L1pd, L1pt
+	zfmaddpd zmm15, zmm20, zmm14, zmm6	;; I5 = I57i + .951*I57r				; 33-36		n 44
+	zfnmaddpd zmm20, zmm20, zmm14, zmm6	;; I7 = I57i - .951*I57r				; 33-36		n 45
+
+	vsubpd	zmm4, zmm0, zmm1		;; R6   = (r1-r6) - (r2--)				; 34-37		n 39
+	zfmaddpd zmm14, zmm1, zmm30, zmm0	;; R2Ar = (r1-r6) + .809(r2--)				; 34-37		n 39
+	zfnmaddpd zmm1, zmm1, zmm31, zmm0	;; R48r = (r1-r6) - .309(r2--)				; 35-38		n 40
+	vsubpd	zmm6, zmm10, zmm11		;; I6   = (i1-i6) - (i2--)				; 35-38		n 40
+	zfmaddpd zmm0, zmm11, zmm30, zmm10	;; I2Ai = (i1-i6) + .809(i2--)				; 36-39		n 41
+	zfnmaddpd zmm11, zmm11, zmm31, zmm10	;; I48i = (i1-i6) - .309(i2--)				; 36-39		n 41
+
+no bcast vmovapd zmm27, [screg+1*128+64]	;; cosine/sine for R3/I3 and R9/I9 (w^2)
+bcast	vbroadcastsd zmm27, Q [screg+1*16+8]	;; cosine/sine for R3/I3 and R9/I9
+	zfmsubpd zmm10, zmm13, zmm27, zmm21	;; A3 = R3 * cosine/sine - I3 (final R3)		; 37-40
+	zfmaddpd zmm21, zmm21, zmm27, zmm13	;; B3 = I3 * cosine/sine + R3 (final I3)		; 37-40
+	zfmaddpd zmm13, zmm5, zmm27, zmm19	;; A9 = R9 * cosine/sine + I9 (final R9)		; 38-41
+	zfmsubpd zmm19, zmm19, zmm27, zmm5	;; B9 = I9 * cosine/sine - R9 (final I9)		; 38-41
+
+	vaddpd	zmm4, zmm4, zmm2		;; R6   = R6 + (r3--)					; 39-42		n 49
+	zfmaddpd zmm14, zmm2, zmm31, zmm14	;; R2Ar = R2Ar + .309(r3--)				; 39-42		n 46
+	zfnmaddpd zmm1, zmm2, zmm30, zmm1	;; R48r = R48r - .809(r3--)				; 40-43		n 47
+	vaddpd	zmm6, zmm6, zmm12		;; I6   = I6 + (i3--)					; 40-43		n 49
+	zfmaddpd zmm0, zmm12, zmm31, zmm0	;; I2Ai = I2Ai + .309(i3--)				; 41-44		n 47
+	zfnmaddpd zmm11, zmm12, zmm30, zmm11	;; I48i = I48i - .809(i3--)				; 41-44		n 48
+	zstore	[srcreg+2*d1], zmm10		;; Save R3						; 41
+
+	zfmaddpd zmm5, zmm16, zmm29, zmm3	;; R2Ai = .588/.951(i2-+) + (i3-+)			; 42-45		n 50
+	zfnmaddpd zmm3, zmm3, zmm29, zmm16	;; R48i = (i2-+) - .588/.951(i3-+)			; 42-45		n 52
+	zstore	[srcreg+2*d1+64], zmm21		;; Save I3						; 41+1
+	zfmaddpd zmm2, zmm17, zmm29, zmm23	;; I2Ar = .588/.951(r2-+) + (r3-+)			; 43-46		n 51
+	zfnmaddpd zmm23, zmm23, zmm29, zmm17	;; I48r = (r2-+) - .588/.951(r3-+)			; 43-46		n 53
+	zstore	[srcreg+8*d1], zmm13		;; Save R9						; 42+1
+
+no bcast vmovapd zmm27, [screg+3*128+64]	;; cosine/sine for R5/I5 and R7/I7 (w^4)
+bcast	vbroadcastsd zmm27, Q [screg+3*16+8]	;; cosine/sine for R5/I5 and R7/I7
+	zfmsubpd zmm12, zmm22, zmm27, zmm15	;; A5 = R5 * cosine/sine - I5 (final R5)		; 44-47
+	zfmaddpd zmm15, zmm15, zmm27, zmm22	;; B5 = I5 * cosine/sine + R5 (final I5)		; 44-47
+	zstore	[srcreg+8*d1+64], zmm19		;; Save I9						; 42+2
+	zfmaddpd zmm16, zmm9, zmm27, zmm20	;; A7 = R7 * cosine/sine + I7 (final R7)		; 45-48
+	zfmsubpd zmm20, zmm20, zmm27, zmm9	;; B7 = I7 * cosine/sine - R7 (final I7)		; 45-48
+
+no bcast vmovapd zmm27, [screg+0*128]		;; sine for R2/I2 and R10/I10 (w^1)
+bcast	vbroadcastsd zmm27, Q [screg+0*16]	;; sine for R2/I2 and R10/I10
+	vmulpd	zmm14, zmm14, zmm27		;; R2Ar = R2Ar * sine					; 46-49		n 50
+	vmulpd	zmm17, zmm28, zmm27		;; sine2A = .951 * sine					; 46-49		n 50
+	vmulpd	zmm0, zmm0, zmm27		;; I2Ai = I2Ai * sine					; 47-50		n 51
+no bcast vmovapd zmm27, [screg+2*128]		;; sine for R4/I4 and R8/I8 (w^3)
+bcast	vbroadcastsd zmm27, Q [screg+2*16]	;; sine for R4/I4 and R8/I8
+	vmulpd	zmm1, zmm1, zmm27		;; R48r = R48r * sine					; 47-50		n 52
+	vmulpd	zmm22, zmm28, zmm27		;; sine48 = .951 * sine					; 48-51		n 52
+	vmulpd	zmm11, zmm11, zmm27		;; I48i = I48i * sine					; 48-51		n 53
+	zstore	[srcreg+4*d1], zmm12		;; Save R5						; 48
+
+no bcast vmovapd zmm27, [screg+4*128+64]	;; cosine/sine for R6/I6 (w^5)
+bcast	vbroadcastsd zmm27, Q [screg+4*16+8]	;; cosine/sine for R6/I6
+	zfmsubpd zmm9, zmm4, zmm27, zmm6	;; A6 = R6 * cosine/sine - I6				; 49-52		n 54
+	zfmaddpd zmm6, zmm6, zmm27, zmm4	;; B6 = I6 * cosine/sine + R6				; 49-52		n 54
+	zstore	[srcreg+4*d1+64], zmm15		;; Save I5						; 48+1
+
+	zfnmaddpd zmm4, zmm5, zmm17, zmm14	;; R2 = R2Ar - .951*R2Ai				; 50-53		n 55
+	zfmaddpd zmm5, zmm5, zmm17, zmm14	;; R10= R2Ar + .951*R2Ai				; 50-53		n 56
+	zstore	[srcreg+6*d1], zmm16		;; Save R7						; 49+1
+	zfmaddpd zmm14, zmm2, zmm17, zmm0	;; I2 = I2Ai + .951*I2Ar				; 51-54		n 55
+	zfnmaddpd zmm2, zmm2, zmm17, zmm0	;; I10= I2Ai - .951*I2Ar				; 51-54		n 56
+	zstore	[srcreg+6*d1+64], zmm20		;; Save I7						; 49+2
+
+	zfnmaddpd zmm0, zmm3, zmm22, zmm1	;; R4 = R48r - .951*R48i				; 52-55		n 57
+	zfmaddpd zmm3, zmm3, zmm22, zmm1	;; R8 = R48r + .951*R48i				; 52-55		n 58
+	zfmaddpd zmm17, zmm23, zmm22, zmm11	;; I4 = I48i + .951*I48r				; 53-56		n 57
+	zfnmaddpd zmm23, zmm23, zmm22, zmm11	;; I8 = I48i - .951*I48r				; 53-56		n 58
+
+no bcast vmovapd zmm27, [screg+4*128]		;; sine for R6/I6 (w^5)
+bcast	vbroadcastsd zmm27, Q [screg+4*16]	;; sine for R6/I6
+	vmulpd	zmm9, zmm9, zmm27		;; A6 = A6 * sine (final R6)				; 54-57
+	vmulpd	zmm6, zmm6, zmm27		;; B6 = B6 * sine (final I6)				; 54-57
+
+no bcast vmovapd zmm27, [screg+0*128+64]	;; cosine/sine for R2/I2 and R10/I10 (w^1)
+bcast	vbroadcastsd zmm27, Q [screg+0*16+8]	;; cosine/sine for R2/I2 and R10/I10
+	zfmsubpd zmm1, zmm4, zmm27, zmm14	;; A2 = R2 * cosine/sine - I2 (final R2)		; 55-58
+	zfmaddpd zmm14, zmm14, zmm27, zmm4	;; B2 = I2 * cosine/sine + R2 (final I2)		; 55-58
+	zfmaddpd zmm11, zmm5, zmm27, zmm2	;; A10 = R10 * cosine/sine + I10 (final R10)		; 56-59
+	zfmsubpd zmm2, zmm2, zmm27, zmm5	;; B10 = I10 * cosine/sine - R10 (final I10)		; 56-59
+
+no bcast vmovapd zmm27, [screg+2*128+64]	;; cosine/sine for R4/I4 and R8/I8 (w^3)
+bcast	vbroadcastsd zmm27, Q [screg+2*16+8]	;; cosine/sine for R4/I4 and R8/I8
+	zfmsubpd zmm22, zmm0, zmm27, zmm17	;; A4 = R4 * cosine/sine - I4 (final R4)		; 57-60
+	zfmaddpd zmm17, zmm17, zmm27, zmm0	;; B4 = I4 * cosine/sine + R4 (final I4)		; 57-60
+	zfmaddpd zmm4, zmm3, zmm27, zmm23	;; A8 = R8 * cosine/sine + I8 (final R8)		; 58-61
+	zfmsubpd zmm23, zmm23, zmm27, zmm3	;; B8 = I8 * cosine/sine - R8 (final I8)		; 58-61
+
+	bump	screg, scinc
+	zstore	[srcreg+5*d1], zmm9		;; Save R6						; 58
+	zstore	[srcreg+5*d1+64], zmm6		;; Save I6						; 58+1
+	zstore	[srcreg+d1], zmm1		;; Save R2						; 59+1
+	zstore	[srcreg+d1+64], zmm14		;; Save I2						; 59+2
+	zstore	[srcreg+9*d1], zmm11		;; Save R10						; 60+2
+	zstore	[srcreg+9*d1+64], zmm2		;; Save I10						; 60+3
+	zstore	[srcreg+3*d1], zmm22		;; Save R4						; 61+3
+	zstore	[srcreg+3*d1+64], zmm17		;; Save I4						; 61+4
+	zstore	[srcreg+7*d1], zmm4		;; Save R8						; 62+4
+	zstore	[srcreg+7*d1+64], zmm23		;; Save I8						; 62+5
+	bump	srcreg, srcinc
+	ENDM
+
+;;
+;; ************************************* ten-complex-djbunfft variants ******************************************
+;;
+
+;; The standard version
+zr10_ten_complex_djbunfft_preload MACRO
+	zr10_10c_djbunfft_cmn_preload
+	ENDM
+zr10_ten_complex_djbunfft MACRO srcreg,srcinc,d1,screg,scinc,maxrpt,L1pt,L1pd
+	zr10_10c_djbunfft_cmn srcreg,srcinc,d1,noexec,screg,scinc,maxrpt,L1pt,L1pd
+	ENDM
+
+; Like the standard version except vbroadcastsd is used to reduce sin/cos data
+zr10b_ten_complex_djbunfft_preload MACRO
+	zr10_10c_djbunfft_cmn_preload
+	ENDM
+zr10b_ten_complex_djbunfft MACRO srcreg,srcinc,d1,screg,scinc,maxrpt,L1pt,L1pd
+	zr10_10c_djbunfft_cmn srcreg,srcinc,d1,exec,screg,scinc,maxrpt,L1pt,L1pd
+	ENDM
+
+;; Common macro to operate on 10 complex values doing 3.322 levels of the inverse FFT, applying
+;; the sin/cos multipliers beforehand.
+
+;; To calculate a 10-complex inverse FFT in a brute force way (using a shorthand notation):
+;; c1 + c2 + ... + c10 * w^-0000000000
+;; c1 + c2 + ... + c10 * w^-0123456789
+;; c1 + c2 + ... + c10 * w^-0246802468
+;; ...
+;; c1 + c2 + ... + c10 * w^-0864208642
+;; c1 + c2 + ... + c10 * w^-0987654321
+;;
+;; The sin/cos values (w = 10th root of unity) are:
+;; w^-1 =  .809 - .588i
+;; w^-2 =  .309 - .951i
+;; w^-3 = -.309 - .951i
+;; w^-4 = -.809 - .588i
+;; w^-5 = -1
+
+;; Applying the sin/cos values above:
+;; reals:
+;; r1     +r2     +r3     +r4     +r5 + r6     +r7     +r8     +r9     +r10
+;; r1 +.809r2 +.309r3 -.309r4 -.809r5 - r6 -.809r7 -.309r8 +.309r9 +.809r10 +.588i2 +.951i3 +.951i4 +.588i5 -.588i7 -.951i8 -.951i9 -.588i10
+;; r1 +.309r2 -.809r3 -.809r4 +.309r5 + r6 +.309r7 -.809r8 -.809r9 +.309r10 +.951i2 +.588i3 -.588i4 -.951i5 +.951i7 +.588i8 -.588i9 -.951i10
+;; r1 -.309r2 -.809r3 +.809r4 +.309r5 - r6 +.309r7 +.809r8 -.809r9 -.309r10 +.951i2 -.588i3 -.588i4 +.951i5 -.951i7 +.588i8 +.588i9 -.951i10
+;; r1 -.809r2 +.309r3 +.309r4 -.809r5 + r6 -.809r7 +.309r8 +.309r9 -.809r10 +.588i2 -.951i3 +.951i4 -.588i5 +.588i7 -.951i8 +.951i9 -.588i10
+;; r1     -r2     +r3     -r4     +r5 - r6     +r7     -r8     +r9     -r10
+;; r1 -.809r2 +.309r3 +.309r4 -.809r5 + r6 -.809r7 +.309r8 +.309r9 -.809r10 -.588i2 +.951i3 -.951i4 +.588i5 -.588i7 +.951i8 -.951i9 +.588i10
+;; r1 -.309r2 -.809r3 +.809r4 +.309r5 - r6 +.309r7 +.809r8 -.809r9 -.309r10 -.951i2 +.588i3 +.588i4 -.951i5 +.951i7 -.588i8 -.588i9 +.951i10
+;; r1 +.309r2 -.809r3 -.809r4 +.309r5 + r6 +.309r7 -.809r8 -.809r9 +.309r10 -.951i2 -.588i3 +.588i4 +.951i5 -.951i7 -.588i8 +.588i9 +.951i10
+;; r1 +.809r2 +.309r3 -.309r4 -.809r5 - r6 -.809r7 -.309r8 +.309r9 +.809r10 -.588i2 -.951i3 -.951i4 -.588i5 +.588i7 +.951i8 +.951i9 +.588i10
+
+;; imaginarys:
+;;                                                                  +i1     +i2     +i3     +i4     +i5  +i6     +i7     +i8     +i9     +i10
+;; -.588r2 -.951r3 -.951r4 -.588r5 +.588r7 +.951r8 +.951r9 +.588r10 +i1 +.809i2 +.309i3 -.309i4 -.809i5  -i6 -.809i7 -.309i8 +.309i9 +.809i10
+;; -.951r2 -.588r3 +.588r4 +.951r5 -.951r7 -.588r8 +.588r9 +.951r10 +i1 +.309i2 -.809i3 -.809i4 +.309i5  +i6 +.309i7 -.809i8 -.809i9 +.309i10
+;; -.951r2 +.588r3 +.588r4 -.951r5 +.951r7 -.588r8 -.588r9 +.951r10 +i1 -.309i2 -.809i3 +.809i4 +.309i5  -i6 +.309i7 +.809i8 -.809i9 -.309i10
+;; -.588r2 +.951r3 -.951r4 +.588r5 -.588r7 +.951r8 -.951r9 +.588r10 +i1 -.809i2 +.309i3 +.309i4 -.809i5  +i6 -.809i7 +.309i8 +.309i9 -.809i10
+;;                                                                  +i1     -i2     +i3     -i4     +i5  -i6     +i7     -i8     +i9     -i10
+;; +.588r2 -.951r3 +.951r4 -.588r5 +.588r7 -.951r8 +.951r9 -.588r10 +i1 -.809i2 +.309i3 +.309i4 -.809i5  +i6 -.809i7 +.309i8 +.309i9 -.809i10
+;; +.951r2 -.588r3 -.588r4 +.951r5 -.951r7 +.588r8 +.588r9 -.951r10 +i1 -.309i2 -.809i3 +.809i4 +.309i5  -i6 +.309i7 +.809i8 -.809i9 -.309i10
+;; +.951r2 +.588r3 -.588r4 -.951r5 +.951r7 +.588r8 -.588r9 -.951r10 +i1 +.309i2 -.809i3 -.809i4 +.309i5  +i6 +.309i7 -.809i8 -.809i9 +.309i10
+;; +.588r2 +.951r3 +.951r4 +.588r5 -.588r7 -.951r8 -.951r9 -.588r10 +i1 +.809i2 +.309i3 -.309i4 -.809i5  -i6 -.809i7 -.309i8 +.309i9 +.809i10
+
+;; Rearranging for more FMA opportunities:
+;;R1 = (r1+r6)     +((r2+r10)+(r5+r7))     +((r3+r9)+(r4+r8))
+;;R3 = (r1+r6) +.309((r2+r10)+(r5+r7)) -.809((r3+r9)+(r4+r8)) +.951((i2-i10)-(i5-i7)) +.588((i3-i9)-(i4-i8))
+;;R9 = (r1+r6) +.309((r2+r10)+(r5+r7)) -.809((r3+r9)+(r4+r8)) -.951((i2-i10)-(i5-i7)) -.588((i3-i9)-(i4-i8))
+;;R5 = (r1+r6) -.809((r2+r10)+(r5+r7)) +.309((r3+r9)+(r4+r8)) +.588((i2-i10)-(i5-i7)) -.951((i3-i9)-(i4-i8))
+;;R7 = (r1+r6) -.809((r2+r10)+(r5+r7)) +.309((r3+r9)+(r4+r8)) -.588((i2-i10)-(i5-i7)) +.951((i3-i9)-(i4-i8))
+
+;;R6 = (r1-r6)     -((r2+r10)-(r5+r7))     +((r3+r9)-(r4+r8))
+;;R2 = (r1-r6) +.809((r2+r10)-(r5+r7)) +.309((r3+r9)-(r4+r8)) +.588((i2-i10)+(i5-i7)) +.951((i3-i9)+(i4-i8))
+;;R10= (r1-r6) +.809((r2+r10)-(r5+r7)) +.309((r3+r9)-(r4+r8)) -.588((i2-i10)+(i5-i7)) -.951((i3-i9)+(i4-i8))
+;;R4 = (r1-r6) -.309((r2+r10)-(r5+r7)) -.809((r3+r9)-(r4+r8)) +.951((i2-i10)+(i5-i7)) -.588((i3-i9)+(i4-i8))
+;;R8 = (r1-r6) -.309((r2+r10)-(r5+r7)) -.809((r3+r9)-(r4+r8)) -.951((i2-i10)+(i5-i7)) +.588((i3-i9)+(i4-i8))
+
+;;I1 = (i1+i6)                                                    +((i2+i10)+(i5+i7))     +((i3+i9)+(i4+i8))
+;;I3 = (i1+i6) -.951((r2-r10)-(r5-r7)) -.588((r3-r9)-(r4-r8)) +.309((i2+i10)+(i5+i7)) -.809((i3+i9)+(i4+i8))
+;;I9 = (i1+i6) +.951((r2-r10)-(r5-r7)) +.588((r3-r9)-(r4-r8)) +.309((i2+i10)+(i5+i7)) -.809((i3+i9)+(i4+i8))
+;;I5 = (i1+i6) -.588((r2-r10)-(r5-r7)) +.951((r3-r9)-(r4-r8)) -.809((i2+i10)+(i5+i7)) +.309((i3+i9)+(i4+i8))
+;;I7 = (i1+i6) +.588((r2-r10)-(r5-r7)) -.951((r3-r9)-(r4-r8)) -.809((i2+i10)+(i5+i7)) +.309((i3+i9)+(i4+i8))
+
+;;I6 = (i1-i6)                                                    -((i2+i10)-(i5+i7))     +((i3+i9)-(i4+i8))
+;;I2 = (i1-i6) -.588((r2-r10)+(r5-r7)) -.951((r3-r9)+(r4-r8)) +.809((i2+i10)-(i5+i7)) +.309((i3+i9)-(i4+i8))
+;;I10= (i1-i6) +.588((r2-r10)+(r5-r7)) +.951((r3-r9)+(r4-r8)) +.809((i2+i10)-(i5+i7)) +.309((i3+i9)-(i4+i8))
+;;I4 = (i1-i6) -.951((r2-r10)+(r5-r7)) +.588((r3-r9)+(r4-r8)) -.309((i2+i10)-(i5+i7)) -.809((i3+i9)-(i4+i8))
+;;I8 = (i1-i6) +.951((r2-r10)+(r5-r7)) -.588((r3-r9)+(r4-r8)) -.309((i2+i10)-(i5+i7)) -.809((i3+i9)-(i4+i8))
+
+zr10_10c_djbunfft_cmn_preload MACRO
+	vbroadcastsd zmm31, ZMM_P309		;; .309
+	vbroadcastsd zmm30, ZMM_P809		;; .809
+	vbroadcastsd zmm29, ZMM_P588_P951	;; .588/.951
+	vbroadcastsd zmm28, ZMM_P951		;; .951
+	ENDM
+
+zr10_10c_djbunfft_cmn MACRO srcreg,srcinc,d1,bcast,screg,scinc,maxrpt,L1pt,L1pd
+no bcast vmovapd zmm27, [screg+0*128+64]	;; cosine/sine for R2/I2 and R10/I10 (w^1)
+bcast	vbroadcastsd zmm27, Q [screg+0*16+8]	;; cosine/sine for R2/I2 and R10/I10
+	vmovapd	zmm1, [srcreg+d1]		;; R2
+	vmovapd	zmm11, [srcreg+d1+64]		;; I2
+	zfmaddpd zmm20, zmm1, zmm27, zmm11	;; A2 = R2 * cosine/sine + I2				; 1-4		n 5
+	zfmsubpd zmm11, zmm11, zmm27, zmm1	;; B2 = I2 * cosine/sine - R2				; 1-4		n 5
+	vmovapd	zmm9, [srcreg+9*d1]		;; R10
+	vmovapd	zmm19, [srcreg+9*d1+64]		;; I10
+	zfmsubpd zmm1, zmm9, zmm27, zmm19	;; A10 = R10 * cosine/sine - I10			; 2-5		n 12
+	zfmaddpd zmm19, zmm19, zmm27, zmm9	;; B10 = I10 * cosine/sine + R10			; 2-5		n 13
+
+no bcast vmovapd zmm27, [screg+1*128+64]	;; cosine/sine for R3/I3 and R9/I9 (w^2)
+bcast	vbroadcastsd zmm27, Q [screg+1*16+8]	;; cosine/sine for R3/I3 and R9/I9
+	vmovapd	zmm2, [srcreg+2*d1]		;; R3
+	vmovapd	zmm12, [srcreg+2*d1+64]		;; I3
+	zfmaddpd zmm9, zmm2, zmm27, zmm12	;; A3 = R3 * cosine/sine + I3				; 3-6		n 10
+	zfmsubpd zmm12, zmm12, zmm27, zmm2	;; B3 = I3 * cosine/sine - R3				; 3-6		n 10
+	vmovapd	zmm8, [srcreg+8*d1]		;; R9
+	vmovapd	zmm18, [srcreg+8*d1+64]		;; I9
+	zfmsubpd zmm2, zmm8, zmm27, zmm18	;; A9 = R9 * cosine/sine - I9				; 4-7		n 16
+	zfmaddpd zmm18, zmm18, zmm27, zmm8	;; B9 = I9 * cosine/sine + R9				; 4-7		n 17
+
+no bcast vmovapd zmm27, [screg+0*128]		;; sine for R2/I2 and R10/I10 (w^1)
+bcast	vbroadcastsd zmm27, Q [screg+0*16]	;; sine for R2/I2 and R10/I10
+	vmulpd	zmm20, zmm20, zmm27		;; A2 = A2 * sine (new R2)				; 5-8		n 12
+	vmulpd	zmm11, zmm11, zmm27		;; B2 = B2 * sine (new I2)				; 5-8		n 13
+
+no bcast vmovapd zmm26, [screg+3*128+64]	;; cosine/sine for R5/I5 and R7/I7 (w^4)
+bcast	vbroadcastsd zmm26, Q [screg+3*16+8]	;; cosine/sine for R5/I5 and R7/I7
+	vmovapd	zmm4, [srcreg+4*d1]		;; R5
+	vmovapd	zmm14, [srcreg+4*d1+64]		;; I5
+	zfmaddpd zmm8, zmm4, zmm26, zmm14	;; A5 = R5 * cosine/sine + I5 (new R5/sine)		; 6-9		n 14
+	zfmsubpd zmm14, zmm14, zmm26, zmm4	;; B5 = I5 * cosine/sine - R5 (new I5/sine)		; 6-9		n 15
+	vmovapd	zmm6, [srcreg+6*d1]		;; R7
+	vmovapd	zmm16, [srcreg+6*d1+64]		;; I7
+	zfmsubpd zmm4, zmm6, zmm26, zmm16	;; A7 = R7 * cosine/sine - I7 (new R7/sine)		; 7-10		n 14
+	zfmaddpd zmm16, zmm16, zmm26, zmm6	;; B7 = I7 * cosine/sine + R7 (new I7/sine)		; 7-10		n 15
+
+no bcast vmovapd zmm26, [screg+2*128+64]	;; cosine/sine for R4/I4 and R8/I8 (w^3)
+bcast	vbroadcastsd zmm26, Q [screg+2*16+8]	;; cosine/sine for R4/I4 and R8/I8
+	vmovapd	zmm3, [srcreg+3*d1]		;; R4
+	vmovapd	zmm13, [srcreg+3*d1+64]		;; I4
+	zfmaddpd zmm6, zmm3, zmm26, zmm13	;; A4 = R4 * cosine/sine + I4 (new R4/sine)		; 8-11		n 19
+	zfmsubpd zmm13, zmm13, zmm26, zmm3	;; B4 = I4 * cosine/sine - R4 (new I4/sine)		; 8-11		n 18
+	vmovapd	zmm7, [srcreg+7*d1]		;; R8
+	vmovapd	zmm17, [srcreg+7*d1+64]		;; I8
+	zfmsubpd zmm3, zmm7, zmm26, zmm17	;; A8 = R8 * cosine/sine - I8 (new R8/sine)		; 9-12		n 19
+	zfmaddpd zmm17, zmm17, zmm26, zmm7	;; B8 = I8 * cosine/sine + R8 (new I8/sine)		; 9-12		n 18
+
+no bcast vmovapd zmm26, [screg+1*128]		;; sine for R3/I3 and R9/I9 (w^2)
+bcast	vbroadcastsd zmm26, Q [screg+1*16]	;; sine for R3/I3 and R9/I9
+	vmulpd	zmm9, zmm9, zmm26		;; A3 = A3 * sine (new R3)				; 10-13		n 16
+	vmulpd	zmm12, zmm12, zmm26		;; B3 = B3 * sine (new I3)				; 10-13		n 17
+
+no bcast vmovapd zmm25, [screg+4*128+64]	;; cosine/sine for R6/I6 (w^5)
+bcast	vbroadcastsd zmm25, Q [screg+4*16+8]	;; cosine/sine for R6/I6
+	vmovapd	zmm5, [srcreg+5*d1]		;; R6
+	vmovapd	zmm15, [srcreg+5*d1+64]		;; I6
+	zfmaddpd zmm7, zmm5, zmm25, zmm15	;; A6 = R6 * cosine/sine + I6 (new R6/sine)		; 11-14		n 20
+	zfmsubpd zmm15, zmm15, zmm25, zmm5	;; B6 = I6 * cosine/sine - R6 (new I6/sine)		; 11-14		n 21
+
+	L1prefetchw srcreg+L1pd, L1pt
+	zfmaddpd zmm5, zmm1, zmm27, zmm20	;; R2+R10*sine						; 12-15		n 22
+	zfnmaddpd zmm1, zmm1, zmm27, zmm20	;; R2-R10*sine						; 12-15		n 27
+	L1prefetchw srcreg+64+L1pd, L1pt
+	zfmaddpd zmm20, zmm19, zmm27, zmm11	;; I2+I10*sine						; 13-16		n 23
+	zfnmaddpd zmm19, zmm19, zmm27, zmm11	;; I2-I10*sine						; 13-16		n 26
+	L1prefetchw srcreg+d1+L1pd, L1pt
+	vaddpd	zmm11, zmm8, zmm4		;; R5+R7 / sine						; 14-17		n 22
+	vsubpd	zmm8, zmm8, zmm4		;; R5-R7 / sine						; 14-17		n 27
+	L1prefetchw srcreg+d1+64+L1pd, L1pt
+	vaddpd	zmm4, zmm14, zmm16		;; I5+I7 / sine						; 15-18		n 23
+	vsubpd	zmm14, zmm14, zmm16		;; I5-I7 / sine						; 15-18		n 26
+
+	L1prefetchw srcreg+2*d1+L1pd, L1pt
+	zfmaddpd zmm16, zmm2, zmm26, zmm9	;; R3+R9*sine						; 16-19		n 28
+	zfnmaddpd zmm2, zmm2, zmm26, zmm9	;; R3-R9*sine						; 16-19		n 25
+	L1prefetchw srcreg+2*d1+64+L1pd, L1pt
+	zfmaddpd zmm9, zmm18, zmm26, zmm12	;; I3+I9*sine						; 17-20		n 29
+	zfnmaddpd zmm18, zmm18, zmm26, zmm12	;; I3-I9*sine						; 17-20		n 24
+	L1prefetchw srcreg+3*d1+L1pd, L1pt
+	vaddpd	zmm12, zmm13, zmm17		;; I4+I8 / sine						; 18-21		n 29
+	vsubpd	zmm13, zmm13, zmm17		;; I4-I8 / sine						; 18-21		n 24
+	L1prefetchw srcreg+3*d1+64+L1pd, L1pt
+	vaddpd	zmm17, zmm6, zmm3		;; R4+R8 / sine						; 19-22		n 28
+	vsubpd	zmm6, zmm6, zmm3		;; R4-R8 / sine						; 19-22		n 25
+
+no bcast vmovapd zmm27, [screg+4*128]		;; sine for R6/I6 (w^5)
+bcast	vbroadcastsd zmm27, Q [screg+4*16]	;; sine for R6/I6
+	vmovapd	zmm0, [srcreg]			;; R1
+	zfmaddpd zmm3, zmm7, zmm27, zmm0	;; R1+R6*sine						; 20-23		n 30
+	zfnmaddpd zmm7, zmm7, zmm27, zmm0	;; R1-R6*sine						; 20-23		n 38
+	vmovapd	zmm10, [srcreg+64]		;; I1
+	zfmaddpd zmm0, zmm15, zmm27, zmm10	;; I1+I6*sine						; 21-24		n 31
+	zfnmaddpd zmm15, zmm15, zmm27, zmm10	;; I1-I6*sine						; 21-24		n 39
+
+no bcast vmovapd zmm26, [screg+3*128]		;; sine for R5/I5 and R7/I7 (w^4)
+bcast	vbroadcastsd zmm26, Q [screg+3*16]	;; sine for R5/I5 and R7/I7
+	zfmaddpd zmm10, zmm11, zmm26, zmm5	;; r2++ = (r2+r10) + (r5+r7)*sine			; 22-25		n 30
+	zfnmaddpd zmm11, zmm11, zmm26, zmm5	;; r2+- = (r2+r10) - (r5+r7)*sine			; 22-25		n 38
+	zfmaddpd zmm5, zmm4, zmm26, zmm20	;; i2++ = (i2+i10) + (i5+i7)*sine			; 23-26		n 31
+	zfnmaddpd zmm4, zmm4, zmm26, zmm20	;; i2+- = (i2+i10) - (i5+i7)*sine			; 23-26		n 39
+no bcast vmovapd zmm27, [screg+2*128]		;; sine for R4/I4 and R8/I8 (w^3)
+bcast	vbroadcastsd zmm27, Q [screg+2*16]	;; sine for R4/I4 and R8/I8
+	zfmaddpd zmm20, zmm13, zmm27, zmm18	;; i3-+ = (i3-i9) + (i4-i8)*sine			; 24-27		n 43
+	zfnmaddpd zmm13, zmm13, zmm27, zmm18	;; i3-- = (i3-i9) - (i4-i8)*sine			; 24-27		n 33
+	L1prefetchw srcreg+4*d1+L1pd, L1pt
+	zfmaddpd zmm18, zmm6, zmm27, zmm2	;; r3-+ = (r3-r9) + (r4-r8)*sine			; 25-28		n 44
+	zfnmaddpd zmm6, zmm6, zmm27, zmm2	;; r3-- = (r3-r9) - (r4-r8)*sine			; 25-28		n 34
+	L1prefetchw srcreg+4*d1+64+L1pd, L1pt
+	zfmaddpd zmm2, zmm14, zmm26, zmm19	;; i2-+ = (i2-i10) + (i5-i7)*sine			; 26-29		n 43
+	zfnmaddpd zmm14, zmm14, zmm26, zmm19	;; i2-- = (i2-i10) - (i5-i7)*sine			; 26-29		n 33
+	L1prefetchw srcreg+5*d1+L1pd, L1pt
+	zfmaddpd zmm19, zmm8, zmm26, zmm1	;; r2-+ = (r2-r10) + (r5-r7)*sine			; 27-30		n 44
+	zfnmaddpd zmm8, zmm8, zmm26, zmm1	;; r2-- = (r2-r10) - (r5-r7)*sine			; 27-30		n 34
+	L1prefetchw srcreg+5*d1+64+L1pd, L1pt
+	zfmaddpd zmm1, zmm17, zmm27, zmm16	;; r3++ = (r3+r9) + (r4+r8)*sine			; 28-31		n 35
+	zfnmaddpd zmm17, zmm17, zmm27, zmm16	;; r3+- = (r3+r9) - (r4+r8)*sine			; 28-31		n 45
+	L1prefetchw srcreg+6*d1+L1pd, L1pt
+	zfmaddpd zmm16, zmm12, zmm27, zmm9	;; i3++ = (i3+i9) + (i4+i8)*sine			; 29-32		n 36
+	zfnmaddpd zmm12, zmm12, zmm27, zmm9	;; i3+- = (i3+i9) - (i4+i8)*sine			; 29-32		n 46
+
+	L1prefetchw srcreg+6*d1+64+L1pd, L1pt
+	vaddpd	zmm9, zmm3, zmm10		;; R1 = (r1+r6) + (r2++)				; 30-33		n 35
+	zfmaddpd zmm21, zmm10, zmm31, zmm3	;; R39r = (r1+r6) + .309(r2++)				; 30-33		n 35
+	L1prefetchw srcreg+7*d1+L1pd, L1pt
+	zfnmaddpd zmm10, zmm10, zmm30, zmm3	;; R57r = (r1+r6) - .809(r2++)				; 31-34		n 36
+	vaddpd	zmm3, zmm0, zmm5		;; I1 = (i1+i6) + (i2++)				; 31-34		n 36
+	L1prefetchw srcreg+7*d1+64+L1pd, L1pt
+	zfmaddpd zmm22, zmm5, zmm31, zmm0	;; I39i = (i1+i6) + .309(i2++)				; 32-35		n 37
+	zfnmaddpd zmm5, zmm5, zmm30, zmm0	;; I57i = (i1+i6) - .809(i2++)				; 32-35		n 37
+
+	L1prefetchw srcreg+8*d1+L1pd, L1pt
+	zfmaddpd zmm0, zmm13, zmm29, zmm14	;; R39i = (i2--) + .588/.951(i3--)			; 33-36		n 41
+	zfmsubpd zmm14, zmm14, zmm29, zmm13	;; R57i = .588/.951(i2--) - (i3--)			; 33-36		n 42
+	L1prefetchw srcreg+8*d1+64+L1pd, L1pt
+	zfmaddpd zmm13, zmm6, zmm29, zmm8	;; I39r = (r2--) + .588/.951(r3--)			; 34-37		n 48
+	zfmsubpd zmm8, zmm8, zmm29, zmm6	;; I57r = .588/.951(r2--) - (r3--)			; 34-37		n 49
+
+	L1prefetchw srcreg+9*d1+L1pd, L1pt
+	vaddpd	zmm9, zmm9, zmm1		;; R1   = R1 + (r3++)					; 35-38
+	zfnmaddpd zmm21, zmm1, zmm30, zmm21	;; R39r = R39r - .809(r3++)				; 35-38		n 41
+	L1prefetchw srcreg+9*d1+64+L1pd, L1pt
+	zfmaddpd zmm10, zmm1, zmm31, zmm10	;; R57r = R57r + .309(r3++)				; 36-39		n 42
+	vaddpd	zmm3, zmm3, zmm16		;; I1   = I1 + (i3++)					; 36-39
+	zfnmaddpd zmm22, zmm16, zmm30, zmm22	;; I39i = I39i - .809(i3++)				; 37-40		n 48
+	zfmaddpd zmm5, zmm16, zmm31, zmm5	;; I57i = I57i + .309(i3++)				; 37-40		n 49
+
+	vsubpd	zmm6, zmm7, zmm11		;; R6 = (r1-r6) - (r2+-)				; 38-41		n 45
+	zfmaddpd zmm1, zmm11, zmm30, zmm7	;; R2Ar = (r1-r6) + .809(r2+-)				; 38-41		n 45
+	zfnmaddpd zmm11, zmm11, zmm31, zmm7	;; R48r = (r1-r6) - .309(r2+-)				; 39-42		n 46
+	vsubpd	zmm16, zmm15, zmm4		;; I6 = (i1-i6) - (i2+-)				; 39-42		n 46
+  	zstore	[srcreg], zmm9			;; Save R1						; 39
+	zfmaddpd zmm7, zmm4, zmm30, zmm15	;; I2Ai = (i1-i6) + .809(i2+-)				; 40-43		n 47
+	zfnmaddpd zmm4, zmm4, zmm31, zmm15	;; I48i = (i1-i6) - .309(i2+-)				; 40-43		n 47
+	zstore	[srcreg+64], zmm3		;; Save I1						; 40
+
+	zfmaddpd zmm15, zmm0, zmm28, zmm21	;; R3 = R39r + .951*R39i				; 41-44
+	zfnmaddpd zmm0, zmm0, zmm28, zmm21	;; R9 = R39r - .951*R39i				; 41-44
+	zfmaddpd zmm21, zmm14, zmm28, zmm10	;; R5 = R57r + .951*R57i				; 42-45
+	zfnmaddpd zmm14, zmm14, zmm28, zmm10	;; R7 = R57r - .951*R57i				; 42-45
+
+	zfmaddpd zmm10, zmm2, zmm29, zmm20	;; R2Ai = .588/.951(i2-+) + (i3-+)			; 43-46		n 50
+	zfnmaddpd zmm20, zmm20, zmm29, zmm2	;; R48i = (i2-+) - .588/.951(i3-+)			; 43-46		n 51
+	zfmaddpd zmm2, zmm19, zmm29, zmm18	;; I2Ar = .588/.951(r2-+) + (r3-+)			; 44-47		n 52
+	zfnmaddpd zmm18, zmm18, zmm29, zmm19	;; I48r = (r2-+) - .588/.951(r3-+)			; 44-47		n 53
+
+	vaddpd	zmm6, zmm6, zmm17		;; R6   = R6 + (r3+-)					; 45-48
+	zfmaddpd zmm1, zmm17, zmm31, zmm1	;; R2Ar = R2Ar + .309(r3+-)				; 45-48		n 50
+	zstore	[srcreg+2*d1], zmm15		;; Save R3						; 45
+	zfnmaddpd zmm11, zmm17, zmm30, zmm11	;; R48r = R48r - .809(r3+-)				; 46-49		n 51
+	vaddpd	zmm16, zmm16, zmm12		;; I6   = I6 + (i3+-)					; 46-49
+	zstore	[srcreg+8*d1], zmm0		;; Save R9						; 45+1
+	zfmaddpd zmm7, zmm12, zmm31, zmm7	;; I2Ai = I2Ai + .309(i3+-)				; 47-50		n 52
+	zfnmaddpd zmm4, zmm12, zmm30, zmm4	;; I48i = I48i - .809(i3+-)				; 47-50		n 53
+	zstore	[srcreg+4*d1], zmm21		;; Save R5						; 46+1
+
+	zfnmaddpd zmm19, zmm13, zmm28, zmm22	;; I3 = I39i - .951*I39r				; 48-51
+	zfmaddpd zmm13, zmm13, zmm28, zmm22	;; I9 = I39i + .951*I39r				; 48-51
+	zstore	[srcreg+6*d1], zmm14		;; Save R7						; 46+2
+	zfnmaddpd zmm17, zmm8, zmm28, zmm5	;; I5 = I57i - .951*I57r				; 49-52
+	zfmaddpd zmm8, zmm8, zmm28, zmm5	;; I7 = I57i + .951*I57r				; 49-52
+	zstore	[srcreg+5*d1], zmm6		;; Save R6						; 49
+
+	zfmaddpd zmm12, zmm10, zmm28, zmm1	;; R2 = R2Ar + .951*R2Ai				; 50-53
+	zfnmaddpd zmm10, zmm10, zmm28, zmm1	;; R10= R2Ar - .951*R2Ai				; 50-53
+	zstore	[srcreg+5*d1+64], zmm16		;; Save I6						; 50
+	zfmaddpd zmm22, zmm20, zmm28, zmm11	;; R4 = R48r + .951*R48i				; 51-54
+	zfnmaddpd zmm20, zmm20, zmm28, zmm11	;; R8 = R48r - .951*R48i				; 51-54
+
+	zfnmaddpd zmm5, zmm2, zmm28, zmm7	;; I2 = I2Ai - .951*I2Ar				; 52-55
+	zfmaddpd zmm2, zmm2, zmm28, zmm7	;; I10= I2Ai + .951*I2Ar				; 52-55
+	zstore	[srcreg+2*d1+64], zmm19		;; Save I3						; 52
+	zfnmaddpd zmm1, zmm18, zmm28, zmm4	;; I4 = I48i - .951*I48r				; 53-56
+	zfmaddpd zmm18, zmm18, zmm28, zmm4	;; I8 = I48i + .951*I48r				; 53-56
+	zstore	[srcreg+8*d1+64], zmm13		;; Save I9						; 52+1
+
+	bump	screg, scinc
+	zstore	[srcreg+4*d1+64], zmm17		;; Save I5						; 53+1
+	zstore	[srcreg+6*d1+64], zmm8		;; Save I7						; 53+2
+	zstore	[srcreg+d1], zmm12		;; Save R2						; 54+2
+	zstore	[srcreg+9*d1], zmm10		;; Save R10						; 54+3
+	zstore	[srcreg+3*d1], zmm22		;; Save R4						; 55+3
+	zstore	[srcreg+7*d1], zmm20		;; Save R8						; 55+4
+	zstore	[srcreg+d1+64], zmm5		;; Save I2						; 56+4
+	zstore	[srcreg+9*d1+64], zmm2		;; Save I10						; 56+5
+	zstore	[srcreg+3*d1+64], zmm1		;; Save I4						; 57+5
+	zstore	[srcreg+7*d1+64], zmm18		;; Save I8						; 57+6
+	bump	srcreg, srcinc
+	ENDM
+
+
+;;
+;; ************************************* 20-reals-fft variants ******************************************
+;;
+
+;; These macros operate on 20 reals doing 4.322 levels of the FFT, applying
+;; the sin/cos multipliers afterwards.  The output is 2 reals and 9 complex numbers.
+
+;; To calculate a 20-reals FFT, we calculate 20 complex values in a brute force way (using a shorthand notation):
+;; r1 + r2 + ... + r20	*  w^0000000000...
+;; r1 + r2 + ... + r20	*  w^0123456789...
+;; r1 + r2 + ... + r20	*  w^02468ACE....
+;;    ...
+;; r1 + r2 + ... + r20	*  w^...A987654321
+;; Note that Hermetian symmetry means we won't need to calculate the last 10 complex values.
+;;
+;; The sin/cos values (w = 20th root of unity) are:
+;; w^1 = .951 + .309i
+;; w^2 = .809 + .588i
+;; w^3 = .588 + .809i
+;; w^4 = .309 + .951i
+;; w^5 = 0 + 1i
+;; w^6 = -.309 + .951i
+;; w^7 = -.588 + .809i
+;; w^8 = -.809 + .588i
+;; w^9 = -.951 + .309i
+;; w^10 = -1
+
+;; Applying the sin/cos values above (and noting that combining r2 and r12, r3 and r13, etc. will simplify calculations):
+;; reals:
+;; r1+r11     +(r2+r12)     +(r10+r20)      +(r3+r13)     +(r9+r19)     +(r4+r14)     +(r8+r18)     +(r5+r15)     +(r7+r17) + (r6+r16)
+;; r1-r11 +.951(r2-r12) -.951(r10-r20)  +.809(r3-r13) -.809(r9-r19) +.588(r4-r14) -.588(r8-r18) +.309(r5-r15) -.309(r7-r17)
+;; r1+r11 +.809(r2+r12) +.809(r10+r20)  +.309(r3+r13) +.309(r9+r19) -.309(r4+r14) -.309(r8+r18) -.809(r5+r15) -.809(r7+r17) - (r6+r16)
+;; r1-r11 +.588(r2-r12) -.588(r10-r20)  -.309(r3-r13) +.309(r9-r19) -.951(r4-r14) +.951(r8-r18) -.809(r5-r15) +.809(r7-r17)
+;; r1+r11 +.309(r2+r12) +.309(r10+r20)  -.809(r3+r13) -.809(r9+r19) -.809(r4+r14) -.809(r8+r18) +.309(r5+r15) +.309(r7+r17) + (r6+r16)
+;; r1-r11                                   -(r3-r13)     +(r9-r19)                                 +(r5-r15)     -(r7-r17)                            
+;; r1+r11 -.309(r2+r12) -.309(r10+r20)  -.809(r3+r13) -.809(r9+r19) +.809(r4+r14) +.809(r8+r18) +.309(r5+r15) +.309(r7+r17) - (r6+r16)
+;; r1-r11 -.588(r2-r12) +.588(r10-r20)  -.309(r3-r13) +.309(r9-r19) +.951(r4-r14) -.951(r8-r18) -.809(r5-r15) +.809(r7-r17)
+;; r1+r11 -.809(r2+r12) -.809(r10+r20)  +.309(r3+r13) +.309(r9+r19) +.309(r4+r14) +.309(r8+r18) -.809(r5+r15) -.809(r7+r17) + (r6+r16)
+;; r1-r11 -.951(r2-r12) +.951(r10-r20)  +.809(r3-r13) -.809(r9-r19) -.588(r4-r14) +.588(r8-r18) +.309(r5-r15) -.309(r7-r17)
+;; r1+r11     -(r2+r12)     -(r10+r20)      +(r3+r13)     +(r9+r19)     -(r4+r14)     -(r8+r18)     +(r5+r15)     +(r7+r17) - (r6+r16)
+;;
+;; imaginarys:
+;; 0
+;; +.309(r2-r12) +.309(r10-r20) +.588(r3-r13) +.588(r9-r19) +.809(r4-r14) +.809(r8-r18) +.951(r5-r15) +.951(r7-r17) + (r6-r16)
+;; +.588(r2+r12) -.588(r10+r20) +.951(r3+r13) -.951(r9+r19) +.951(r4+r14) -.951(r8+r18) +.588(r5+r15) -.588(r7+r17)
+;; +.809(r2-r12) +.809(r10-r20) +.951(r3-r13) +.951(r9-r19) +.309(r4-r14) +.309(r8-r18) -.588(r5-r15) -.588(r7-r17) - (r6-r16)
+;; +.951(r2+r12) -.951(r10+r20) +.588(r3+r13) -.588(r9+r19) -.588(r4+r14) +.588(r8+r18) -.951(r5+r15) +.951(r7+r17)
+;;      (r2-r12)     +(r10-r20)                                 -(r4-r14)     -(r8-r18)                             + (r6-r16)
+;; +.951(r2+r12) -.951(r10+r20) -.588(r3+r13) +.588(r9+r19) -.588(r4+r14) +.588(r8+r18) +.951(r5+r15) -.951(r7+r17)
+;; +.809(r2-r12) +.809(r10-r20) -.951(r3-r13) -.951(r9-r19) +.309(r4-r14) +.309(r8-r18) +.588(r5-r15) +.588(r7-r17) - (r6-r16)
+;; +.588(r2+r12) -.588(r10+r20) -.951(r3+r13) +.951(r9+r19) +.951(r4+r14) -.951(r8+r18) -.588(r5+r15) +.588(r7+r17)
+;; +.309(r2-r12) +.309(r10-r20) -.588(r3-r13) -.588(r9-r19) +.809(r4-r14) +.809(r8-r18) -.951(r5-r15) -.951(r7-r17) + (r6-r16)
+
+;; Simplifying and combining and rearranging to highlight the common subexpressions, we get:
+;;R1 = (r1+r11) + (r6+r16)     +(((r2+r12)+(r10+r20))+((r5+r15)+(r7+r17)))      +(((r3+r13)+(r9+r19))+((r4+r14)+(r8+r18)))
+;;R5 = (r1+r11) + (r6+r16) +.309(((r2+r12)+(r10+r20))+((r5+r15)+(r7+r17)))  -.809(((r3+r13)+(r9+r19))+((r4+r14)+(r8+r18)))
+;;R9 = (r1+r11) + (r6+r16) -.809(((r2+r12)+(r10+r20))+((r5+r15)+(r7+r17)))  +.309(((r3+r13)+(r9+r19))+((r4+r14)+(r8+r18)))
+;;R11= (r1+r11) - (r6+r16)     -(((r2+r12)+(r10+r20))-((r5+r15)+(r7+r17)))      +(((r3+r13)+(r9+r19))-((r4+r14)+(r8+r18)))
+;;R3 = (r1+r11) - (r6+r16) +.809(((r2+r12)+(r10+r20))-((r5+r15)+(r7+r17)))  +.309(((r3+r13)+(r9+r19))-((r4+r14)+(r8+r18)))
+;;R7 = (r1+r11) - (r6+r16) -.309(((r2+r12)+(r10+r20))-((r5+r15)+(r7+r17)))  -.809(((r3+r13)+(r9+r19))-((r4+r14)+(r8+r18)))
+
+;;R6 = (r1-r11)     -((r3-r13)-(r9-r19))     +((r5-r15)-(r7-r17))                                                    
+;;R2 = (r1-r11) +.809((r3-r13)-(r9-r19)) +.309((r5-r15)-(r7-r17)) +.951((r2-r12)-(r10-r20)) +.588((r4-r14)-(r8-r18))
+;;R10= (r1-r11) +.809((r3-r13)-(r9-r19)) +.309((r5-r15)-(r7-r17)) -.951((r2-r12)-(r10-r20)) -.588((r4-r14)-(r8-r18))
+;;R4 = (r1-r11) -.309((r3-r13)-(r9-r19)) -.809((r5-r15)-(r7-r17)) +.588((r2-r12)-(r10-r20)) -.951((r4-r14)-(r8-r18))
+;;R8 = (r1-r11) -.309((r3-r13)-(r9-r19)) -.809((r5-r15)-(r7-r17)) -.588((r2-r12)-(r10-r20)) +.951((r4-r14)-(r8-r18))
+
+;;I5 = +.951(((r2+r12)-(r10+r20))-((r5+r15)-(r7+r17))) +.588(((r3+r13)-(r9+r19))-((r4+r14)-(r8+r18)))
+;;I9 = +.588(((r2+r12)-(r10+r20))-((r5+r15)-(r7+r17))) -.951(((r3+r13)-(r9+r19))-((r4+r14)-(r8+r18)))
+;;I3 = +.588(((r2+r12)-(r10+r20))+((r5+r15)-(r7+r17))) +.951(((r3+r13)-(r9+r19))+((r4+r14)-(r8+r18)))
+;;I7 = +.951(((r2+r12)-(r10+r20))+((r5+r15)-(r7+r17))) -.588(((r3+r13)-(r9+r19))+((r4+r14)-(r8+r18)))
+
+;;I6 =      ((r2-r12)+(r10-r20))     -((r4-r14)+(r8-r18)) + (r6-r16)
+;;I2 = +.309((r2-r12)+(r10-r20)) +.809((r4-r14)+(r8-r18)) + (r6-r16) +.588((r3-r13)+(r9-r19)) +.951((r5-r15)+(r7-r17))
+;;I10= +.309((r2-r12)+(r10-r20)) +.809((r4-r14)+(r8-r18)) + (r6-r16) -.588((r3-r13)+(r9-r19)) -.951((r5-r15)+(r7-r17))
+;;I4 = +.809((r2-r12)+(r10-r20)) +.309((r4-r14)+(r8-r18)) - (r6-r16) +.951((r3-r13)+(r9-r19)) -.588((r5-r15)+(r7-r17))
+;;I8 = +.809((r2-r12)+(r10-r20)) +.309((r4-r14)+(r8-r18)) - (r6-r16) -.951((r3-r13)+(r9-r19)) +.588((r5-r15)+(r7-r17))
+
+;;; BUG - do we need to support more distance input arguments (since distance is divisible by 2)??  would allow more use of dist32?
+
+; Uses two sin/cos pointers
+zr10_2sc_twenty_reals_fft_preload MACRO
+	zr10_20r_fft_cmn_preload
+	ENDM
+zr10_2sc_twenty_reals_fft MACRO srcreg,srcinc,d1,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
+	zr10_20r_fft_cmn srcreg,0,srcinc,d1,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
+	ENDM
+
+; Offsets source by rbx
+zr10f_2sc_twenty_reals_fft_preload MACRO
+	zr10_20r_fft_cmn_preload
+	ENDM
+zr10f_2sc_twenty_reals_fft MACRO srcreg,srcinc,d1,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
+	zr10_20r_fft_cmn srcreg,rbx,srcinc,d1,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
+	ENDM
+
+; Combined sin/cos data
+zr10_csc_twenty_reals_fft_preload MACRO
+	zr10_20r_fft_cmn_preload
+	ENDM
+zr10_csc_twenty_reals_fft MACRO srcreg,srcinc,d1,screg,scinc,maxrpt,L1pt,L1pd
+	zr10_20r_fft_cmn srcreg,0,srcinc,d1,screg+5*128,0,screg,scinc,maxrpt,L1pt,L1pd
+	ENDM
+
+
+zr10_20r_fft_cmn_preload MACRO
+	vbroadcastsd zmm31, ZMM_P309		;; .309
+	vbroadcastsd zmm30, ZMM_P809		;; .809
+	vbroadcastsd zmm29, ZMM_P588_P951	;; .588/.951
+	vbroadcastsd zmm28, ZMM_P951		;; .951
+	ENDM
+
+zr10_20r_fft_cmn MACRO srcreg,srcoff,srcinc,d1,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
+	vmovapd	zmm0, [srcreg+srcoff+d1]	;; r2+r12
+	vmovapd	zmm2, [srcreg+srcoff+9*d1]	;; r10+r20
+	vaddpd	zmm20, zmm0, zmm2		;; r2++ = (r2+r12) + (r10+r20)				; 1-4		n 7
+	vsubpd	zmm0, zmm0, zmm2		;; r2+- = (r2+r12) - (r10+r20)				; 1-4		n 8
+
+	vmovapd	zmm4, [srcreg+srcoff+4*d1]	;; r5+r15
+	vmovapd	zmm6, [srcreg+srcoff+6*d1]	;; r7+r17
+	vaddpd	zmm2, zmm4, zmm6		;; r5++ = (r5+r15) + (r7+r17)				; 2-5		n 7
+	vsubpd	zmm4, zmm4, zmm6		;; r5+- = (r5+r15) - (r7+r17)				; 2-5		n 15
+
+	vmovapd	zmm8, [srcreg+srcoff+2*d1]	;; r3+r13
+	vmovapd	zmm10, [srcreg+srcoff+8*d1]	;; r9+r19
+	vaddpd	zmm6, zmm8, zmm10		;; r3++ = (r3+r13) + (r9+r19)				; 3-6		n 9
+	vsubpd	zmm8, zmm8, zmm10		;; r3+- = (r3+r13) - (r9+r19)				; 3-6		n 8
+
+	vmovapd	zmm12, [srcreg+srcoff+3*d1]	;; r4+r14
+	vmovapd	zmm14, [srcreg+srcoff+7*d1]	;; r8+r18
+	vaddpd	zmm10, zmm12, zmm14		;; r4++ = (r4+r14) + (r8+r18)				; 4-7		n 9
+	vsubpd	zmm12, zmm12, zmm14		;; r4+- = (r4+r14) - (r8+r18)				; 4-7		n 16
+
+	vmovapd	zmm9, [srcreg+srcoff+2*d1+64]	;; r3-r13
+	vmovapd	zmm11, [srcreg+srcoff+8*d1+64]	;; r9-r19
+	vaddpd	zmm14, zmm9, zmm11		;;  r3-+ = (r3-r13) + (r9-r19)				; 5-8		n 27
+	vsubpd	zmm9, zmm9, zmm11		;;  r3-- = (r3-r13) - (r9-r19)				; 5-8		n 23
+
+	vmovapd	zmm16, [srcreg+srcoff]		;; r1+r11
+	vmovapd	zmm18, [srcreg+srcoff+5*d1]	;; r6+r16
+	vaddpd	zmm11, zmm16, zmm18		;; r1++ = (r1+r11) + (r6+r16)				; 6-9		n 12
+	vsubpd	zmm16, zmm16, zmm18		;; r1+- = (r1+r11) - (r6+r16)				; 6-9		n 13
+
+	vaddpd	zmm18, zmm20, zmm2		;; r2+++ = (r2++) + (r5++)				; 7-10		n 12
+	vsubpd	zmm20, zmm20, zmm2		;; r2++- = (r2++) - (r5++)				; 7-10		n 13
+
+	vmulpd	zmm0, zmm0, zmm28		;; r2+- = r2+- * .951					; 8-11		n 15
+	vmulpd	zmm8, zmm8, zmm28		;; r3+- = r3+- * .951					; 8-11		n 16
+
+	vaddpd	zmm2, zmm6, zmm10		;; r3+++ = (r3++) + (r4++)				; 9-12		n 17
+	vsubpd	zmm6, zmm6, zmm10		;; r3++- = (r3++) - (r4++)				; 9-12		n 18
+
+	vmovapd	zmm1, [srcreg+srcoff+d1+64]	;; r2-r12
+	vmovapd	zmm3, [srcreg+srcoff+9*d1+64]	;; r10-r20
+	vaddpd	zmm10, zmm1, zmm3		;;  r2-+ = (r2-r12) + (r10-r20)				; 10-13		n 24
+	vsubpd	zmm1, zmm1, zmm3		;;  r2-- = (r2-r12) - (r10-r20)				; 10-13		n 26
+
+	vmovapd	zmm13, [srcreg+srcoff+3*d1+64]	;; r4-r14
+	vmovapd	zmm15, [srcreg+srcoff+7*d1+64]	;; r8-r18
+	vaddpd	zmm3, zmm13, zmm15		;;  r4-+ = (r4-r14) + (r8-r18)				; 11-14		n 33
+	vsubpd	zmm13, zmm13, zmm15		;;  r4-- = (r4-r14) - (r8-r18)				; 11-14		n 26
+
+	L1prefetchw srcreg+L1pd, L1pt
+	vaddpd	zmm15, zmm11, zmm18		;; R1 = (r1++) + (r2+++)				; 12-15		n 17
+	zfmaddpd zmm21, zmm18, zmm31, zmm11	;; R5 = (r1++) + .309(r2+++)				; 12-15		n 17
+	L1prefetchw srcreg+64+L1pd, L1pt
+	zfnmaddpd zmm18, zmm18, zmm30, zmm11	;; R9 = (r1++) - .809(r2+++)				; 13-16		n 18
+	vsubpd	zmm11, zmm16, zmm20		;; R11= (r1+-) - (r2++-)				; 13-16		n 18
+	L1prefetchw srcreg+d1+L1pd, L1pt
+	zfmaddpd zmm22, zmm20, zmm30, zmm16	;; R3 = (r1+-) + .809(r2++-)				; 14-17		n 19
+	zfnmaddpd zmm20, zmm20, zmm31, zmm16	;; R7 = (r1+-) - .309(r2++-)				; 14-17		n 19
+
+	L1prefetchw srcreg+d1+64+L1pd, L1pt
+	zfmaddpd zmm16, zmm4, zmm28, zmm0	;; r2+-+ = (r2+-) + .951(r5+-)				; 15-18		n 22
+	zfnmaddpd zmm4, zmm4, zmm28, zmm0	;; r2+-- = (r2+-) - .951(r5+-)				; 15-18		n 21
+	L1prefetchw srcreg+2*d1+L1pd, L1pt
+	zfmaddpd zmm0, zmm12, zmm28, zmm8	;; r3+-+ = (r3+-) + .951(r4+-)				; 16-19		n 22
+	zfnmaddpd zmm12, zmm12, zmm28, zmm8	;; r3+-- = (r3+-) - .951(r4+-)				; 16-19		n 21
+
+	L1prefetchw srcreg+2*d1+64+L1pd, L1pt
+	vaddpd	zmm15, zmm15, zmm2		;; R1 = R1 + (r3+++)					; 17-20
+	zfnmaddpd zmm21, zmm2, zmm30, zmm21	;; R5 = R5 - .809(r3+++)				; 17-20		n 28
+	L1prefetchw srcreg+3*d1+L1pd, L1pt
+	zfmaddpd zmm18, zmm2, zmm31, zmm18	;; R9 = R9 + .309(r3+++)				; 18-21		n 29
+	vaddpd	zmm11, zmm11, zmm6		;; R11= R11 + (r3++-)					; 18-21
+	L1prefetchw srcreg+3*d1+64+L1pd, L1pt
+	zfmaddpd zmm22, zmm6, zmm31, zmm22	;; R3 = R3 + .309(r3++-)				; 19-22		n 30
+	zfnmaddpd zmm20, zmm6, zmm30, zmm20	;; R7 = R7 - .809(r3++-)				; 19-22		n 31
+
+	vmovapd	zmm5, [srcreg+srcoff+4*d1+64]	;; r5-r15
+	vmovapd	zmm7, [srcreg+srcoff+6*d1+64]	;; r7-r17
+	vaddpd	zmm8, zmm5, zmm7		;;  r5-+ = (r5-r15) + (r7-r17)				; 20-23		n 27
+	vsubpd	zmm5, zmm5, zmm7		;;  r5-- = (r5-r15) - (r7-r17)				; 20-23		n 32
+
+	L1prefetchw srcreg+4*d1+L1pd, L1pt
+	zfmaddpd zmm2, zmm12, zmm29, zmm4	;; I5 = (r2+--) + .588/.951(r3+--)			; 21-24		n 28
+	zfmsubpd zmm4, zmm4, zmm29, zmm12	;; I9 = .588/.951(r2+--) - (r3+--)			; 21-24		n 29
+	L1prefetchw srcreg+4*d1+64+L1pd, L1pt
+	zfmaddpd zmm6, zmm16, zmm29, zmm0	;; I3 = .588/.951(r2+-+) + (r3+-+)			; 22-25		n 30
+	zfnmaddpd zmm0, zmm0, zmm29, zmm16	;; I7 = (r2+-+) - .588/.951(r3+-+)			; 22-25		n 31
+
+	vmovapd	zmm17, [srcreg+srcoff+64]	;; r1-r11
+	vsubpd	zmm7, zmm17, zmm9		;; R6   = (r1-r11) - (r3--)				; 23-26		n 32
+	zfmaddpd zmm12, zmm9, zmm30, zmm17	;; R2Ao = (r1-r11) + .809(r3--)				; 23-26		n 32
+	zfnmaddpd zmm9, zmm9, zmm31, zmm17	;; R48o = (r1-r11) - .309(r3--)				; 24-27		n 33
+	vmovapd	zmm19, [srcreg+srcoff+5*d1+64]	;; r6-r16
+	vaddpd	zmm16, zmm10, zmm19		;; I6   = (r2-+) + (r6-r16)				; 24-27		n 33
+	zfmaddpd zmm17, zmm10, zmm31, zmm19	;; I2Ae = .309(r2-+) + (r6-r16)				; 25-28		n 34
+	L1prefetchw srcreg+5*d1+L1pd, L1pt
+	zfmsubpd zmm10, zmm10, zmm30, zmm19	;; I48e = .809(r2-+) - (r6-r16)				; 25-28		n 34
+	zstore	[srcreg], zmm15			;; Save R1						; 21
+
+	L1prefetchw srcreg+5*d1+64+L1pd, L1pt
+	zfmaddpd zmm19, zmm13, zmm29, zmm1	;; R2Ae = (r2--) + .588/.951(r4--)			; 26-29		n 38
+	zfmsubpd zmm1, zmm1, zmm29, zmm13	;; R48e = .588/.951(r2--) - (r4--)			; 26-29		n 40
+	L1prefetchw srcreg+6*d1+L1pd, L1pt
+	zfmaddpd zmm13, zmm14, zmm29, zmm8	;; I2Ao = .588/.951(r3-+) + (r5-+)			; 27-30		n 39
+	zfnmaddpd zmm8, zmm8, zmm29, zmm14	;; I48o = (r3-+) - .588/.951(r5-+)			; 27-30		n 41
+	zstore	[srcreg+64], zmm11		;; Save R11						; 22
+
+	vmovapd zmm27, [screg2+1*128+64]	;; cosine/sine for R5/I5 (w^4 = 10-complex w^2)
+	zfmsubpd zmm14, zmm21, zmm27, zmm2	;; A5 = R5 * cosine/sine - I5				; 28-31		n 35
+	zfmaddpd zmm2, zmm2, zmm27, zmm21	;; B5 = I5 * cosine/sine + R5				; 28-31		n 35
+
+	vmovapd zmm27, [screg2+3*128+64]	;; cosine/sine for R9/I9 (w^8 = 10-complex w^4)
+	zfmsubpd zmm21, zmm18, zmm27, zmm4	;; A9 = R9 * cosine/sine - I9				; 29-32		n 36
+	zfmaddpd zmm4, zmm4, zmm27, zmm18	;; B9 = I9 * cosine/sine + R9				; 29-32		n 36
+
+	vmovapd zmm27, [screg2+0*128+64]	;; cosine/sine for R3/I3 (w^2 = 10-complex w^1)
+	zfmsubpd zmm18, zmm22, zmm27, zmm6	;; A3 = R3 * cosine/sine - I3				; 30-33		n 37
+	zfmaddpd zmm6, zmm6, zmm27, zmm22	;; B3 = I3 * cosine/sine + R3				; 30-33		n 37
+
+	vmovapd zmm27, [screg2+2*128+64]	;; cosine/sine for R7/I7 (w^6 = 10-complex w^3)
+	zfmsubpd zmm22, zmm20, zmm27, zmm0	;; A7 = R7 * cosine/sine - I7				; 31-34		n 42
+	zfmaddpd zmm0, zmm0, zmm27, zmm20	;; B7 = I7 * cosine/sine + R7				; 31-34		n 42
+
+	L1prefetchw srcreg+6*d1+64+L1pd, L1pt
+	vaddpd	zmm7, zmm7, zmm5		;; R6   = R6 + (r5--)					; 32-35		n 43
+	zfmaddpd zmm12, zmm5, zmm31, zmm12	;; R2Ao = R2Ao + .309(r5--)				; 32-35		n 38
+	L1prefetchw srcreg+7*d1+L1pd, L1pt
+	zfnmaddpd zmm9, zmm5, zmm30, zmm9	;; R48o = R48o - .809(r5--)				; 33-36		n 40
+	vsubpd	zmm16, zmm16, zmm3		;; I6   = I6 - (r4-+)					; 33-36		n 43
+	L1prefetchw srcreg+7*d1+64+L1pd, L1pt
+	zfmaddpd zmm17, zmm3, zmm30, zmm17	;; I2Ae = I2Ae + .809(r4-+)				; 34-37		n 39
+	zfmaddpd zmm10, zmm3, zmm31, zmm10	;; I48e = I48e + .309(r4-+)				; 34-37		n 41
+
+	vmovapd zmm27, [screg2+1*128]		;; sine for R5/I5 (w^4 = 10-complex w^2)
+	vmulpd	zmm14, zmm14, zmm27		;; A5 = A5 * sine (final R5)				; 35-38
+	vmulpd	zmm2, zmm2, zmm27		;; B5 = B5 * sine (final I5)				; 35-38
+
+	vmovapd zmm27, [screg2+3*128]		;; sine for R9/I9 (w^8 = 10-complex w^4)
+	vmulpd	zmm21, zmm21, zmm27		;; A9 = A9 * sine (final R9)				; 36-39
+	vmulpd	zmm4, zmm4, zmm27		;; B9 = B9 * sine (final I9)				; 36-39
+
+	vmovapd zmm27, [screg2+0*128]		;; sine for R3/I3 (w^2 = 10-complex w^1)
+	vmulpd	zmm18, zmm18, zmm27		;; A3 = A3 * sine (final R3)				; 37-40
+	vmulpd	zmm6, zmm6, zmm27		;; B3 = B3 * sine (final I3)				; 37-40
+
+	L1prefetchw srcreg+8*d1+L1pd, L1pt
+	zfmaddpd zmm20, zmm19, zmm28, zmm12	;; R2 = R2Ao + .951*R2Ae				; 38-41		n 44
+	zfnmaddpd zmm19, zmm19, zmm28, zmm12	;; R10= R2Ao - .951*R2Ae				; 38-41		n 45
+	L1prefetchw srcreg+8*d1+64+L1pd, L1pt
+	zfmaddpd zmm5, zmm13, zmm28, zmm17	;; I2 = I2Ae + .951*I2Ao				; 39-42		n 44
+	zfnmaddpd zmm13, zmm13, zmm28, zmm17	;; I10= I2Ae - .951*I2Ao				; 39-42		n 45
+	zstore	[srcreg+4*d1], zmm14		;; Save R5						; 39
+	L1prefetchw srcreg+9*d1+L1pd, L1pt
+	zfmaddpd zmm3, zmm1, zmm28, zmm9	;; R4 = R48o + .951*R48e				; 40-43		n 46
+	zfnmaddpd zmm1, zmm1, zmm28, zmm9	;; R8 = R48o - .951*R48e				; 40-43		n 47
+	zstore	[srcreg+4*d1+64], zmm2		;; Save I5						; 39+1
+	L1prefetchw srcreg+9*d1+64+L1pd, L1pt
+	zfmaddpd zmm12, zmm8, zmm28, zmm10	;; I4 = I48e + .951*I48o				; 41-44		n 46
+	zfnmaddpd zmm8, zmm8, zmm28, zmm10	;; I8 = I48e - .951*I48o				; 41-44		n 47
+	zstore	[srcreg+8*d1], zmm21		;; Save R9						; 40+1
+
+	vmovapd zmm27, [screg2+2*128]		;; sine for R7/I7 (w^6 = 10-complex w^3)
+	vmulpd	zmm22, zmm22, zmm27		;; A7 = A7 * sine (final R7)				; 42-45
+	vmulpd	zmm0, zmm0, zmm27		;; B7 = B7 * sine (final I7)				; 42-45
+	zstore	[srcreg+8*d1+64], zmm4		;; Save I9						; 40+2
+
+	vmovapd zmm27, [screg1+2*128+64]	;; cosine/sine for R6/I6 (w^5)
+	zfmsubpd zmm17, zmm7, zmm27, zmm16	;; A6 = R6 * cosine/sine - I6				; 43-46		n 48
+	zfmaddpd zmm16, zmm16, zmm27, zmm7	;; B6 = I6 * cosine/sine + R6				; 43-46		n 48
+	zstore	[srcreg+2*d1], zmm18		;; Save R3						; 41+2
+
+	vmovapd zmm27, [screg1+0*128+64]	;; cosine/sine for R2/I2 (w^1)
+	zfmsubpd zmm9, zmm20, zmm27, zmm5	;; A2 = R2 * cosine/sine - I2				; 44-47		n 49
+	zfmaddpd zmm5, zmm5, zmm27, zmm20	;; B2 = I2 * cosine/sine + R2				; 44-47		n 49
+	zstore	[srcreg+2*d1+64], zmm6		;; Save I3						; 41+3
+
+	vmovapd zmm27, [screg1+4*128+64]	;; cosine/sine for R10/I10 (w^9)
+	zfmsubpd zmm10, zmm19, zmm27, zmm13	;; A10 = R10 * cosine/sine - I10			; 45-48		n 50
+	zfmaddpd zmm13, zmm13, zmm27, zmm19	;; B10 = I10 * cosine/sine + R10			; 45-48		n 50
+
+	vmovapd zmm27, [screg1+1*128+64]	;; cosine/sine for R4/I4 (w^3)
+	zfmsubpd zmm7, zmm3, zmm27, zmm12	;; A4 = R4 * cosine/sine - I4				; 46-49		n 51
+	zfmaddpd zmm12, zmm12, zmm27, zmm3	;; B4 = I4 * cosine/sine + R4				; 46-49		n 51
+	zstore	[srcreg+6*d1], zmm22		;; Save R7						; 46
+
+	vmovapd zmm27, [screg1+3*128+64]	;; cosine/sine for R8/I8 (w^7)
+	zfmsubpd zmm20, zmm1, zmm27, zmm8	;; A8 = R8 * cosine/sine - I8				; 47-50		n 52
+	zfmaddpd zmm8, zmm8, zmm27, zmm1	;; B8 = I8 * cosine/sine + R8				; 47-50		n 52
+	zstore	[srcreg+6*d1+64], zmm0		;; Save I7						; 46+1
+
+	vmovapd zmm27, [screg1+2*128]		;; sine for R6/I6 (w^5)
+	vmulpd	zmm17, zmm17, zmm27		;; A6 = A6 * sine (final R6)				; 48-51
+	vmulpd	zmm16, zmm16, zmm27		;; B6 = B6 * sine (final I6)				; 48-51
+
+	vmovapd zmm27, [screg1+0*128]		;; sine for R2/I2 (w^1)
+	vmulpd	zmm9, zmm9, zmm27		;; A2 = A2 * sine (final R2)				; 49-52
+	vmulpd	zmm5, zmm5, zmm27		;; B2 = B2 * sine (final I2)				; 49-52
+
+	vmovapd zmm27, [screg1+4*128]		;; sine for R10/I10 (w^9)
+	vmulpd	zmm10, zmm10, zmm27		;; A10 = A10 * sine (final R10)				; 50-53
+	vmulpd	zmm13, zmm13, zmm27		;; B10 = B10 * sine (final I10)				; 50-53
+
+	vmovapd zmm27, [screg1+1*128]		;; sine for R4/I4 (w^3)
+	vmulpd	zmm7, zmm7, zmm27		;; A4 = A4 * sine (final R4)				; 51-54
+	vmulpd	zmm12, zmm12, zmm27		;; B4 = B4 * sine (final I4)				; 51-54
+
+	vmovapd zmm27, [screg1+3*128]		;; sine for R8/I8 (w^7)
+	vmulpd	zmm20, zmm20, zmm27		;; A8 = A8 * sine (final R8)				; 52-55
+	vmulpd	zmm8, zmm8, zmm27		;; B8 = B8 * sine (final I8)				; 52-55
+
+	bump	screg1, scinc1
+	bump	screg2, scinc2
+	zstore	[srcreg+5*d1], zmm17		;; Save R6						; 52
+	zstore	[srcreg+5*d1+64], zmm16		;; Save I6						; 52+1
+	zstore	[srcreg+d1], zmm9		;; Save R2						; 53+1
+	zstore	[srcreg+d1+64], zmm5		;; Save I2						; 53+2
+	zstore	[srcreg+9*d1], zmm10		;; Save R10						; 54+2
+	zstore	[srcreg+9*d1+64], zmm13		;; Save I10						; 54+3
+	zstore	[srcreg+3*d1], zmm7		;; Save R4						; 55+3
+	zstore	[srcreg+3*d1+64], zmm12		;; Save I4						; 55+4
+	zstore	[srcreg+7*d1], zmm20		;; Save R8						; 56+4
+	zstore	[srcreg+7*d1+64], zmm8		;; Save I8						; 56+5
+	bump	srcreg, srcinc
+	ENDM
+
+
+
+;;
+;; ************************************* 20-reals-unfft variants ******************************************
+;;
+
+;; These macros produce 20 reals after doing 4.322 levels of the inverse FFT applying
+;; the sin/cos multipliers beforehand.  The input is 2 real and 9 complex numbers.
+
+;; To calculate a 20-reals inverse FFT, we calculate 20 real values from 20 complex inputs in a brute force way.
+;; First we note that the 20 complex values are computed from the 9 complex and 2 real inputs using Hermetian symmetry, thusly:
+;; c1 = r1A + 0*i
+;; c2 = r2 + i2*i
+;; ...
+;; c10 = r10 + i10*i
+;; c11 = r1B + 0*i
+;; c12 = r10 - i10*i
+;; ...
+;; c20 = r2 - i2*i 
+;;
+;; The brute force calculations are:
+;;
+;; c1 + c2 + ... + c20	*  w^-0000000000...
+;; c1 + c2 + ... + c20	*  w^-0123456789A...
+;; c1 + c2 + ... + c20	*  w^-02468ACE....
+;;    ...
+;; c1 + c2 + ... + c20	*  w^-...A987654321
+;;
+;; The sin/cos values (w = 20th root of unity) are:
+;; w^-1 = .951 - .309i
+;; w^-2 = .809 - .588i
+;; w^-3 = .588 - .809i
+;; w^-4 = .309 - .951i
+;; w^-5 = 0 - 1i
+;; w^-6 = -.309 - .951i
+;; w^-7 = -.588 - .809i
+;; w^-8 = -.809 - .588i
+;; w^-9 = -.951 - .309i
+;; w^-10 = -1
+
+;; Applying the sin/cos values above, taking advantage of symmetry, and ignoring a lot of multiplies by 2:
+;; r1A     +(r2+r10)     +(r3+r9)     +(r4+r8)     +(r5+r7) + r6 + r1B
+;; r1A +.951(r2-r10) +.809(r3-r9) +.588(r4-r8) +.309(r5-r7)      - r1B +.309(i2+i10) +.588(i3+i9) +.809(i4+i8) +.951(i5+i7) + i6
+;; r1A +.809(r2+r10) +.309(r3+r9) -.309(r4+r8) -.809(r5+r7) - r6 + r1B +.588(i2-i10) +.951(i3-i9) +.951(i4-i8) +.588(i5-i7)
+;; r1A +.588(r2-r10) -.309(r3-r9) -.951(r4-r8) -.809(r5-r7)      - r1B +.809(i2+i10) +.951(i3+i9) +.309(i4+i8) -.588(i5+i7) - i6
+;; r1A +.309(r2+r10) -.809(r3+r9) -.809(r4+r8) +.309(r5+r7) + r6 + r1B +.951(i2-i10) +.588(i3-i9) -.588(i4-i8) -.951(i5-i7)
+;; r1A                   -(r3-r9)                  +(r5-r7)      - r1B     +(i2+i10)                  -(i4+i8)              + i6
+;; r1A -.309(r2+r10) -.809(r3+r9) +.809(r4+r8) +.309(r5+r7) - r6 + r1B +.951(i2-i10) -.588(i3-i9) -.588(i4-i8) +.951(i5-i7)
+;; r1A -.588(r2-r10) -.309(r3-r9) +.951(r4-r8) -.809(r5-r7)      - r1B +.809(i2+i10) -.951(i3+i9) +.309(i4+i8) +.588(i5+i7) - i6
+;; r1A -.809(r2+r10) +.309(r3+r9) +.309(r4+r8) -.809(r5+r7) + r6 + r1B +.588(i2-i10) -.951(i3-i9) +.951(i4-i8) -.588(i5-i7)
+;; r1A -.951(r2-r10) +.809(r3-r9) -.588(r4-r8) +.309(r5-r7)      - r1B +.309(i2+i10) -.588(i3+i9) +.809(i4+i8) -.951(i5+i7) + i6
+;; r1A     -(r2+r10)     +(r3+r9)     -(r4+r8)     +(r5+r7) - r6 + r1B
+;; ... r12 thru r20 are the same as r10 through r2 but with the sign of the imaginary component changed.
+;;
+;; Also remember that due to the funny way we do things, input #1 is r1A+r1B and input #11 is r1A-r1B
+
+;; Simplifying yields:
+;;R1 = (r1A+r1B) + r6     +((r2+r10)+(r5+r7))     +((r3+r9)+(r4+r8))
+;;R5 = (r1A+r1B) + r6 +.309((r2+r10)+(r5+r7)) -.809((r3+r9)+(r4+r8)) +.951((i2-i10)-(i5-i7)) +.588((i3-i9)-(i4-i8))
+;;R17= (r1A+r1B) + r6 +.309((r2+r10)+(r5+r7)) -.809((r3+r9)+(r4+r8)) -.951((i2-i10)-(i5-i7)) -.588((i3-i9)-(i4-i8))
+;;R9 = (r1A+r1B) + r6 -.809((r2+r10)+(r5+r7)) +.309((r3+r9)+(r4+r8)) +.588((i2-i10)-(i5-i7)) -.951((i3-i9)-(i4-i8))
+;;R13= (r1A+r1B) + r6 -.809((r2+r10)+(r5+r7)) +.309((r3+r9)+(r4+r8)) -.588((i2-i10)-(i5-i7)) +.951((i3-i9)-(i4-i8))
+
+;;R11= (r1A+r1B) - r6     -((r2+r10)-(r5+r7))     +((r3+r9)-(r4+r8))
+;;R3 = (r1A+r1B) - r6 +.809((r2+r10)-(r5+r7)) +.309((r3+r9)-(r4+r8)) +.588((i2-i10)+(i5-i7)) +.951((i3-i9)+(i4-i8))
+;;R19= (r1A+r1B) - r6 +.809((r2+r10)-(r5+r7)) +.309((r3+r9)-(r4+r8)) -.588((i2-i10)+(i5-i7)) -.951((i3-i9)+(i4-i8))
+;;R7 = (r1A+r1B) - r6 -.309((r2+r10)-(r5+r7)) -.809((r3+r9)-(r4+r8)) +.951((i2-i10)+(i5-i7)) -.588((i3-i9)+(i4-i8))
+;;R15= (r1A+r1B) - r6 -.309((r2+r10)-(r5+r7)) -.809((r3+r9)-(r4+r8)) -.951((i2-i10)+(i5-i7)) +.588((i3-i9)+(i4-i8))
+
+;;R6 = (r1A-r1B) + i6     +((i2+i10)+(r5-r7))     -((r3-r9)+(i4+i8))             
+;;R2 = (r1A-r1B) + i6 +.309((i2+i10)+(r5-r7)) +.809((r3-r9)+(i4+i8)) +.951((r2-r10)+(i5+i7)) +.588((i3+i9)+(r4-r8))
+;;R10= (r1A-r1B) + i6 +.309((i2+i10)+(r5-r7)) +.809((r3-r9)+(i4+i8)) -.951((r2-r10)+(i5+i7)) -.588((i3+i9)+(r4-r8))
+;;R14= (r1A-r1B) + i6 -.809((i2+i10)+(r5-r7)) -.309((r3-r9)+(i4+i8)) -.588((r2-r10)+(i5+i7)) +.951((i3+i9)+(r4-r8))
+;;R18= (r1A-r1B) + i6 -.809((i2+i10)+(r5-r7)) -.309((r3-r9)+(i4+i8)) +.588((r2-r10)+(i5+i7)) -.951((i3+i9)+(r4-r8))
+
+;;R16= (r1A-r1B) - i6     -((i2+i10)-(r5-r7))     -((r3-r9)-(i4+i8))             
+;;R4 = (r1A-r1B) - i6 +.809((i2+i10)-(r5-r7)) -.309((r3-r9)-(i4+i8)) +.588((r2-r10)-(i5+i7)) +.951((i3+i9)-(r4-r8))
+;;R8 = (r1A-r1B) - i6 +.809((i2+i10)-(r5-r7)) -.309((r3-r9)-(i4+i8)) -.588((r2-r10)-(i5+i7)) -.951((i3+i9)-(r4-r8))
+;;R12= (r1A-r1B) - i6 -.309((i2+i10)-(r5-r7)) +.809((r3-r9)-(i4+i8)) -.951((r2-r10)-(i5+i7)) +.588((i3+i9)-(r4-r8))
+;;R20= (r1A-r1B) - i6 -.309((i2+i10)-(r5-r7)) +.809((r3-r9)-(i4+i8)) +.951((r2-r10)-(i5+i7)) -.588((i3+i9)-(r4-r8))
+
+;;; BUG - do we need to support more distance input arguments (since distance is divisible by 4)??  would allow more use of dist32?
+
+;; Uses two sin/cos ptrs
+zr10_2sc_twenty_reals_unfft_preload MACRO
+	zr10_20r_unfft_cmn_preload
+	ENDM
+zr10_2sc_twenty_reals_unfft MACRO srcreg,srcinc,d1,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
+	zr10_20r_unfft_cmn srcreg,srcinc,d1,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
+	ENDM
+
+;; Combined sin/cos data
+zr10_csc_twenty_reals_unfft_preload MACRO
+	zr10_20r_unfft_cmn_preload
+	ENDM
+zr10_csc_twenty_reals_unfft MACRO srcreg,srcinc,d1,screg,scinc,maxrpt,L1pt,L1pd
+	zr10_20r_unfft_cmn srcreg,srcinc,d1,screg+5*128,0,screg,scinc,maxrpt,L1pt,L1pd
+	ENDM
+
+zr10_20r_unfft_cmn_preload MACRO
+	vbroadcastsd zmm31, ZMM_P309		;; .309
+	vbroadcastsd zmm30, ZMM_P809		;; .809
+	vbroadcastsd zmm29, ZMM_P588_P951	;; .588/.951
+	vbroadcastsd zmm28, ZMM_P951		;; .951
+	ENDM
+zr10_20r_unfft_cmn MACRO srcreg,srcinc,d1,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
+	vmovapd zmm27, [screg1+0*128+64]	;; cosine/sine for R2/I2 (w^1)
+	vmovapd	zmm1, [srcreg+d1]		;; R2
+	vmovapd	zmm11, [srcreg+d1+64]		;; I2
+	zfmaddpd zmm20, zmm1, zmm27, zmm11	;; A2 = R2 * cosine/sine + I2				; 1-4
+	zfmsubpd zmm11, zmm11, zmm27, zmm1	;; B2 = I2 * cosine/sine - R2				; 1-4
+
+	vmovapd zmm27, [screg2+1*128+64]	;; cosine/sine for R5/I5 (w^4 = complex w^2)
+	vmovapd	zmm4, [srcreg+4*d1]		;; R5
+	vmovapd	zmm14, [srcreg+4*d1+64]		;; I5
+	zfmaddpd zmm1, zmm4, zmm27, zmm14	;; A5 = R5 * cosine/sine + I5				; 2-5
+	zfmsubpd zmm14, zmm14, zmm27, zmm4	;; B5 = I5 * cosine/sine - R5				; 2-5
+
+	vmovapd zmm27, [screg2+0*128+64]	;; cosine/sine for R3/I3 (w^2 = complex w^1)
+	vmovapd	zmm2, [srcreg+2*d1]		;; R3
+	vmovapd	zmm12, [srcreg+2*d1+64]		;; I3
+	zfmaddpd zmm4, zmm2, zmm27, zmm12	;; A3 = R3 * cosine/sine + I3				; 3-6
+	zfmsubpd zmm12, zmm12, zmm27, zmm2	;; B3 = I3 * cosine/sine - R3				; 3-6
+
+	vmovapd zmm27, [screg1+1*128+64]	;; cosine/sine for R4/I4 (w^3)
+	vmovapd	zmm3, [srcreg+3*d1]		;; R4
+	vmovapd	zmm13, [srcreg+3*d1+64]		;; I4
+	zfmaddpd zmm2, zmm3, zmm27, zmm13	;; A4 = R4 * cosine/sine + I4				; 4-7
+	zfmsubpd zmm13, zmm13, zmm27, zmm3	;; B4 = I4 * cosine/sine - R4				; 4-7
+
+	vmovapd zmm27, [screg1+2*128+64]	;; cosine/sine for R6/I6 (w^5)
+	vmovapd	zmm5, [srcreg+5*d1]		;; R6
+	vmovapd	zmm15, [srcreg+5*d1+64]		;; I6
+	zfmaddpd zmm3, zmm5, zmm27, zmm15	;; A6 = R6 * cosine/sine + I6				; 5-8
+	zfmsubpd zmm15, zmm15, zmm27, zmm5	;; B6 = I6 * cosine/sine - R6				; 5-8
+
+	vmovapd zmm27, [screg1+4*128+64]	;; cosine/sine for R10/I10 (w^9)
+	vmovapd	zmm9, [srcreg+9*d1]		;; R10
+	vmovapd	zmm19, [srcreg+9*d1+64]		;; I10
+	zfmaddpd zmm5, zmm9, zmm27, zmm19	;; A10 = R10 * cosine/sine + I10 (new R10/sine)		; 6-9
+	zfmsubpd zmm19, zmm19, zmm27, zmm9	;; B10 = I10 * cosine/sine - R10 (new I10/sine)		; 6-9
+
+	vmovapd zmm27, [screg1+0*128]		;; sine for R2/I2 (w^1)
+	vmulpd	zmm20, zmm20, zmm27		;; A2 = A2 * sine (new R2)				; 7-10
+	vmulpd	zmm11, zmm11, zmm27		;; B2 = B2 * sine (new I2)				; 7-10
+
+	vmovapd zmm27, [screg2+2*128+64]	;; cosine/sine for R7/I7 (w^6 = complex w^3)
+	vmovapd	zmm6, [srcreg+6*d1]		;; R7
+	vmovapd	zmm16, [srcreg+6*d1+64]		;; I7
+	zfmaddpd zmm9, zmm6, zmm27, zmm16	;; A7 = R7 * cosine/sine + I7 (new R7/sine)		; 8-11
+	zfmsubpd zmm16, zmm16, zmm27, zmm6	;; B7 = I7 * cosine/sine - R7 (new I7/sine)		; 8-11
+
+	vmovapd zmm27, [screg2+1*128]		;; sine for R5/I5 (w^4 = complex w^2)
+	vmulpd	zmm1, zmm1, zmm27		;; A5 = A5 * sine (new R5)				; 9-12
+	vmulpd	zmm14, zmm14, zmm27		;; B5 = B5 * sine (new I5)				; 9-12
+
+	vmovapd zmm27, [screg2+3*128+64]	;; cosine/sine for R9/I9 (w^8 = complex w^4)
+	vmovapd	zmm8, [srcreg+8*d1]		;; R9
+	vmovapd	zmm18, [srcreg+8*d1+64]		;; I9
+	zfmaddpd zmm6, zmm8, zmm27, zmm18	;; A9 = R9 * cosine/sine + I9 (new R9/sine)		; 10-13
+	zfmsubpd zmm18, zmm18, zmm27, zmm8	;; B9 = I9 * cosine/sine - R9 (new I9/sine)		; 10-13
+
+	vmovapd zmm27, [screg2+0*128]		;; sine for R3/I3 (w^2 = complex w^1)
+	vmulpd	zmm4, zmm4, zmm27		;; A3 = A3 * sine (new R3)				; 11-14
+	vmulpd	zmm12, zmm12, zmm27		;; B3 = B3 * sine (new I3)				; 11-14
+
+	vmovapd zmm27, [screg1+3*128+64]	;; cosine/sine for R8/I8 (w^7)
+	vmovapd	zmm7, [srcreg+7*d1]		;; R8
+	vmovapd	zmm17, [srcreg+7*d1+64]		;; I8
+	zfmaddpd zmm8, zmm7, zmm27, zmm17	;; A8 = R8 * cosine/sine + I8 (new R8/sine)		; 12-15
+	zfmsubpd zmm17, zmm17, zmm27, zmm7	;; B8 = I8 * cosine/sine - R8 (new I8/sine)		; 12-15
+
+	vmovapd zmm27, [screg1+1*128]		;; sine for R4/I4 (w^3)
+	vmulpd	zmm2, zmm2, zmm27		;; A4 = A4 * sine (new R4)				; 13-16
+	vmulpd	zmm13, zmm13, zmm27		;; B4 = B4 * sine (new I4)				; 13-16
+
+	vmovapd zmm27, [screg1+4*128]		;; sine for R10/I10 (w^9)
+	zfmaddpd zmm7, zmm5, zmm27, zmm20	;; r2+ = R2+R10*sine					; 14-17
+	zfnmaddpd zmm5, zmm5, zmm27, zmm20	;; r2- = R2-R10*sine					; 14-17
+	zfmaddpd zmm20, zmm19, zmm27, zmm11	;; i2+ = I2+I10*sine					; 15-18
+	zfnmaddpd zmm19, zmm19, zmm27, zmm11	;; i2- = I2-I10*sine					; 15-18
+
+	vmovapd zmm27, [screg2+2*128]		;; sine for R7/I7 (w^6 = complex w^3)
+	zfmaddpd zmm11, zmm9, zmm27, zmm1	;; r5+ = R5+R7*sine					; 16-19
+	zfnmaddpd zmm9, zmm9, zmm27, zmm1	;; r5- = R5-R7*sine					; 16-19
+	zfmaddpd zmm1, zmm16, zmm27, zmm14	;; i5+ = I5+I7*sine					; 17-20
+	zfnmaddpd zmm16, zmm16, zmm27, zmm14	;; i5- = I5-I7*sine					; 17-20
+
+	vmovapd zmm27, [screg2+3*128]		;; sine for R9/I9 (w^8 = complex w^4)
+	zfmaddpd zmm14, zmm6, zmm27, zmm4	;; r3+ = R3+R9*sine					; 18-21
+	zfnmaddpd zmm6, zmm6, zmm27, zmm4	;; r3- = R3-R9*sine					; 18-21
+	zfmaddpd zmm4, zmm18, zmm27, zmm12	;; i3+ = I3+I9*sine					; 19-22
+	zfnmaddpd zmm18, zmm18, zmm27, zmm12	;; i3- = I3-I9*sine					; 19-22
+
+	vmovapd zmm27, [screg1+3*128]		;; sine for R8/I8 (w^7)
+	zfmaddpd zmm12, zmm8, zmm27, zmm2	;; r4+ = R4+R8*sine					; 20-23
+	zfnmaddpd zmm8, zmm8, zmm27, zmm2	;; r4- = R4-R8*sine					; 20-23
+	zfmaddpd zmm2, zmm17, zmm27, zmm13	;; i4+ = I4+I8*sine					; 21-24
+	zfnmaddpd zmm17, zmm17, zmm27, zmm13	;; i4- = I4-I8*sine					; 21-24
+
+	vmovapd zmm27, [screg1+2*128]		;; sine for R6/I6 (w^5)
+	vmovapd	zmm0, [srcreg]			;; r1A+r1B
+	zfmaddpd zmm13, zmm3, zmm27, zmm0	;; r1++ = (r1A+r1B)+R6*sine				; 22-25
+	zfnmaddpd zmm3, zmm3, zmm27, zmm0	;; r1+- = (r1A+r1B)-R6*sine				; 22-25
+	vmovapd	zmm10, [srcreg+64]		;; r1A-r1B
+	zfmaddpd zmm0, zmm15, zmm27, zmm10	;; r1-+ = (r1A-r1B)+I6*sine				; 23-26
+	zfnmaddpd zmm15, zmm15, zmm27, zmm10	;; r1-- = (r1A-r1B)-I6*sine				; 23-26
+
+	L1prefetchw srcreg+L1pd, L1pt
+	vaddpd	zmm10, zmm7, zmm11		;; r2++ = (r2+r10) + (r5+r7)				; 24-27
+	vsubpd	zmm7, zmm7, zmm11		;; r2+- = (r2+r10) - (r5+r7)				; 24-27
+	L1prefetchw srcreg+64+L1pd, L1pt
+	vaddpd	zmm11, zmm19, zmm16		;; i2-+ = (i2-i10) + (i5-i7)				; 25-28
+	vsubpd	zmm19, zmm19, zmm16		;; i2-- = (i2-i10) - (i5-i7)				; 25-28
+	L1prefetchw srcreg+d1+L1pd, L1pt
+	vaddpd	zmm16, zmm18, zmm17		;; i3-+ = (i3-i9) + (i4-i8)				; 26-29
+	vsubpd	zmm18, zmm18, zmm17		;; i3-- = (i3-i9) - (i4-i8)				; 26-29
+	L1prefetchw srcreg+d1+64+L1pd, L1pt
+	vaddpd	zmm17, zmm14, zmm12		;; r3++ = (r3+r9) + (r4+r8)				; 27-30
+	vsubpd	zmm14, zmm14, zmm12		;; r3+- = (r3+r9) - (r4+r8)				; 27-30
+
+	L1prefetchw srcreg+2*d1+L1pd, L1pt
+	vaddpd	zmm12, zmm13, zmm10		;; R1    = (r1++) + (r2++)				; 28-31
+	zfmaddpd zmm21, zmm10, zmm31, zmm13	;; R5_17r= (r1++) + .309(r2++)				; 28-31
+	L1prefetchw srcreg+2*d1+64+L1pd, L1pt
+	zfnmaddpd zmm10, zmm10, zmm30, zmm13	;; R9_13r= (r1++) - .809(r2++)				; 29-32
+	vsubpd	zmm13, zmm3, zmm7		;; R11   = (r1+-) - (r2+-)				; 29-32
+	L1prefetchw srcreg+3*d1+L1pd, L1pt
+	zfmaddpd zmm22, zmm7, zmm30, zmm3	;; R3_19r= (r1+-) + .809(r2+-)				; 30-33
+	zfnmaddpd zmm7, zmm7, zmm31, zmm3	;; R7_15r= (r1+-) - .309(r2+-)				; 30-33
+
+	L1prefetchw srcreg+3*d1+64+L1pd, L1pt
+	zfmaddpd zmm3, zmm18, zmm29, zmm19	;; R5_17i= (i2--) + .588/.951(i3--)			; 31-34
+	zfmsubpd zmm19, zmm19, zmm29, zmm18	;; R9_13i= .588/.951(i2--) - (i3--)			; 31-34
+	L1prefetchw srcreg+4*d1+L1pd, L1pt
+	zfmaddpd zmm18, zmm11, zmm29, zmm16	;; R3_19i= .588/.951(i2-+) + (i3-+)			; 32-35
+	zfnmaddpd zmm16, zmm16, zmm29, zmm11	;; R7_15i= (i2-+) - .588/.951(i3-+)			; 32-35
+
+	L1prefetchw srcreg+4*d1+64+L1pd, L1pt
+	vaddpd	zmm12, zmm12, zmm17		;; R1    = R1 + (r3++)					; 33-36
+	zfnmaddpd zmm21, zmm17, zmm30, zmm21	;; R5_17r= R5_17r - .809(r3++)				; 33-36
+	L1prefetchw srcreg+5*d1+L1pd, L1pt
+	zfmaddpd zmm10, zmm17, zmm31, zmm10	;; R9_13r= R9_13r + .309(r3++)				; 34-37
+	vaddpd	zmm13, zmm13, zmm14		;; R11   = R11 + (r3+-)					; 34-37
+	L1prefetchw srcreg+5*d1+64+L1pd, L1pt
+	zfmaddpd zmm22, zmm14, zmm31, zmm22	;; R3_19r= R3_19r + .309(r3+-)				; 35-38
+	zfnmaddpd zmm7, zmm14, zmm30, zmm7	;; R7_15r= R7_15r - .809(r3+-)				; 35-38
+
+	L1prefetchw srcreg+6*d1+L1pd, L1pt
+	vaddpd	zmm11, zmm20, zmm9		;; i2++ = (i2+i10) + (r5-r7)				; 36-39
+	vsubpd	zmm20, zmm20, zmm9		;; i2+- = (i2+i10) - (r5-r7)				; 36-39
+	L1prefetchw srcreg+6*d1+64+L1pd, L1pt
+	vaddpd	zmm17, zmm5, zmm1		;; r2-+ = (r2-r10) + (i5+i7)				; 37-40
+	vsubpd	zmm5, zmm5, zmm1		;; r2-- = (r2-r10) - (i5+i7)				; 37-40
+  	zstore	[srcreg], zmm12			;; Save R1						; 37
+
+	L1prefetchw srcreg+7*d1+L1pd, L1pt
+	zfmaddpd zmm14, zmm3, zmm28, zmm21	;; R5  = R5_17r + .951*R5_17i				; 38-41
+	zfnmaddpd zmm3, zmm3, zmm28, zmm21	;; R17 = R5_17r - .951*R5_17i				; 38-41
+	zstore	[srcreg+64], zmm13		;; Save R11						; 38
+	L1prefetchw srcreg+7*d1+64+L1pd, L1pt
+	zfmaddpd zmm9, zmm19, zmm28, zmm10	;; R9  = R9_13r + .951*R9_13i				; 39-42
+	zfnmaddpd zmm19, zmm19, zmm28, zmm10	;; R13 = R9_13r - .951*R9_13i				; 39-42
+	L1prefetchw srcreg+8*d1+L1pd, L1pt
+	zfmaddpd zmm1, zmm18, zmm28, zmm22	;; R3  = R3_19r + .951*R3_19i				; 40-43
+	zfnmaddpd zmm18, zmm18, zmm28, zmm22	;; R19 = R3_19r - .951*R3_19i				; 40-43
+
+	L1prefetchw srcreg+8*d1+64+L1pd, L1pt
+	vaddpd	zmm10, zmm4, zmm8		;; i3++ = (i3+i9) + (r4-r8)				; 41-44
+	vsubpd	zmm4, zmm4, zmm8		;; i3+- = (i3+i9) - (r4-r8)				; 41-44
+	L1prefetchw srcreg+9*d1+L1pd, L1pt
+	vaddpd	zmm8, zmm6, zmm2		;; r3-+ = (r3-r9) + (i4+i8)				; 42-45
+	vsubpd	zmm6, zmm6, zmm2		;; r3-- = (r3-r9) - (i4+i8)				; 42-45
+	zstore	[srcreg+4*d1], zmm14		;; Save R5						; 42
+
+	L1prefetchw srcreg+9*d1+64+L1pd, L1pt
+	vaddpd	zmm2, zmm0, zmm11		;; R6     = (r1-+) + (i2++)				; 43-46
+	zfmaddpd zmm21, zmm11, zmm31, zmm0	;; R2_10a = (r1-+) + .309(i2++)				; 43-46
+	zstore	[srcreg+6*d1+64], zmm3		;; Save R17						; 42+1
+	zfnmaddpd zmm11, zmm11, zmm30, zmm0	;; R14_18a= (r1-+) - .809(i2++)				; 44-47
+	vsubpd	zmm0, zmm15, zmm20		;; R16    = (r1--) - (i2+-)				; 44-47
+	zstore	[srcreg+8*d1], zmm9		;; Save R9						; 43+1
+	zfmaddpd zmm22, zmm20, zmm30, zmm15	;; R4_8a  = (r1--) + .809(i2+-)				; 45-48
+	zfnmaddpd zmm20, zmm20, zmm31, zmm15	;; R12_20a= (r1--) - .309(i2+-)				; 45-48
+	zstore	[srcreg+2*d1+64], zmm19		;; Save R13						; 43+2
+
+	zfmaddpd zmm15, zmm10, zmm29, zmm17	;; R2_10b = (r2-+) + .588/.951(i3++)			; 46-49
+	zfmsubpd zmm17, zmm17, zmm29, zmm10	;; R14_18b= .588/.951(r2-+) - (i3++)			; 46-49
+	zstore	[srcreg+2*d1], zmm1		;; Save R3						; 44+2
+	zfmaddpd zmm10, zmm5, zmm29, zmm4	;; R4_8b  = .588/.951(r2--) + (i3+-)			; 47-50
+	zfnmaddpd zmm4, zmm4, zmm29, zmm5	;; R12_20b= (r2--) - .588/.951(i3+-)			; 47-50
+	zstore	[srcreg+8*d1+64], zmm18		;; Save R19						; 44+3
+
+	vsubpd	zmm2, zmm2, zmm8		;; R6     = R6 - (r3-+)					; 48-51
+	zfmaddpd zmm21, zmm8, zmm30, zmm21	;; R2_10a = R2_10a + .809(r3-+)				; 48-51
+	zfnmaddpd zmm11, zmm8, zmm31, zmm11	;; R14_18a= R14_18a - .309(r3-+)			; 49-52
+	vsubpd	zmm0, zmm0, zmm6		;; R16    = R16 - (r3--)				; 49-52
+	zfnmaddpd zmm22, zmm6, zmm31, zmm22	;; R4_8a  = R4_8a - .309(r3--)				; 50-53
+	zfmaddpd zmm20, zmm6, zmm30, zmm20	;; R12_20a= R12_20a + .809(r3--)			; 50-53
+
+	zfmaddpd zmm5, zmm16, zmm28, zmm7	;; R7  = R7_15r + .951*R7_15i				; 51-54
+	zfnmaddpd zmm16, zmm16, zmm28, zmm7	;; R15 = R7_15r - .951*R7_15i				; 51-54
+
+	zfmaddpd zmm8, zmm15, zmm28, zmm21	;; R2  = R2_10a + .951*R2_10b				; 52-55
+	zfnmaddpd zmm15, zmm15, zmm28, zmm21	;; R10 = R2_10a - .951*R2_10b				; 52-55
+	zstore	[srcreg+5*d1], zmm2		;; Save R6						; 52
+	zfnmaddpd zmm6, zmm17, zmm28, zmm11	;; R14 = R14_18a - .951*R14_18b				; 53-56
+	zfmaddpd zmm17, zmm17, zmm28, zmm11	;; R18 = R14_18a + .951*R14_18b				; 53-56
+	zstore	[srcreg+5*d1+64], zmm0		;; Save R16						; 53
+
+	zfmaddpd zmm7, zmm10, zmm28, zmm22	;; R4  = R4_8a + .951*R4_8b				; 54-57
+	zfnmaddpd zmm10, zmm10, zmm28, zmm22	;; R8  = R4_8a - .951*R4_8b				; 54-57
+	zfnmaddpd zmm11, zmm4, zmm28, zmm20	;; R12 = R12_20a - .951*R12_20b				; 55-58
+	zfmaddpd zmm4, zmm4, zmm28, zmm20	;; R20 = R12_20a + .951*R12_20b				; 55-58
+
+	bump	screg1, scinc1
+	bump	screg2, scinc2
+	zstore	[srcreg+6*d1], zmm5		;; Save R7						; 55
+	zstore	[srcreg+4*d1+64], zmm16		;; Save R15						; 55+1
+	zstore	[srcreg+d1], zmm8		;; Save R2						; 56+1
+	zstore	[srcreg+9*d1], zmm15		;; Save R10						; 56+2
+	zstore	[srcreg+3*d1+64], zmm6		;; Save R14						; 57+2
+	zstore	[srcreg+7*d1+64], zmm17		;; Save R18						; 57+3
+	zstore	[srcreg+3*d1], zmm7		;; Save R4						; 58+3
+	zstore	[srcreg+7*d1], zmm10		;; Save R8						; 58+4
+	zstore	[srcreg+d1+64], zmm11		;; Save R12						; 59+4
+	zstore	[srcreg+9*d1+64], zmm4		;; Save R20						; 59+5
+	bump	srcreg, srcinc
+	ENDM
+
+

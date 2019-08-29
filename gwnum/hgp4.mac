@@ -1,0 +1,432 @@
+; Copyright 2001-2010 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+; These macros implement Pentium 4 optimized versions of macros found
+; in hg.mac.
+
+
+x6r_fft MACRO r1, r2, r3, r4, r5, r6, t1, t2
+	xcopy	t1, r3
+	addpd	r3, r5			;; T4 = R3 + R5
+	xcopy	t2, r2
+	addpd	r2, r6			;; T2 = R2 + R6
+	subpd	t1, r5			;; T3 = R3 - R5
+	subpd	t2, r6			;; T1 = R2 - R6
+	xload	r5, XMM_HALF
+	mulpd	r5, r3			;; 0.5 * (R3 + R5)
+	addpd	r3, r1			;; new R1 = R1 + R3 + R5
+	xload	r6, XMM_HALF
+	mulpd	r6, r2			;; 0.5 * (R2 + R6)
+	addpd	r2, r4			;; new R3 = R2 + R4 + R6
+	mulpd	t1, XMM_P866		;; new I2 = 0.866 * (R3 - R5)
+	subpd	r1, r5			;; new R2 = R1 - 0.5 * (R3 + R5)
+	mulpd	t2, XMM_P866		;; new I4 = 0.866 * (R2 - R6)
+	subpd	r6, r4			;; new R4 = 0.5 * (R2 + R6) - R4
+
+	subpd	r3, r2			;; R1 = R1 - R3 (final R2)
+	multwo	r2
+	addpd	r2, r3			;; R3 = R1 + R3 (final R1)
+	subpd	t1, t2			;; I2 = I2 - I4 (final R6)
+	multwo	t2
+	addpd	t2, t1			;; I4 = I2 + I4 (final R4)
+	subpd	r1, r6			;; R2 = R2 - R4 (final R5)
+	multwo	r6
+	addpd	r6, r1			;; R4 = R2 + R4 (final R3)
+	ENDM
+
+x6r_unfft MACRO r1, r2, r3, r4, r5, r6, t1, t2
+	subpd	r3, r5			;; R3 - R5 (new R4)
+	multwo	r5
+	addpd	r5, r3			;; R3 + R5 (new R2)
+	subpd	r4, r6			;; R4 - R6 (new I4)
+	multwo	r6
+	addpd	r6, r4			;; R4 + R6 (new I2)
+	xload	t2, XMM_HALF
+	mulpd	t2, r3			;; 0.5 * R4
+	subpd	r1, r2			;; R1 - R2 (new R3)
+	multwo	r2
+	addpd	r2, r1			;; R1 + R2 (new R1)
+	xload	t1, XMM_HALF
+	mulpd	t1, r5			;; 0.5 * R2
+	mulpd	r4, XMM_P866		;; 0.866 * I4
+	mulpd	r6, XMM_P866		;; 0.866 * I2
+	addpd	t2, r1			;; R3 + 0.5 * R4
+	addpd	r5, r2			;; final R1 = R1 + R2
+	subpd	r2, t1			;; R1 - 0.5 * R2
+	subpd	r1, r3			;; final R4 = R3 - R4
+	subpd	t2, r4			;; final R6 = R3 + 0.5 * R4 - 0.866 * I4
+	multwo	r4
+	addpd	r4, t2			;; final R2 = R3 + 0.5 * R4 + 0.866 * I4
+	subpd	r2, r6			;; final R5 = R1 - 0.5 * R2 - 0.866 * I2
+	multwo	r6
+	addpd	r6, r2			;; final R3 = R1 - 0.5 * R2 + 0.866 * I2
+	ENDM
+
+x7r_fft MACRO r1, r2, r3, r4, r5, r6, r7, t1, memr1
+	subpd	r2, r7			;;	R2-R7
+	multwo	r7
+	addpd	r7, r2			;; T1 = R2+R7
+	subpd	r3, r6			;;	R3-R6
+	multwo	r6
+	addpd	r6, r3			;; T2 = R3+R6
+	subpd	r4, r5			;;	R4-R5
+	multwo	r5
+	addpd	r5, r4			;; T3 = R4+R5
+	xcopy	t1, r1			;; R1
+	addpd	t1, r7			;; R1+T1
+	addpd	t1, r6			;; R1+T1+T2
+	addpd	t1, r5			;; R1+T1+T2+T3 (final R1)
+	xstore	memr1, t1
+	mulpd	r7, XMM_P623		;; T1 = T1 * .623
+	mulpd	r6, XMM_P623		;; T2 = T2 * .623
+	mulpd	r5, XMM_P623		;; T3 = T3 * .623
+	xstore	XMM_TMP1, r2
+	xcopy	r2, r1
+	xcopy	t1, r1
+	addpd	r1, r7			;; newR2 = R1 + T1
+	addpd	r2, r5			;; newR3 = R1 + T3
+	addpd	t1, r6			;; newR4 = R1 + T2
+	mulpd	r7, XMM_M358		;; T1 = T1 * (-.223/.623)
+	mulpd	r6, XMM_M358		;; T2 = T2 * (-.223/.623)
+	mulpd	r5, XMM_M358		;; T3 = T3 * (-.223/.623)
+	addpd	r1, r6			;; newR2 = newR2 + T2
+	addpd	r2, r7			;; newR3 = newR3 + T1
+	addpd	t1, r5			;; newR4 = newR4 + T3
+	mulpd	r7, XMM_P404		;; T1 = T1 * (-.901/-.223)
+	mulpd	r6, XMM_P404		;; T2 = T2 * (-.901/-.223)
+	mulpd	r5, XMM_P404		;; T3 = T3 * (-.901/-.223)
+	addpd	r1, r5			;; newR2 = newR2 + T3 (final R2)
+	addpd	r2, r6			;; newR3 = newR3 + T2 (final R3)
+	addpd	t1, r7			;; newR4 = newR4 + T1 (final R4)
+	xload	r7, XMM_TMP1		;; T1 = R2-R7
+	mulpd	r7, XMM_P975		;; T1 = T1 * .975
+	mulpd	r3, XMM_P975		;; T2 = T2 * .975
+	mulpd	r4, XMM_P975		;; T3 = T3 * .975
+	xstore	XMM_TMP2, r2		;; final R3
+	xcopy	r2, r3			;; newI2 = T2
+	xcopy	r6, r7			;; newI3 = T1
+	xcopy	r5, r4			;; newI4 = T3
+	mulpd	r7, XMM_P445		;; T1 = T1 * (.434/.975)
+	mulpd	r3, XMM_P445		;; T2 = T2 * (.434/.975)
+	mulpd	r5, XMM_P445		;; T3 = T3 * (.434/.975)
+	addpd	r2, r5			;; newI2 = newI2 + T3
+	subpd	r6, r3			;; newI3 = newI3 - T2
+	addpd	r4, r7			;; newI4 = newI4 + T1
+	mulpd	r7, XMM_P180		;; T1 = T1 * (.782/.434)
+	mulpd	r3, XMM_P180		;; T2 = T2 * (.782/.434)
+	mulpd	r5, XMM_P180		;; T3 = T3 * (.782/.434)
+	addpd	r2, r7			;; newI2 = newI2 + T1 (final I2)
+	subpd	r6, r5			;; newI3 = newI3 - T3 (final I3)
+	subpd	r4, r3			;; newI4 = newI4 - T2 (final I4)
+	xload	r5, XMM_TMP2 		;; final R3
+	ENDM
+
+x7r_unfft_mem MACRO r1, r2, r3, r4, r5, r6, r7, t1, memr3, memr7, outmemr1
+	xcopy	t1, r1			;; R1
+	addpd	t1, r2			;; R1 + R2
+	addpd	t1, r4			;; R1 + R2 + R3
+	addpd	t1, r6			;; R1 + R2 + R3 + R4 (final R1)
+	xstore	outmemr1, t1		;; Save final R1
+
+	xcopy	r7, r1			;; A2 = R1
+	xcopy	t1, r1			;; A3 = R1
+	mulpd	r2, XMM_P623		;; S2 = R2 * .623
+	mulpd	r4, XMM_P623		;; S3 = R3 * .623
+	mulpd	r6, XMM_P623		;; S4 = R4 * .623
+	addpd	r7, r2			;; A2 = A2 + S2
+	addpd	t1, r6			;; A3 = A3 + S4
+	addpd	r1, r4			;; A4 = A4 + S3
+	mulpd	r2, XMM_M358		;; S2 = S2 * (-.223/.623)
+	mulpd	r4, XMM_M358		;; S3 = S3 * (-.223/.623)
+	mulpd	r6, XMM_M358		;; S4 = S4 * (-.223/.623)
+	addpd	r7, r4			;; A2 = A2 + S3
+	addpd	t1, r2			;; A3 = A3 + S2
+	addpd	r1, r6			;; A4 = A4 + S4
+	mulpd	r2, XMM_P404		;; S2 = S2 * (-.901/-.223)
+	mulpd	r4, XMM_P404		;; S3 = S3 * (-.901/-.223)
+	mulpd	r6, XMM_P404		;; S4 = S4 * (-.901/-.223)
+	addpd	r7, r6			;; A2 = A2 + S4
+	addpd	t1, r4			;; A3 = A3 + S3
+	addpd	r1, r2			;; A4 = A4 + S2
+
+	xstore	XMM_TMP2, r7		;; Save A2
+	xload	r3, memr3		;; Load I2
+	xload	r7, memr7		;; Load I3
+	mulpd	r3, XMM_P975		;; T2 = I2*.975
+	mulpd	r5, XMM_P975		;; T3 = I3*.975
+	mulpd	r7, XMM_P975		;; T4 = I4*.975
+	xcopy	r6, r5			;; B2 = T3
+	xcopy	r2, r3			;; B3 = T2
+	xcopy	r4, r7			;; B4 = T4
+	mulpd	r3, XMM_P445		;; T2 = T2 * (.434/.975)
+	mulpd	r5, XMM_P445		;; T3 = T3 * (.434/.975)
+	mulpd	r7, XMM_P445		;; T4 = T4 * (.434/.975)
+	addpd	r6, r7			;; B2 = B2 + T4
+	subpd	r2, r5			;; B3 = B3 - T3
+	addpd	r4, r3			;; B4 = B4 + T2
+	mulpd	r3, XMM_P180		;; T2 = T2 * (.782/.434)
+	mulpd	r5, XMM_P180		;; T3 = T3 * (.782/.434)
+	mulpd	r7, XMM_P180		;; T4 = T4 * (.782/.434)
+	addpd	r6, r3			;; B2 = B2 + T2
+	subpd	r2, r7			;; B3 = B3 - T4
+	subpd	r4, r5			;; B4 = B4 - T3
+	xload	r3, XMM_TMP2		;; Reload A2
+
+	subpd	r3, r6			;; A2 = A2 - B2 (final R7)
+	multwo	r6			;; B2 = B2 * 2
+	addpd	r6, r3			;; B2 = A2 + B2 (final R2)
+	subpd	t1, r2			;; A3 = A3 - B3 (final R6)
+	multwo	r2			;; B3 = B3 * 2
+	addpd	r2, t1			;; B3 = A3 + B3 (final R3)
+	subpd	r1, r4			;; A4 = A4 - B4 (final R5)
+	multwo	r4			;; B4 = B4 * 2
+	addpd	r4, r1			;; B4 = A4 + B4 (final R4)
+	ENDM
+x7r_unfft MACRO r1, r2, r3, r4, r5, r6, r7, t1, memr1
+	xcopy	t1, r1			;; R1
+	addpd	t1, r2			;; R1 + R2
+	addpd	t1, r4			;; R1 + R2 + R3
+	addpd	t1, r6			;; R1 + R2 + R3 + R4 (final R1)
+	mulpd	r3, XMM_P975		;; T2 = I2*.975
+	mulpd	r5, XMM_P975		;; T3 = I3*.975
+	mulpd	r7, XMM_P975		;; T4 = I4*.975
+	xstore	memr1, t1		;; Save final R1
+	xstore	XMM_TMP2, r2		;; Save R2
+	xstore	XMM_TMP3, r4		;; Save R3
+	xcopy	t1, r5			;; B2 = T3
+	xcopy	r2, r3			;; B3 = T2
+	xcopy	r4, r7			;; B4 = T4
+	mulpd	r3, XMM_P445		;; T2 = T2 * (.434/.975)
+	mulpd	r5, XMM_P445		;; T3 = T3 * (.434/.975)
+	mulpd	r7, XMM_P445		;; T4 = T4 * (.434/.975)
+	addpd	t1, r7			;; B2 = B2 + T4
+	subpd	r2, r5			;; B3 = B3 - T3
+	addpd	r4, r3			;; B4 = B4 + T2
+	mulpd	r3, XMM_P180		;; T2 = T2 * (.782/.434)
+	mulpd	r5, XMM_P180		;; T3 = T3 * (.782/.434)
+	mulpd	r7, XMM_P180		;; T4 = T4 * (.782/.434)
+	addpd	t1, r3			;; B2 = B2 + T2
+	subpd	r2, r7			;; B3 = B3 - T4
+	subpd	r4, r5			;; B4 = B4 - T3
+	xload	r3, XMM_TMP2		;; Reload R2
+	xload	r5, XMM_TMP3		;; Reload R3
+	xstore	XMM_TMP2, t1		;; Save B2
+	xcopy	r7, r1			;; A2 = R1
+	xcopy	t1, r1			;; A3 = R1
+	mulpd	r3, XMM_P623		;; S2 = R2 * .623
+	mulpd	r5, XMM_P623		;; S3 = R3 * .623
+	mulpd	r6, XMM_P623		;; S4 = R4 * .623
+	addpd	r7, r3			;; A2 = A2 + S2
+	addpd	t1, r6			;; A3 = A3 + S4
+	addpd	r1, r5			;; A4 = A4 + S3
+	mulpd	r3, XMM_M358		;; S2 = S2 * (-.223/.623)
+	mulpd	r5, XMM_M358		;; S3 = S3 * (-.223/.623)
+	mulpd	r6, XMM_M358		;; S4 = S4 * (-.223/.623)
+	addpd	r7, r5			;; A2 = A2 + S3
+	addpd	t1, r3			;; A3 = A3 + S2
+	addpd	r1, r6			;; A4 = A4 + S4
+	mulpd	r3, XMM_P404		;; S2 = S2 * (-.901/-.223)
+	mulpd	r5, XMM_P404		;; S3 = S3 * (-.901/-.223)
+	mulpd	r6, XMM_P404		;; S4 = S4 * (-.901/-.223)
+	addpd	r7, r6			;; A2 = A2 + S4
+	addpd	t1, r5			;; A3 = A3 + S3
+	addpd	r1, r3			;; A4 = A4 + S2
+	xload	r3, XMM_TMP2		;; Reload B2
+	subpd	r7, r3			;; A2 = A2 - B2 (final R7)
+	multwo	r3			;; B2 = B2 * 2
+	addpd	r3, r7			;; B2 = A2 + B2 (final R2)
+	subpd	t1, r2			;; A3 = A3 - B3 (final R6)
+	multwo	r2			;; B3 = B3 * 2
+	addpd	r2, t1			;; B3 = A3 + B3 (final R3)
+	subpd	r1, r4			;; A4 = A4 - B4 (final R5)
+	multwo	r4			;; B4 = B4 * 2
+	addpd	r4, r1			;; B4 = A4 + B4 (final R4)
+	ENDM
+
+
+x8r2_fft MACRO r1, r2, r3, r4, r5, r6, r7, r8, mem6, mem8, dest1
+	subpd	r1, r3			;; new R3 = R1 - R3 (final R3)
+	multwo	r3
+	addpd	r3, r1			;; new R1 = R1 + R3
+	subpd	r2, r4			;; new R4 = R2 - R4 (final R4)
+	multwo	r4
+	addpd	r4, r2			;; new R2 = R2 + R4
+	subpd	r3, r4			;; R1 = R1 - R2 (final R2)
+	multwo	r4
+	addpd	r4, r3			;; R2 = R1 + R2 (final R1)
+	xload	r8, mem8
+	xload	r6, mem6
+	subpd	r6, r8			;; R2 - I2
+	addpd	r8, mem6		;; R2 + I2
+	mulpd	r6, XMM_SQRTHALF	;; newR2
+	xstore	dest1, r4
+	mulpd	r8, XMM_SQRTHALF	;; newI2
+	subpd	r7, r8			;; I1 = I1 - I2 (new I2)
+	multwo	r8
+	addpd	r8, r7			;; I2 = I1 + I2 (new I1)
+	subpd	r5, r6			;; R1 = R1 - R2 (new R2)
+	multwo	r6
+	addpd	r6, r5			;; R2 = R1 + R2 (new R1)
+	ENDM
+
+
+x8r2_unfft MACRO r1, r2, r3, r4, r5, r6, r7, r8, mem8, dest1
+	subpd	r1, r2			;; new R2 = R1 - R2
+	multwo	r2
+	addpd	r2, r1			;; new R1 = R1 + R2
+	subpd	r1, r4			;; R2 = R2 - R4 (final R4)
+	multwo	r4
+	addpd	r4, r1			;; R4 = R2 + R4 (final R2)
+	subpd	r2, r3			;; R1 = R1 - R3 (final R3)
+	multwo	r3
+	addpd	r3, r2			;; R3 = R1 + R3 (final R1)
+	xload	r8, mem8
+	addpd	r8, r6			;; new I1 = I1 + I2
+	xstore	dest1, r3
+	subpd	r6, mem8		;; new I2 = I1 - I2
+	subpd	r5, r7			;; new R2 = R1 - R2
+	multwo	r7
+	addpd	r7, r5			;; new R1 = R1 + R2
+	xload	r3, XMM_SQRTHALF
+	mulpd	r6, r3			;; B2 = I2 * sine
+	mulpd	r5, r3			;; A2 = R2 * sine
+	xcopy	r3, r6			;; Save B2 (C2 = B2)
+	subpd	r6, r5			;; C2 = C2 - A2 (new I2)
+	addpd	r5, r3			;; A2 = A2 + B2 (new R2)
+	ENDM
+
+x8r2_half_fft MACRO r1, r2, r3, r4, t1, t2, t3
+	subpd	r1, r3			;; new R3 = R1 - R3 (final R3)
+	multwo	r3
+	addpd	r3, r1			;; new R1 = R1 + R3
+	subpd	r2, r4			;; new R4 = R2 - R4 (final R4)
+	multwo	r4
+	addpd	r4, r2			;; new R2 = R2 + R4
+	subpd	r3, r4			;; R1 = R1 - R2 (final R2)
+	multwo	r4
+	addpd	r4, r3			;; R2 = R1 + R2 (final R1)
+	ENDM
+
+x8r2_half_unfft MACRO r1, r2, r3, r4, t1, t2, t3
+	subpd	r1, r2			;; new R2 = R1 - R2
+	multwo	r2
+	addpd	r2, r1			;; new R1 = R1 + R2
+	subpd	r1, r4			;; R2 = R2 - R4 (final R4)
+	multwo	r4
+	addpd	r4, r1			;; R4 = R2 + R4 (final R2)
+	subpd	r2, r3			;; R1 = R1 - R3 (final R3)
+	multwo	r3
+	addpd	r3, r2			;; R3 = R1 + R3 (final R1)
+	ENDM
+
+half_x4r_fft MACRO r1, r2, r3, r4, t1
+	subpd	r1, r2			;; R1 - R2 (final R2)
+	multwo	r2
+	addpd	r2, r1			;; R1 + R2 (final R1)
+					;; Nop R3
+					;; Nop R4
+	ENDM
+
+x4r_fft MACRO r1, r2, r3, r4, r5, r6, r7, r8
+	subpd	r1, r2			;; R1 - R2 (final R2)
+	multwo	r2
+	addpd	r2, r1			;; R1 + R2 (final R1)
+					;; Nop R3
+					;; Nop R4
+	subpd	r6, r8			;; R2 - I2
+	multwo	r8
+	addpd	r8, r6			;; R2 + I2
+	mulpd	r6, XMM_SQRTHALF	;; newR2
+	mulpd	r8, XMM_SQRTHALF	;; newI2
+	subpd	r7, r8			;; I1 = I1 - I2 (new I2)
+	multwo	r8
+	addpd	r8, r7			;; I2 = I1 + I2 (new I1)
+	subpd	r5, r6			;; R1 = R1 - R2 (new R2)
+	multwo	r6
+	addpd	r6, r5			;; R2 = R1 + R2 (new R1)
+	ENDM
+
+
+
+; These macros implement 64-bit Pentium 4 optimized versions of macros found
+; in hg.mac.  We make use of the 8 extra registers.
+
+IFDEF X86_64
+
+xfive_reals_fft_preload MACRO
+	movapd	xmm8, XMM_P618		;; (.588/.951)
+	movapd	xmm9, XMM_P309		;; .309
+	movapd	xmm10, XMM_P951		;; .951
+	movapd	xmm11, XMM_P588		;; .588
+	movapd	xmm12, XMM_M809		;; -.809
+	movapd	xmm13, XMM_M262		;; (-.809/.309)
+	movapd	xmm14, XMM_M162		;; (-.951/.588)
+	movapd	xmm15, XMM_M382		;; (.309/-.809)
+	ENDM
+x5r_fft MACRO r1, r2, r3, r4, r5, t1, t2, t3
+	movapd	t1, r5			;; 0-5 Copy R5
+	addpd	r5, r2			;; 1-4 T1 = R2 + R5
+	movapd	t2, r4			;; 2-7 Copy R4
+	addpd	r4, r3			;; 3-5 T2 = R3 + R4
+	movapd	t3, r1			;; 4-9 newR2 = R1
+	subpd	r2, t1			;; 6-9 T3 = R2 - R5
+	movapd	t1, r1			;; 7-12 newR3 = R1
+	subpd	r3, t2			;; 8-11 T4 = R3 - R4
+	movapd	t2, xmm8		;; 9-14 const (.588/.951)
+	addpd	r1, r5			;; 10-13 newR1 = R1 + T1
+	mulpd	r5, xmm9		;; 11-16 T1 = T1 * .309
+	mulpd	r2, xmm10		;; 13-18 T3 = T3 * .951 (new I2)
+	addpd	r1, r4			;; 14-17 newR1 = newR1 + T2
+	mulpd	r3, xmm11		;; 15-20 T4 = T4 * .588
+	addpd	t3, r5			;; 17-20 newR2 = newR2 + T1
+	mulpd	r4, xmm12		;; 18-23 T2 = T2 * -.809
+	mulpd	r5, xmm13		;; 20-25 T1 = T1 * (-.809/.309)
+	mulpd	t2, r2			;; 22-27 T3 = T3 * (.588/.951)
+	addpd	r2, r3			;; 23-26 newI2 = newI2 + T4
+	mulpd	r3, xmm14		;; 24-29 T4 = T4 * (-.951/.588)
+	addpd	t3, r4			;; 25-28 newR2 = newR2 + T2
+	mulpd	r4, xmm15		;; 26-31 T2 = T2 * (.309/-.809)
+	addpd	t1, r5			;; 27-30 newR3 = newR3 + T1
+	addpd	t2, r3			;; 30-33 T3 = T3 + T4 (final I3)
+	addpd	t1, r4			;; 32-35 newR3 = newR3 + T2
+	ENDM
+
+xfive_reals_unfft_preload MACRO
+	movapd	xmm8, XMM_P309		;; Load .309
+	movapd	xmm9, XMM_M809		;; Load -.809
+	movapd	xmm10, XMM_P951		;; Load 0.951
+	movapd	xmm11, XMM_P588		;; Load 0.588
+	ENDM
+x5r_unfft MACRO r1, r2, r3, r4, r5, t1, t2, t3, mem1
+	movapd	t1, xmm8		;; Load .309
+	mulpd	t1, r2			;; 1-6 R2*.309
+	movapd	t2, xmm9		;; Load -.809
+	mulpd	t2, r2			;; 3-8 R2*-.809
+	addpd	r2, r4			;; 4-7 R2+R3
+	movapd	t3, xmm9		;; Load -.809
+	mulpd	t3, r4			;; 5-10 R3*-.809
+	addpd	r2, r1			;; 6-9 R1+R2+R3 (final R1)
+	mulpd	r4, xmm8		;; 7-12 R3*.309
+	addpd	t1, r1			;; 8-11 R1 + R2*.309
+	movapd	mem1, r2		;; Save final R1
+	movapd	r2, xmm10		;; Load 0.951
+	mulpd	r2, r3	 		;; 9-14 I2*.951
+	addpd	t2, r1			;; 10-13 R1 + R2*-.809
+	movapd	r1, xmm11		;; Load 0.588
+	mulpd	r1, r5			;; 11-16 I3*.588
+	addpd	t1, t3			;; 12-15 R1 + R2*.309 - R3*.809
+	mulpd	r3, xmm11		;; 13-18 I2*.588
+	addpd	t2, r4			;; 14-17 R1 - R2*.809 + R3*.309
+	mulpd	r5, xmm10		;; 15-20 I3*-.951
+	movapd	t3, t1			;; 16-21 R1 + R2*.309 - R3*.809
+	addpd	r2, r1			;; 17-20 I2*.951 + I3*.588
+	movapd	r4, t2			;; 18-23 R1 - R2*.809 + R3*.309
+	subpd	r3, r5			;; 21-24 I2*.588 - I3*.951
+	addpd	t1, r2			;; 23-26 final R2
+	subpd	t3, r2			;; 25-28 final R5
+	addpd	t2, r3			;; 27-30 final R3
+	subpd	r4, r3			;; 29-31 final R4
+	ENDM
+
+ENDIF

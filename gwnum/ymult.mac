@@ -1,0 +1,1093 @@
+; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+
+; Return from a type 1 FFT - return to caller
+
+yfft_1_ret MACRO
+	ad_epilog 0,1,rbx,rbp,rsi,rdi,ymm6,ymm7,ymm8,ymm9,ymm10,ymm11,ymm12,ymm13,ymm14,ymm15
+	ENDM
+
+; Return from a type 2,3, or 4 FFT - call the common normalization code
+; used in one-pass FFTs only.
+
+yfft_3_ret MACRO
+	start_timer 28
+	mov	rax, NORMRTN
+	call	rax
+	end_timer 28
+	ad_epilog 0,1,rbx,rbp,rsi,rdi,ymm6,ymm7,ymm8,ymm9,ymm10,ymm11,ymm12,ymm13,ymm14,ymm15
+	ENDM
+
+;;
+;; Common definitions in AVX FFTs
+;;
+
+;; Used in r4 (traditional radix-4) FFTs
+YMM_SCD1 = 64			;; Sizeof a small (radix-3) DJB sin/cos table entry
+YMM_SCD2 = 128			;; Sizeof a DJB sin/cos table entry
+YMM_SCD3 = 192			;; Sizeof an eight_reals sin/cos table entry
+YMM_SCD4 = 256			;; Sizeof an entry in premultiplier table
+YMM_SCD6 = 384			;; Sizeof a combined first_djbfft / last_djbunfft table entry
+YMM_SCD7 = 448			;; Sizeof a real radix-16 with premultipliers table entry
+YMM_SCD8 = 512			;; Sizeof a radix-8 with premultipliers table entry
+YMM_SCD9 = 576			;; Sizeof a real radix-20 with premultipliers table entry
+YMM_SCD11 = 704			;; Sizeof a real radix-24 with premultipliers table entry
+YMM_SCD13 = 832			;; Sizeof a real radix-28 with premultipliers table entry
+
+;; Used in r4dwpn (radix-4 delay with partial normalization) FFTs
+YMM_SCND2 = 192			;; Sizeof a complex radix-4 sin/cos/normalization table entry
+YMM_SCND4 = 384			;; Sizeof a complex plus real radix-4 sin/cos/normalization table entry
+YMM_GMD = 320			;; Sizeof a grp two-to-phi/two-to-minus-phi multiplier block in a r4dwpn FFT
+
+; **********************************************************
+; **********************************************************
+; ******************  ONE PASS MACROS  *********************
+; **********************************************************
+; **********************************************************
+
+;
+; Generate the code for a small FFT computed in just one pass.
+;
+; FFT routines are named using this scheme:
+;
+;	yfft yfft_type fft_size options yarch
+;
+; where yfft_type is (not all are implemented):
+;	r4 = radix-4 DJB
+;	r4delay = radix-4/8 DJB with first levels of pass 1 using common sin/cos values and last levels
+;		  of pass 1 fixing the discrepancy.  Less sin/cos memory, a few more complex multiplies.
+;	r4dwpn = r4delay with partial normalization.
+;	sr = split-radix
+; options are:
+;	_op for one-pass FFTs
+;	_ac for all_complex
+;
+; yarch indicates FFT is optimized for one of these architectures:
+;	CORE		Sandy Bridge and later Intel Core CPUs
+;	FMA3		Haswell and later Intel Core CPUs
+;	BULL		third generation AMD64 chips (Bulldozer)
+;
+; Examples:
+;	yfft_hg_512_op_K8
+;	yfft_r4_4096_op_ac_CORE
+
+yonepass MACRO fftname, all_complex
+	LOCAL	yprocname, ymacroname
+
+;; Generate the procedure name
+
+	yprocname CATSTR <yfft_>,yfft_type,<_>,<&fftname>,<_op>
+	IF all_complex EQ 1
+	yprocname CATSTR yprocname,<_ac>
+	ENDIF
+	yprocname CATSTR yprocname,<_>,yarch
+
+;; Generate the FFT macro name
+
+	ymacroname CATSTR <yfft>,<&fftname>
+	IF all_complex EQ 1
+	ymacroname CATSTR ymacroname,<p>
+	ENDIF
+
+;; Header for the FFT routine
+
+	PROCF	yprocname
+	ad_prolog 0,1,rbx,rbp,rsi,rdi,ymm6,ymm7,ymm8,ymm9,ymm10,ymm11,ymm12,ymm13,ymm14,ymm15
+	mov	rsi, DESTARG
+	mov	rbx, DIST_TO_FFTSRCARG
+
+;; To avoid 4KB distances we optimize the larger one-pass FFTs by inserting pad bytes after
+;; every 4, 8, 16, 32, or 64 cache lines.
+
+	dist4 = 4*64+64
+	dist8 = 8*64+64
+	dist16 = 16*64+64
+	dist32 = 32*64+64
+	dist64 = 64*64+64
+
+;; Call the macro containing the guts of the FFT
+
+	clear_timers
+	ymacroname
+
+;; Footer for the routine
+
+	yprocname ENDP	
+	ENDM
+
+
+; ********************************************************
+; ********************************************************
+; ******************  PASS 1 MACROS  *********************
+; ********************************************************
+; ********************************************************
+
+;
+; Macros used in pass 1 of a two pass FFT.
+;
+
+; This macro lets us build a shared pass 1 routine
+;
+; Shared pass 1s are named using this scheme:
+;
+;	yfft yfft_type fft_size options clm yarch
+;
+; where yfft_type is (not all are implemented):
+;	r4 = radix-4 DJB
+;	r4delay = radix-4/8 DJB with delayed application of the first pass 1 levels sin/cos data
+;	r4dwpn = r4delay with partial normalization.
+;	sr = split-radix
+; options are:
+;	_ac for all_complex
+;	_ip for two-pass in-place (no scratch area)
+;	_np for no_prefetch
+;
+; yarch indicates FFT is optimized for one of these architectures:
+;	CORE		Sandy Bridge Core i7, default for unrecognized Intel CPUs
+;	FMA3		Intel chips supporting the FMA3 instruction (Haswell chips)
+;
+; Examples:
+;	yfft_r4_320_4_FMA3
+;	yfft_r4dwpn_2048_ac_4_CORE
+
+ypass1gen MACRO p1_size, all_complex, in_place, clmarg
+	LOCAL	ymacroname
+
+;; Copy some of the args 
+
+	clm = clmarg
+
+;; Generate the procedure name
+
+	yprocname CATSTR <yfft_>,yfft_type,<_>,%p1_size
+	IF all_complex EQ 1
+	yprocname CATSTR yprocname,<_ac>
+	ENDIF
+	IFNB <in_place>
+	IF in_place EQ 1
+	yprocname CATSTR yprocname,<_ip>
+	ENDIF
+	ENDIF
+	IF PREFETCHING EQ 0
+	yprocname CATSTR yprocname,<_np>
+	ENDIF
+	yprocname CATSTR yprocname,<_>,%clm,<_>,yarch
+
+;; Compute the needed distances
+;; Choose a clmblkdst to avoid the bad 4KB distance (especially in 4*clmblkdst)
+;; For clm=2, be we want a larger clmblkdst8 gap so that the stores of one y4cl macro
+;; don't conflict with the reads of the next y4cl macro, as in a macros reading 4*clmblkdst and clmblkdst8:
+;;	first 4cl:	0, 2KB, 4KB+64, 6KB+64,
+;;	next 4cl:	64, 2KB+64, 4KB+128, 6KB+128
+;; A padding of 192 will solve the problem.
+
+	IF (p1_size EQ 384 AND all_complex) OR (p1_size EQ 640 AND all_complex) OR (p1_size EQ 1536 AND all_complex)
+		clmblkdst = (4*clm*64+64)
+		clmblkdst8 = (clmblkdst*8)
+	ELSEIF clm EQ 1
+		clmblkdst = (4*clm*64)
+		clmblkdst8 = (clmblkdst*8+64)
+	ELSEIF clm EQ 2
+		clmblkdst = (4*clm*64)
+		clmblkdst8 = (clmblkdst*8+192)
+	ELSE
+		clmblkdst = (4*clm*64+64)
+		clmblkdst8 = (clmblkdst*8-64)
+	ENDIF
+
+;; Generate the pass 1 macro name
+
+	ymacroname CATSTR <y>,yfft_type,<_pass1sc>,%p1_size
+	IF all_complex EQ 1
+	ymacroname CATSTR ymacroname,<ac>
+	ENDIF
+
+;; Pass 1 macros use registers r8, r10 for blkdst and 3*blkdst
+
+blkdstreg EQU r8
+blkdst3reg EQU r10
+blkdst TEXTEQU <r8>
+
+;; Run the pass 1 macro to generate code
+
+	ymacroname
+
+	ENDM
+
+
+; This macro lets us build a non-shared pass 1 routine
+;
+; Set various constants used in the FFT.  Also generate the proper FFT routine name.
+;
+; FFT routines are named using this scheme:
+;
+;	yfft yfft_type fft_size options ypass2_levels clm yarch
+;
+; where yfft_type is (not all are implemented):
+;	r4 = radix-4 DJB
+;	r4delay = radix-4/8 DJB with delayed application of the first pass 1 levels sin/cos data
+;	r4dwpn = r4delay with partial normalization.
+;	sr = split-radix
+; options are:
+;	_ac for all_complex
+;	_ip for two-pass in-place (no scratch area)
+;	_np for no_prefetch
+; ypass2_levels is:
+;	number of complex values handled in pass 2 -- if not a power of 2
+;	log2(number of complex values in pass 2) -- if a power of 2
+;
+; yarch indicates FFT is optimized for one of these architectures:
+;	CORE		Sandy Bridge Core i7, default for unrecognized Intel CPUs
+;	FMA3		Intel chips supporting the FMA3 instruction (Haswell chips)
+;	BULL		AMD's Bulldozer chips
+;
+; Examples:
+;	yfft_r4_1536K_10_4_BULL
+;	yfft_r4dwpn_4M_ac_12_4_CORE
+
+set_FFT_constants MACRO fftname, in_place, all_complex, p1_size, p2_levels, clmarg
+
+;; Copy some of the args 
+
+	clm = clmarg
+
+;; Generate the procedure name
+
+	yprocname CATSTR <yfft_>,yfft_type,<_>,<&fftname>
+	IF all_complex EQ 1
+	yprocname CATSTR yprocname,<_ac>
+	ENDIF
+	IF in_place EQ 1
+	yprocname CATSTR yprocname,<_ip>
+	ENDIF
+	IF PREFETCHING EQ 0
+	yprocname CATSTR yprocname,<_np>
+	ENDIF
+	yprocname CATSTR yprocname,<_>,%p2_levels,<_>,%clm,<_>,yarch
+
+;; Generate the pass 2 routine name
+
+	ypass2name CATSTR <ypass2_>,yfft_type
+	IF PREFETCHING EQ 0
+	ypass2name CATSTR ypass2name,<_np>
+	ENDIF
+	IF p2_levels LE 24
+	ypass2name CATSTR ypass2name,<_>,%p2_levels,<_levels_>,yarch
+	ELSE
+	ypass2name CATSTR ypass2name,<_>,%p2_levels,<_>,yarch
+	ENDIF
+
+;; Compute the number of 64-byte cache lines in pass 2
+
+	IF p2_levels EQ 6
+	p2cl = 16
+	ENDIF
+	IF p2_levels EQ 8
+	p2cl = 64
+	ENDIF
+	IF p2_levels EQ 10
+	p2cl = 256
+	ENDIF
+	IF p2_levels EQ 11
+	p2cl = 512
+	ENDIF
+	IF p2_levels EQ 12
+	p2cl = 1024
+	ENDIF
+	IF p2_levels EQ 13
+	p2cl = 2048
+	ENDIF
+	IF p2_levels EQ 14
+	p2cl = 4096
+	ENDIF
+	IF p2_levels GT 24
+	p2cl = p2_levels / 4
+	ENDIF
+
+;; Compute the needed distances
+;; Choose a clmblkdst to avoid the bad 4KB distance (especially in 4*clmblkdst)
+;; For clm=2, be we want a larger clmblkdst8 gap so that the stores of one y4cl macro
+;; don't conflict with the reads of the next y4cl macro, as in a macros reading 4*clmblkdst and clmblkdst8:
+;;	first 4cl:	0, 2KB, 4KB+64, 6KB+64,
+;;	next 4cl:	64, 2KB+64, 4KB+128, 6KB+128
+;; A padding of 192 will solve the problem.
+
+	IF (p1_size EQ 384 AND all_complex) OR (p1_size EQ 640 AND all_complex) OR (p1_size EQ 1536 AND all_complex)
+		clmblkdst = (4*clm*64+64)
+		clmblkdst8 = (clmblkdst*8)
+	ELSEIF clm EQ 1
+		clmblkdst = (4*clm*64)
+		clmblkdst8 = (clmblkdst*8+64)
+	ELSEIF clm EQ 2
+		clmblkdst = (4*clm*64)
+		clmblkdst8 = (clmblkdst*8+192)
+	ELSE
+		clmblkdst = (4*clm*64+64)
+		clmblkdst8 = (clmblkdst*8-64)
+	ENDIF
+
+;; Each 4KB page in pass 2 is padded with 64 to 192 bytes to avoid 4KB distances in pass 2 y4cl macro calls.
+;; In the old days, pass 2 sizes had to be a multiple of 4KB.  When we added other pass 2 sizes, no 4KB padding was needed.
+
+	IF p2_levels EQ 48 OR p2_levels EQ 6 OR p2_levels EQ 80 OR p2_levels EQ 192 OR p2_levels EQ 320
+		fourKBgap = 0
+	ELSEIF p2_levels EQ 8 OR p2_levels EQ 768 OR p2_levels EQ 11 OR p2_levels EQ 2304 OR p2_levels EQ 3072 OR p2_levels EQ 3840
+		fourKBgap = 64
+	ELSEIF p2_levels EQ 12 OR p2_levels EQ 5120 OR p2_levels EQ 6144 OR p2_levels EQ 6400 OR p2_levels EQ 13 OR p2_levels EQ 9216
+		fourKBgap = 64
+	ELSEIF p2_levels EQ 10240 OR p2_levels EQ 12288 OR p2_levels EQ 15360 OR p2_levels EQ 14 OR p2_levels EQ 20480 OR p2_levels EQ 25600
+		fourKBgap = 64
+	ELSEIF p2_levels EQ 10 OR p2_levels EQ 1280 OR p2_levels EQ 1536 OR p2_levels EQ 2560 OR p2_levels EQ 4608 OR p2_levels EQ 7680 OR p2_levels EQ 12800
+		fourKBgap = 128
+	ENDIF
+
+;; Calculate the distance between pass 1 blocks.  Since we don't support in-place FFTs in pass 1,
+;; most any gap size *should* be OK (as long as the block distance isn't 64 mod 4096).  However,
+;; theory doesn't work for reasons I cannot explain.  For example, the 1152K FFT with 9216 in pass 2
+;; incurs penalties in the sg4cl macros for reasons unknown.  Thus, for most FFTs we choose a gap
+;; that minimizes memory used, but there are some special cases that we enumerate first.
+
+;; BUG - need to see if more special cases are needed
+
+	blkdstval = (p2cl*64+p2cl/64*fourKBgap)
+	IF fourKBgap EQ 0
+		blkdstval = blkdstval + 0
+	ELSEIF p2_levels EQ 2304 OR p2_levels EQ 9216
+		blkdstval = blkdstval + 4*64
+	ELSEIF blkdstval MOD 128 EQ 0
+		blkdstval = blkdstval - 64
+	ELSE
+		blkdstval = blkdstval + 0
+	ENDIF
+	blkdst TEXTEQU <blkdstval>
+	ENDM
+
+; Header and footers for each two-pass FFT routine
+
+yfft_header MACRO pass1
+	PROCF	yprocname
+	ad_prolog 0,1,rbx,rbp,rsi,rdi,r12,r13,r14,r15,xmm6,xmm7,xmm8,xmm9,xmm10,xmm11,xmm12,xmm13,xmm14,xmm15
+	mov	rsi, DESTARG
+	mov	rbx, DIST_TO_FFTSRCARG
+	clear_timers
+
+	;; Jump to pass 1 forward FFT code unless the FFT has already been started
+
+	cmp	DWORD PTR [rsi-28][rbx], 0 ;; Test FFT-started flag
+	je	pass1			;; Jump if FFT not started
+
+	;; Fall through to start pass 2
+
+	ENDM
+
+yfft_footer MACRO
+	ad_epilog 0,1,rbx,rbp,rsi,rdi,r12,r13,r14,r15,xmm6,xmm7,xmm8,xmm9,xmm10,xmm11,xmm12,xmm13,xmm14,xmm15
+	yprocname ENDP	
+	ENDM
+
+;; Wake up auxiliary threads to help with the forward FFT
+
+pass1_forward_fft_setup MACRO loopaddr
+	mov	NEXT_BLOCK, 0		;; Flag indicating forward fft setup
+	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
+	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
+	ENDM
+
+;; Wake up auxiliary threads to help with the inverse FFT
+
+pass1_inverse_fft_setup MACRO loopaddr
+	start_timer 1
+	mov	NEXT_BLOCK, 1		;; Flag indicating inverse fft setup
+	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
+	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
+	ENDM
+
+;; Do a normalization and carry propagation.
+
+pass1_normalize MACRO scratch, do_forward_fft
+
+	c_call	PASS1_PRE_CARRIES	;; Make pre-normalization callback
+
+	start_timer 28
+	IF scratch EQ 1
+	mov	rsi, scratch_area	;; Load source address
+	ELSE
+	mov	rsi, DATA_ADDR		;; Load source address
+	ENDIF
+	mov	rax, NORMRTN		;; Addr of normalization routine
+	call	rax
+	end_timer 28
+
+	c_call	PASS1_POST_CARRIES	;; Make post-normalization callback
+
+	and	al, al			;; Test returned flag
+	jne	do_forward_fft		;; Do forward FFT if flag set
+	;; Fall through to optionally copy data from scratch area back to FFT data area
+	;; and then jump to loop end to get next block to process
+
+	ENDM
+
+;; Get next block at end of pass 1 loop
+
+ypass1_get_next_block MACRO pass2, c0b, b0b
+	LOCAL	again, done
+
+again:	c_call	PASS1_GET_NEXT_BLOCK	;; C callback routine
+
+	cmp	al, 1			;; Test return code
+	jl	c0b			;; Do another inverse FFT/norm/FFT
+	je	b0b			;; Do another forward FFT
+	cmp	al, 4
+	jl	short done		;; Pass 1 main thread done or pass 1 auxiliary thread done
+	je	pass2			;; Start pass 2
+
+;; Propagate the carries back into the FFT data.
+
+	start_timer 29
+	mov	rax, YMM_CARRIES_ROUTINE
+	call	rax
+	end_timer 29
+	jmp	short again
+
+;; All done, end timer and fall through to exit code
+
+done:	end_timer 1
+	ENDM
+
+;;
+;; Macros to copy blks*4*clm 64-byte cache lines to and from scratch area
+;;
+
+copy_scratch_data_to_fft MACRO blks
+	LOCAL	a0b
+	start_timer 30
+	mov	rsi, scratch_area	;; Get address of scratch area
+	mov	rcx, DATA_ADDR		;; Load source address
+	loops_init blks*4*clm
+a0b:	vmovapd	ymm0, [rsi]		;; Copy a cache line
+	vmovapd	ymm2, [rsi+32]
+	vmovapd	[rcx], ymm0
+	vmovapd	[rcx+32], ymm2
+	bump	rsi, 64			;; Next source pointer
+	bump	rcx, blkdst		;; Next dest pointer
+	loops	4, a0b			;; Test loop counter
+	bump	rcx, -4*blkdst+64	;; Next dest pointer
+	loops	clm, a0b		;; Test loop counter
+	bump	rsi, -4*clm*64+clmblkdst;; Next source pointer
+	bump	rcx, -clm*64+4*blkdst	;; Next dest pointer
+	loops	8, a0b			;; Test loop counter
+	bump	rsi, -8*clmblkdst+clmblkdst8
+	loops	blks/8, a0b		;; Test loop counter
+	end_timer 30
+	ENDM
+
+copyreg_scratch_data_to_fft MACRO blks
+	LOCAL	a0b
+	start_timer 30
+	mov	rsi, scratch_area	;; Get address of scratch area
+	mov	rcx, DATA_ADDR		;; Load source address
+	mov	r8, pass2blkdst		;; blkdst
+	loops_init blks*4*clm
+a0b:	vmovapd	ymm0, [rsi]		;; Copy a cache line
+	vmovapd	ymm2, [rsi+32]
+	vmovapd	[rcx], ymm0
+	vmovapd	[rcx+32], ymm2
+	bump	rsi, 64			;; Next source pointer
+	bump	rcx, blkdstreg		;; Next dest pointer
+	loops	4, a0b			;; Test loop counter
+	neg	blkdstreg
+	bump	rcx, 4*blkdstreg+64	;; Next dest pointer
+	neg	blkdstreg
+	loops	clm, a0b		;; Test loop counter
+	bump	rsi, -4*clm*64+clmblkdst;; Next source pointer
+	bump	rcx, -clm*64+4*blkdstreg ;; Next dest pointer
+	loops	8, a0b			;; Test loop counter
+	bump	rsi, -8*clmblkdst+clmblkdst8
+	loops	blks/8, a0b		;; Test loop counter
+	end_timer 30
+	ENDM
+
+copy_fft_data_to_scratch MACRO blks
+	LOCAL	a0b
+	start_timer 31
+	mov	rsi, DATA_ADDR		;; Load source address
+	add	rsi, DIST_TO_FFTSRCARG
+	mov	rcx, scratch_area	;; Get address of scratch area
+	loops_init blks*4*clm
+a0b:	vmovapd	ymm0, [rsi]		;; Copy a cache line
+	vmovapd	ymm2, [rsi+32]
+	vmovapd	[rcx], ymm0
+	vmovapd	[rcx+32], ymm2
+	bump	rsi, blkdst		;; Next source pointer
+	bump	rcx, 64			;; Next dest pointer
+	loops	4, a0b			;; Test loop counter
+	bump	rsi, -4*blkdst+64	;; Next source pointer
+	loops	clm, a0b		;; Test loop counter
+	bump	rsi, -clm*64+4*blkdst	;; Next source pointer
+	bump	rcx, -4*clm*64+clmblkdst;; Next dest pointer
+	loops	8, a0b			;; Test loop counter
+	bump	rcx, -8*clmblkdst+clmblkdst8
+	loops	blks/8, a0b		;; Test loop counter
+	end_timer 31
+	ENDM
+
+copyreg_fft_data_to_scratch MACRO blks
+	LOCAL	a0b
+	start_timer 31
+	mov	rsi, DATA_ADDR		;; Load source address
+	add	rsi, DIST_TO_FFTSRCARG
+	mov	rcx, scratch_area	;; Get address of scratch area
+	mov	r8, pass2blkdst		;; blkdst
+	loops_init blks*4*clm
+a0b:	vmovapd	ymm0, [rsi]		;; Copy a cache line
+	vmovapd	ymm2, [rsi+32]
+	vmovapd	[rcx], ymm0
+	vmovapd	[rcx+32], ymm2
+	bump	rsi, blkdstreg		;; Next source pointer
+	bump	rcx, 64			;; Next dest pointer
+	loops	4, a0b			;; Test loop counter
+	neg	blkdstreg
+	bump	rsi, 4*blkdstreg+64	;; Next source pointer
+	neg	blkdstreg
+	loops	clm, a0b		;; Test loop counter
+	bump	rsi, -clm*64+4*blkdstreg ;; Next source pointer
+	bump	rcx, -4*clm*64+clmblkdst;; Next dest pointer
+	loops	8, a0b			;; Test loop counter
+	bump	rcx, -8*clmblkdst+clmblkdst8
+	loops	blks/8, a0b		;; Test loop counter
+	end_timer 31
+	ENDM
+
+
+;; This macro sets the prefetch pointers needed by the yloop macros
+
+set_data_prefetch_ptrs MACRO
+	IF PREFETCHING NE 0
+	mov	rcx, DATA_PREFETCH	;; Load source address for prefetching
+	ENDIF
+	ENDM
+
+
+;; yloop initialization
+
+yloop_init MACRO count, first_completed, first_iters
+	loops_init count, first_completed, first_iters
+	yloop_prefetch_type = 0
+	yloop_prefetch_iter = 0
+	yloop_bump_iter = 0
+	yloop_prefetched_early = 0
+	yloop_unrolled_count = 0
+	yloop_adjustment = 0
+	ENDM
+
+; Predefined yloop prefetching rates
+
+YNONE = 0			;; Prefetch no cache lines every macro call
+YQUAD = 1			;; Prefetch 4 cache lines every macro call
+YDOUBLE = 2			;; Prefetch 2 cache lines every macro call
+YSINGLE = 3			;; Prefetch 1 cache line every macro call
+YHALF = 4			;; Prefetch 1 cache line every 2 macro calls
+YQUARTER = 5			;; Prefetch 1 cache line every 4 macro calls
+YOTHER = 6			;; Prefetch 1 cache line every N macro calls
+
+;; Set yloop prefetching to L2 cache.  Plain vanilla prefetching, prefetch pointer is bumped
+;; one cache line at a time.  Used to prefetch sin/cos data in pass 1 as well as
+;; FFT data in pass 2.
+
+yloop_set_prefetch MACRO rate, arg1, arg2
+	yloop_prefetch_type = 1			;; Increment prefetch pointer by 64
+	yloop_prefetch_t2 = 0			;; Prefetch to L2 cache
+	yloop_prefetch_rw = 0			;;;; BUG, BUG, BUG:  Implement write-intent
+						;;;; when Intel chips support prefetchwt1.
+	yloop_pfreg EQU rcx
+	yloop_set_rate rate, arg1
+	ENDM
+
+;; Set yloop prefetching to L3 cache.  Prefetch pointer is bumped one cache line at a time.
+;; Used to prefetch FFT data in larger pass 2s where everything won't fit in the L2 cache.
+
+yloop_set_L3_prefetch MACRO rate, arg1, arg2
+	yloop_prefetch_type = 1			;; Increment prefetch pointer by 64
+	yloop_prefetch_t2 = 1			;; Prefetch to L3 cache
+	yloop_prefetch_rw = 0			;; Do not prefetch with write intent, anyway there
+						;; is no prefetchwt2 instruction.
+	yloop_pfreg EQU rcx
+	yloop_set_rate rate, arg1
+	ENDM
+
+;; Set yloop prefetching to L2 cache.  In this type of prefetching, the prefetch pointer is bumped
+;; by blkdst after clm*64 bytes are prefetched.  Used to prefetch FFT data in pass 1.
+
+yloop_set_clm_prefetch MACRO rate
+	yloop_prefetch_type = 2			;; Increment prefetch pointer by clm*64
+	yloop_prefetch_t2 = 0			;; Prefetch to L2 cache
+	yloop_prefetch_rw = 0			;;;; BUG, BUG, BUG:  Implement write-intent
+						;;;; when Intel chips support prefetchwt1.
+	yloop_set_rate rate
+	ENDM
+
+;; Set yloop prefetching to L3 cache.  In this type of prefetching, the prefetch pointer is bumped
+;; by blkdst after clm*64 bytes are prefetched.  Used to prefetch FFT data in larger
+;; pass 1s where data all data will not fit in the L2 cache.
+
+yloop_set_clm_L3_prefetch MACRO rate
+	yloop_prefetch_type = 2			;; Increment prefetch pointer by clm*64
+	yloop_prefetch_t2 = 1			;; Prefetch to L3 cache
+	yloop_prefetch_rw = 0			;; Do not prefetch with write intent, anyway there
+						;; is no prefetchwt2 instruction.
+	yloop_set_rate rate
+	ENDM
+
+;; Set alternate prefetch pointer increment.  The yloops macros were built on the premise
+;; of bumping the prefetch pointer by one cache line (64 bytes) on every prefetch.  This
+;; macros lets us choose a smaller increment so that the caller can avoid prefetching
+;; too many cache lines.  For example, if the caller loops 100 times but only wants to
+;; prefetch 80 cache lines then we can set our prefetch increment to 64 * 80 / 100 bytes.
+;; Note this is not the preferred solution.  In the example above it would be better to
+;; back up the prefetch pointer by 20 cache lines sometime during the looping process.
+;; This is preferred because there is no guarantee (due to rounding) that we can prefetch
+;; exactly the number of cache lines requested.  Unfortunately, the looping structure
+;; or a register shortage may prevent us from using the preferred solution.
+
+yloop_set_alternate_prefetch_increment MACRO cache_lines_to_prefetch, number_of_loops
+	;; Set increment so that we prefetch at least the requested number of cache lines
+	;; The formula is (cache_lines_to_prefetch * 64) / number_of_loops
+	yloop_pfincr = ((cache_lines_to_prefetch) * 64) / (number_of_loops)
+	ENDM
+
+;; Adjust the loop counter so that fewer iterations are performed.  This is an ugly hack
+;; as it requires the caller to understand the inner workings of how looping is implemented.
+yloop_adjust MACRO new_loop_count
+	add	eax, new_loop_count
+	yloop_adjustment = new_loop_count
+	ENDM
+
+;; This macro loops the specified number of times, prefetching 64-byte cache lines as
+;; necessary.  Prefetch pointer is bumped to the next block after clm*64 bytes prefetched.
+yloop MACRO iters, label1, incr_rsi, pm_incr_reg, pm_incr_amt, sc_incr_reg, sc_incr_amt, pf_incr_reg, pf_incr_amt, alt_incr_reg, alt_incr_amt, alt2_incr_reg, alt2_incr_amt
+
+	;; Init local variables
+	ylocal_iters = iters
+
+	;; If we haven't reached the prefetch iteration, then see if we need to prefetch now
+	IF loops_completed LT yloop_prefetch_iter
+
+		;; Emulate the first loops call to set loops_completed.
+		IF loops_completed EQ 0
+			yloop_emulate_first_loops_call
+		ENDIF
+
+		;; Perform iterations before issuing prefetch instruction
+		IF yloop_prefetch_iter GE loops_completed * ylocal_iters
+			loops	ylocal_iters, label1	;; Test loop counter
+			ylocal_iters = 1
+		ELSEIF yloop_prefetch_iter GT loops_completed
+			small_count = yloop_prefetch_iter / loops_completed
+			IF (ylocal_iters MOD small_count) NE 0
+				yerror_with_non_power_of_2_and_prefetching
+			ENDIF
+			loops	small_count, label1	;; Test loop counter
+			ylocal_iters = ylocal_iters / small_count
+		ENDIF
+
+		;; Issue prefetch instruction(s)
+		IF loops_completed GE yloop_prefetch_iter
+			yloop_prefetch
+		ENDIF
+
+		;; Handle the awkward case where we need to do a bump because of unrolling.
+		;; An example: Unrolled 4 times with a prefetch_iter of 2 and a bump_iter of 4.
+		IF yloop_bump_iter GT yloop_prefetch_iter AND loops_completed GE yloop_bump_iter
+			bump	rcx, -clm*64+blkdst		;; Next prefetch pointer
+		ENDIF
+
+	;; Otherwise, if unrolling then emulate the first loops call.
+	ELSEIF loops_completed EQ 0 AND yloop_unrolled_count GT 0
+		yloop_emulate_first_loops_call
+	ENDIF
+
+	;; If we haven't reached the bump iteration, then see if we need to bump the prefetch pointer now
+	IF loops_completed LT yloop_bump_iter
+
+		;; Perform iterations before issuing prefetch instruction
+		IF yloop_bump_iter LT loops_completed * ylocal_iters
+			small_count = yloop_bump_iter / loops_completed
+			IF (ylocal_iters MOD small_count) NE 0
+				yerror_with_non_power_of_2_and_prefetching
+			ENDIF
+			loops	small_count, label1		;; Test loop counter
+			ylocal_iters = ylocal_iters / small_count
+		ELSE
+			loops	ylocal_iters, label1		;; Test loop counter
+			ylocal_iters = 1
+		ENDIF
+
+		;; Issue "clm prefetching" bump instruction where we bump the prefetch pointer every 64*clm bytes
+		IF loops_completed EQ yloop_bump_iter
+			bump	rcx, -clm*64+blkdst		;; Next prefetch pointer
+		ENDIF
+	ENDIF
+
+	;; Loop any remaining iterations
+	IF ylocal_iters GT 1 OR loops_completed EQ 0
+		loops	ylocal_iters, label1
+	ENDIF
+
+	;; Clear count of unrolled building blocks (in case loops_undo or loops_reset is called)
+	yloop_prefetched_early = 0
+	yloop_unrolled_count = 0
+	yloop_adjustment = 0
+
+	;; Optionally bump pointers
+	bump	rsi, incr_rsi			;; Next source pointer
+	bump	pm_incr_reg, pm_incr_amt	;; Next premultiplier pointer
+	bump	sc_incr_reg, sc_incr_amt	;; Next sin/cos pointer
+	bump	pf_incr_reg, pf_incr_amt	;; Next prefetching pointer
+	bump	alt_incr_reg, alt_incr_amt	;; Next pointer to whatever
+	bump	alt2_incr_reg, alt2_incr_amt	;; Next pointer to whatever
+	ENDM
+
+;; This macro is called by the building block macros to try and distribute YDOUBLE and YQUAD prefetching a bit more uniformly.
+;; It may also help the YSINGLE case by moving the prefetch away from the ystores that are bunched at the end of building block macros.
+
+yloop_optional_early_prefetch MACRO
+
+	;; If we prefetch every iteration and we haven't already prefetched the required amount, then prefetch one now.
+	IF yloop_prefetch_iter EQ 1
+	IF yloop_prefetched_early LT yloop_prefetch_count
+		;; Handle standard prefetching
+		IF yloop_prefetch_type EQ 1
+			yprefetcht1 [yloop_pfreg + yloop_prefetched_early * PREFETCHING]
+			yloop_prefetched_early = yloop_prefetched_early + 1
+		;; Handle "clm prefetching" where we bump the prefetch pointer every 64*clm bytes
+		ELSEIF yloop_prefetch_type EQ 2
+			IF (yloop_prefetched_early * PREFETCHING)/(clm*64) EQ 0
+				yprefetcht1 [rcx + (yloop_prefetched_early * PREFETCHING mod (clm*64))]
+			ELSEIF ((yloop_prefetched_early * PREFETCHING)/(clm*64) EQ 3) AND (((OPATTR([blkdst])) AND 100b) EQ 0)
+				add	rcx, blkdst
+				yprefetcht1 [rcx + 2*blkdst + (yloop_prefetched_early * PREFETCHING mod (clm*64))]
+				sub	rcx, blkdst
+			ELSE
+				yprefetcht1 [rcx + (yloop_prefetched_early * PREFETCHING)/(clm*64)*blkdst + (yloop_prefetched_early * PREFETCHING mod (clm*64))]
+			ENDIF
+			yloop_prefetched_early = yloop_prefetched_early + 1
+		ENDIF
+	ENDIF
+	ENDIF
+
+	ENDM
+
+;; This macro is called by the building block macros when they are unrolling a building block.   We must
+;; do any required prefetching and record each unrolled iteration so that we don't loop as much in yloop.
+
+yloop_unrolled_one MACRO
+
+	;; Bump the count of unrolled building blocks
+	yloop_unrolled_count = yloop_unrolled_count + 1
+
+	;; If we're at a prefetch iteration, then prefetch
+	IF yloop_prefetch_iter GT 0
+	IF (yloop_unrolled_count + yloop_adjustment) MOD yloop_prefetch_iter EQ 0
+		yloop_prefetch
+	ENDIF
+	ENDIF
+
+	;; Handle "clm prefetching" where we bump the prefetch pointer every 64*clm bytes
+	;; Note that yloop_prefetch handled this in some cases (where prefetch count fetched a multiple of 64*clm bytes)
+	IF yloop_bump_iter GT 1
+	IF (yloop_prefetch_count * PREFETCHING) MOD (clm*64) NE 0
+	IF (yloop_unrolled_count + yloop_adjustment) MOD yloop_bump_iter EQ 0
+		bump	rcx, -clm*64+blkdst		;; Next prefetch pointer
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDM
+
+;; Internal macro to set yloop prefetching rate.
+
+yloop_set_rate MACRO rate, N
+	IF (rate EQ YNONE)
+		yloop_prefetch_type = 0
+		yloop_prefetch_iter = 0
+	ELSEIF (rate EQ YQUAD)
+		yloop_prefetch_iter = 1
+		yloop_prefetch_count = 4
+	ELSEIF (rate EQ YDOUBLE)
+		yloop_prefetch_iter = 1
+		yloop_prefetch_count = 2
+	ELSEIF (rate EQ YSINGLE)
+		yloop_prefetch_iter = 1
+		yloop_prefetch_count = 1
+	ELSEIF (rate EQ YHALF)
+		yloop_prefetch_iter = 2
+		yloop_prefetch_count = 1
+	ELSEIF (rate EQ YQUARTER)
+		yloop_prefetch_iter = 4
+		yloop_prefetch_count = 1
+	ELSEIF (rate EQ YOTHER)
+		yloop_prefetch_iter = N
+		yloop_prefetch_count = 1
+	ENDIF
+	yloop_pfincr = 64
+	;; Handle supported prefetch amounts
+	IF (PREFETCHING EQ 0)
+		yloop_prefetch_rate = YNONE
+	ELSEIF (PREFETCHING EQ 128)
+		IF (yloop_prefetch_count EQ 1)
+			yloop_prefetch_iter = yloop_prefetch_iter * 2
+		ELSE
+			yloop_prefetch_count = (yloop_prefetch_count+1)/2
+		ENDIF
+	ENDIF
+	;; Calculate the iteration where we'll bump the prefetch pointer to the next block
+	IF yloop_prefetch_type EQ 2
+		yloop_bump_iter = yloop_prefetch_iter * (clm * 64) / (yloop_prefetch_count * PREFETCHING)
+	ELSE
+		yloop_bump_iter = 0
+	ENDIF
+	ENDM
+
+;; Internal macro to emulate the first loops call.  We increment eax and set loops_completed.
+
+yloop_emulate_first_loops_call MACRO
+	IF loops_count LT 256
+		add al, yloop_unrolled_count+1
+	ELSE
+		add eax, yloop_unrolled_count+1
+	ENDIF
+	loops_incr_needed = 0
+	loops_completed = yloop_unrolled_count+1
+	IF yloop_unrolled_count GT 0 AND (loops_completed + yloop_adjustment) EQ ylocal_iters
+		loops_completed = loops_completed + yloop_adjustment
+	ENDIF
+	IF ylocal_iters MOD loops_completed NE 0
+		bad_yloop_emulate_first_loops_call
+	ENDIF
+
+	;; Handle hard non-power-of-2 case.  For example: yloop 20 where we've unrolled 5 times.
+	IF (ylocal_iters AND (ylocal_iters-1)) NE 0 AND (loops_completed AND (loops_completed-1)) NE 0
+		next_power_2 = ylocal_iters
+		next_power_2 = next_power_2 OR (next_power_2 SHR 1)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 2)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 4)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 8)
+		next_power_2 = (next_power_2 OR (next_power_2 SHR 16)) + 1
+		non_power_2_adjustment = next_power_2 - ylocal_iters
+		loops_np2_initial_value_adjust = non_power_2_adjustment
+		overwrite_initial_loop_count loops_np2_initial_value_adjust
+		loops_count = loops_count / ylocal_iters * next_power_2
+		ylocal_iters = next_power_2
+
+		next_power_2 = loops_completed
+		next_power_2 = next_power_2 OR (next_power_2 SHR 1)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 2)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 4)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 8)
+		next_power_2 = (next_power_2 OR (next_power_2 SHR 16)) + 1
+		loops_completed = next_power_2
+	ENDIF
+
+	ylocal_iters = ylocal_iters / loops_completed
+ENDM
+
+;; Internal macro to issue the prefetch instructions and bump the prefetch register
+
+yprefetcht1 MACRO ops:vararg
+	;; Handle read-only prefetching
+	IF yloop_prefetch_rw EQ 0
+		;; Handle read-only prefetching into the L2 or L3 cache
+		IF yloop_prefetch_t2 EQ 0
+			prefetcht1 &ops
+		ELSE
+			prefetcht2 &ops
+		ENDIF
+	ENDIF
+	;; Handle read-write prefetching
+	IF yloop_prefetch_rw EQ 1
+		prefetchwt1 &ops
+	ENDIF
+ENDM
+
+yloop_prefetch MACRO
+
+	;; Handle standard prefetching
+	IF yloop_prefetch_type EQ 1
+
+		IF yloop_prefetched_early LT 1
+			yprefetcht1 [yloop_pfreg]
+		ENDIF
+		IF yloop_prefetch_count GE 2 AND yloop_prefetched_early LT 2
+			yprefetcht1 [yloop_pfreg + yloop_pfincr]
+		ENDIF
+		IF yloop_prefetch_count GE 3 AND yloop_prefetched_early LT 3
+			yprefetcht1 [yloop_pfreg + 2 * yloop_pfincr]
+		ENDIF
+		IF yloop_prefetch_count GE 4 AND yloop_prefetched_early LT 4
+			yprefetcht1 [yloop_pfreg + 3 * yloop_pfincr]
+		ENDIF
+		IF yloop_prefetch_count GE 5 AND yloop_prefetched_early LT 5
+			prefetch_count_too_large
+		ENDIF
+
+		bump	yloop_pfreg, yloop_prefetch_count * yloop_pfincr	;; Next prefetch pointer
+
+	;; Handle "clm prefetching" where we bump the prefetch pointer every 64*clm bytes
+	ELSEIF yloop_prefetch_type EQ 2
+
+		IF yloop_prefetched_early LT 1
+			yprefetcht1 [rcx]
+		ENDIF
+		IF yloop_prefetch_count GE 2 AND yloop_prefetched_early LT 2
+			IF (PREFETCHING)/(clm*64) EQ 0
+				yprefetcht1 [rcx + (PREFETCHING mod (clm*64))]
+			ELSE
+				yprefetcht1 [rcx + (PREFETCHING)/(clm*64)*blkdst + (PREFETCHING mod (clm*64))]
+			ENDIF
+		ENDIF
+		IF yloop_prefetch_count GE 3 AND yloop_prefetched_early LT 3
+			IF (2*PREFETCHING)/(clm*64) EQ 0
+				yprefetcht1 [rcx + ((2*PREFETCHING) mod (clm*64))]
+			ELSE
+				yprefetcht1 [rcx + (2*PREFETCHING)/(clm*64)*blkdst + ((2*PREFETCHING) mod (clm*64))]
+			ENDIF
+		ENDIF
+		IF yloop_prefetch_count GE 4 AND yloop_prefetched_early LT 4
+			IF (3*PREFETCHING)/(clm*64) EQ 0
+				yprefetcht1 [rcx + ((3*PREFETCHING) mod (clm*64))]
+			ELSEIF ((3*PREFETCHING)/(clm*64) EQ 3) AND (((OPATTR([blkdst])) AND 100b) EQ 0)
+				add	rcx, blkdst
+				yprefetcht1 [rcx + 2*blkdst + ((3*PREFETCHING) mod (clm*64))]
+				sub	rcx, blkdst
+			ELSE
+				yprefetcht1 [rcx + (3*PREFETCHING)/(clm*64)*blkdst + ((3*PREFETCHING) mod (clm*64))]
+			ENDIF
+		ENDIF
+		IF yloop_prefetch_count GE 5 AND yloop_prefetched_early LT 5
+			yloop_prefetch_count_too_large
+		ENDIF
+
+		IF (yloop_prefetch_count*PREFETCHING)/(clm*64) EQ 0
+			bump	rcx, ((yloop_prefetch_count*PREFETCHING) mod (clm*64))	;; Next prefetch pointer
+		ELSE
+			bump	rcx, (yloop_prefetch_count*PREFETCHING)/(clm*64)*blkdst + ((yloop_prefetch_count*PREFETCHING) mod (clm*64))	;; Next prefetch pointer
+		ENDIF
+
+	ENDIF
+	ENDM
+
+
+; ********************************************************
+; ********************************************************
+; ******************  PASS 2 MACROS  *********************
+; ********************************************************
+; ********************************************************
+
+;
+; Macros used in pass 2 of a two pass FFT.
+;
+
+; Pass 2s are named using this scheme:
+;
+;	ypass2 yfft_type options ypass2_levels yarch
+;
+; where yfft_type is (not all are implemented):
+;	r4 = radix-4 DJB
+;	r4delay = radix-4/8 DJB with delayed application of the first pass 1 levels sin/cos data
+;	r4dwpn = r4delay with partial normalization.
+;	sr = split-radix
+; options are:
+;	_np for no_prefetch
+; ypass2_levels is:
+;	number of complex values handled in pass 2 -- if not a power of 2
+;	log2(number of complex values in pass 2) -- if a power of 2
+;
+; yarch indicates FFT is optimized for one of these architectures:
+;	CORE		Sandy Bridge Core i7, default for unrecognized Intel CPUs
+;	FMA3		Intel chips supporting the FMA3 instruction (Haswell chips)
+;	BULL		AMD's Bulldozer chips
+;
+; Examples:
+;	ypass2_r4_12_levels_CORE
+;	ypass2_r4_np_12_levels_BULL
+
+;; Create a for this fft type, pass 2 levels, and architecture combination
+
+ypass2gen MACRO levels
+	LOCAL	complex_loop, get_next, procname, procname
+	LOCAL	realmacro, complexmacro
+
+;; Generate the procedure name
+
+	procname CATSTR <ypass2_>,yfft_type
+	IF PREFETCHING EQ 0
+	procname CATSTR procname,<_np>
+	ENDIF
+	IF levels LE 24
+	procname CATSTR procname,<_>,%levels,<_levels_>,yarch
+	ELSE
+	procname CATSTR procname,<_>,%levels,<_>,yarch
+	ENDIF
+
+;; Generate the macro names
+
+	IF levels LE 24
+	realmacro CATSTR <y>,yfft_type,<_>,<pass2_>,%levels,<_levels_real>
+	complexmacro CATSTR <y>,yfft_type,<_>,<pass2_>,%levels,<_levels_complex>
+	ELSE
+	realmacro CATSTR <y>,yfft_type,<_>,<pass2_>,%levels,<_real>
+	complexmacro CATSTR <y>,yfft_type,<_>,<pass2_>,%levels,<_complex>
+	ENDIF
+
+;; Define pass 2 constants.  Each 4KB page is padded with 64 to 192 bytes.
+
+	IF levels EQ 48 OR levels EQ 6 OR levels EQ 80 OR levels EQ 192 OR levels EQ 320
+		fourKBgap = 0
+	ELSEIF levels EQ 8 OR levels EQ 768 OR levels EQ 11 OR levels EQ 2304 OR levels EQ 3072 OR levels EQ 3840 OR levels EQ 12
+		fourKBgap = 64
+	ELSEIF levels EQ 5120 OR levels EQ 6144 OR levels EQ 6400 OR levels EQ 13 OR levels EQ 9216 OR levels EQ 10240
+		fourKBgap = 64
+	ELSEIF levels EQ 12288 OR levels EQ 15360 OR levels EQ 14 OR levels EQ 20480 OR levels EQ 25600
+		fourKBgap = 64
+	ELSEIF levels EQ 10 OR levels EQ 1280 OR levels EQ 1536 OR levels EQ 2560 OR levels EQ 4608 OR levels EQ 7680 OR levels EQ 12800
+		fourKBgap = 128
+	ENDIF
+	dist64 = (64*64+fourKBgap)
+
+;; Generate the procedure
+
+	PROCF	procname
+	int_prolog 0,0,1
+
+;; Entry point for real FFTs: do one real and many complex blocks, also
+;; entry point for all-complex FFTs: do all complex blocks
+
+	mov	rax, OFFSET complex_loop ;; Auxiliary thread entry point
+	mov	THREAD_WORK_ROUTINE, rax ;; Save addr for C code to call
+	c_call	PASS2_WAKE_UP_THREADS	;; C callback routine
+	cmp	ALL_COMPLEX_FFT, 1	;; Test if there is a real-data block
+	je	complex_loop		;; Jump to process all-complex blocks
+
+	realmacro			; Do the real data block
+	jmp	get_next		; Go process complex blocks
+
+complex_loop:
+	complexmacro
+
+;; GET_NEXT_BLOCK returns TRUE if we are done.  Otherwise, it calculates
+;; the next blocks to process and prefetch.
+
+get_next:
+	c_call	PASS2_GET_NEXT_BLOCK	;; C callback routine
+	and	rax, rax		;; Test return code
+	jz	complex_loop		;; If false, process another block
+
+;; All done
+
+	int_epilog 0,0,1
+	procname ENDP	
+	ENDM
+

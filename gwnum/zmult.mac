@@ -1,0 +1,915 @@
+; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved
+; Author:  George Woltman
+; Email: woltman@alum.mit.edu
+;
+
+;;
+;; Common definitions in AVX-512 FFTs
+;;
+
+ZMM_SCD1 = 128			;; Sizeof a small (radix-3) DJB sin/cos table entry
+ZMM_SCD2 = 256			;; Sizeof a DJB sin/cos table entry
+ZMM_SCD3 = 384			;; Sizeof an eight_reals sin/cos table entry
+ZMM_SCD4 = 512			;; Sizeof an entry in premultiplier table
+ZMM_SCD5 = 640			;; Sizeof a radix-10 sin/cos table entry
+ZMM_SCD6 = 768			;; Sizeof a combined first_djbfft / last_djbunfft table entry
+ZMM_SCD7 = 896			;; Sizeof a real radix-16 with premultipliers table entry
+ZMM_SCD8 = 1024			;; Sizeof a radix-8 with premultipliers table entry
+ZMM_SCD9 = 1152			;; Sizeof a real radix-20 with premultipliers table entry
+ZMM_SCD10 = 1280		;; Sizeof a complex radix-10 combined s/c table entry
+ZMM_SCD11 = 1408		;; Sizeof a real radix-24 with premultipliers table entry
+ZMM_SCD12 = 1536		;; Sizeof a twentyfour reals fft table entry
+ZMM_SCD13 = 1664		;; Sizeof a real radix-28 with premultipliers table entry
+ZMM_SCD16 = 2048		;; Sizeof a radix-32 sin/cos table entry
+ZMM_CD8SCD4 = (8*64+4*128)	;; Sizeof a eight_complex first/last djbfft table entry (8 cosines and 4 sin/cosines)
+ZMM_CD12SCD6 = (12*64+6*128)	;; Sizeof a twelve_complex first/last djbfft table entry (8 cosines and 4 sin/cosines)
+
+
+; ********************************************************
+; ********************************************************
+; ******************  PASS 1 MACROS  *********************
+; ********************************************************
+; ********************************************************
+
+;
+; Macros used in pass 1 of a two pass FFT.
+;
+
+; This macro lets us build a shared pass 1 routine
+;
+; Shared pass 1s are named using this scheme:
+;
+;	zfft zfft_type fft_size options clm zarch
+;
+; where zfft_type is (not all are implemented):
+;	r4 = radix-4/8 DJB
+;	r4delay = radix-4/8 DJB with delayed application of the first pass 1 levels sin/cos data
+;	r4dwpn = r4delay with partial normalization.
+;	sr = split-radix
+; options are:
+;	_ac for all_complex
+;	_ip for two-pass in-place (no scratch area)
+;	_np for no_prefetch
+;
+; zarch indicates FFT is optimized for one of these architectures:
+;	SKX		Skylake-X and later Intel CPUs
+;	ZENPLUS		future generation AMD64 chips
+;
+; Examples:
+;	zfft_r4_320_4_FMA3
+;	zfft_r4dwpn_2048_ac_4_CORE
+
+zpass1gen MACRO p1_size, all_complex, in_place, clmarg
+	LOCAL	zmacroname
+
+;; Copy some of the args 
+
+	pass1_size = p1_size
+	clm = clmarg
+
+;; Target a 1MB L2 cache.  Larger pass 1 size's with larger clm values will excceed 1MB.
+;; Skylake X timings have shown that these cases never generate better timings.
+
+	IF pass1_size GE 1024 AND clm EQ 4
+		EXITM
+	ENDIF
+	IF pass1_size GE 2048 AND clm EQ 2
+		EXITM
+	ENDIF
+
+;; Generate the procedure name
+
+	zprocname CATSTR <zfft_>,zfft_type,<_>,%p1_size
+	IF all_complex EQ 1
+	zprocname CATSTR zprocname,<_ac>
+	ENDIF
+	IFNB <in_place>
+	IF in_place EQ 1
+	zprocname CATSTR zprocname,<_ip>
+	ENDIF
+	ENDIF
+	IF PREFETCHING EQ 0
+	zprocname CATSTR zprocname,<_np>
+	ENDIF
+	zprocname CATSTR zprocname,<_>,%clm,<_>,zarch
+
+;; Compute needed distances
+;; The minimum clmblkdst (clm=1) requires 8 (for swizzling at end of pass 1) times 2 (AVX-512 macros
+;; expect imaginary data to immediately follow real data) times 64 (bytes in an AVS-512 word). 
+
+	;; Pass 1 sizes that cannot cope with clmblkdst8 not being a multiple of clmblkdst
+	IF (p1_size EQ 192 OR p1_size EQ 640 OR p1_size EQ 768 OR p1_size EQ 896 OR p1_size EQ 960 OR p1_size EQ 1152 OR p1_size EQ 1280 OR p1_size EQ 1344 OR p1_size EQ 1536 OR p1_size EQ 1920 OR p1_size EQ 2304)
+		clmblkdst = (8*clm*128+64)
+		clmblkdst8 = (clmblkdst*8)
+	ELSEIF clm EQ 1
+		clmblkdst = (8*clm*128)
+		clmblkdst8 = (clmblkdst*8+128)
+	ELSEIF clm EQ 2
+		clmblkdst = (8*clm*128)
+		clmblkdst8 = (clmblkdst*8+192)
+	ELSE
+		clmblkdst = (8*clm*128+64)
+		clmblkdst8 = (clmblkdst*8-64)
+	ENDIF
+
+;; Generate the pass 1 macro name
+
+	zmacroname CATSTR <z>,zfft_type,<_pass1sc>,%p1_size
+	IF all_complex EQ 1
+	zmacroname CATSTR zmacroname,<ac>
+	ENDIF
+
+;; Pass 1 macros use registers r8, r10 for blkdst and 3*blkdst
+
+blkdstreg EQU r8
+blkdst3reg EQU r10
+blkdst TEXTEQU <r8>
+
+;; Run the pass 1 macro to generate code
+
+	zmacroname
+
+	ENDM
+
+; Header and footers for each two-pass FFT routine
+
+zfft_header MACRO pass1
+	PROCF	zprocname
+	ad_prolog 0,1,rbx,rbp,rsi,rdi,r12,r13,r14,r15,zmm6,zmm7,zmm8,zmm9,zmm10,zmm11,zmm12,zmm13,zmm14,zmm15
+	clear_timers
+
+	;; Jump to pass 1 forward FFT code unless the FFT has already been started
+
+	IFNB <pass1>
+	mov	rsi, DESTARG
+ 	mov	rbx, DIST_TO_FFTSRCARG
+	cmp	DWORD PTR [rsi-28][rbx], 0 ;; Test FFT-started flag
+	je	pass1			;; Jump if FFT not started
+	ENDIF
+
+	;; Fall through to start pass 2
+
+	ENDM
+
+zfft_footer MACRO
+	ad_epilog 0,1,rbx,rbp,rsi,rdi,r12,r13,r14,r15,zmm6,zmm7,zmm8,zmm9,zmm10,zmm11,zmm12,zmm13,zmm14,zmm15
+	zprocname ENDP	
+	ENDM
+
+;; Wake up auxiliary threads to help with the forward FFT
+
+pass1_forward_fft_setup MACRO loopaddr
+	mov	NEXT_BLOCK, 0		;; Flag indicating forward fft setup
+	IFNB <loopaddr>
+	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
+	ENDIF
+	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
+	ENDM
+
+;; Wake up auxiliary threads to help with the inverse FFT
+
+pass1_inverse_fft_setup MACRO loopaddr
+	start_timer 1
+	mov	NEXT_BLOCK, 1		;; Flag indicating inverse fft setup
+	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
+	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
+	ENDM
+
+;; Do a normalization and carry propagation.
+
+pass1_normalize MACRO do_forward_fft
+
+	push	rcx			;; Save prefetch pointer
+	push	rdi			;; Save pointer to big/lit flags
+	c_call	PASS1_PRE_CARRIES	;; Make pre-normalization callback
+	pop	rdi			;; Restore pointer to big/lit flags
+	pop	rcx			;; Restore prefetch pointer
+
+	start_timer 28
+	mov	rsi, scratch_area	;; Address of FFT data to normalize
+	mov	edx, pass1_size / 16	;; Load count of clm blocks to normalize (a.k.a. addcount1)
+;; BUG - pass in more usable values rather than read them from memory (like pass1_size, clm, clmblkdst8, etc)
+;;	mov	r10, pass1_size		;; Pass 1 size (number of reals to normalize)
+	mov	r10, norm_grp_mults	;; Address of group multipliers
+	add	r10, pass1_size/8*64	;; Address of inverse group multipliers
+	mov	rbx, 2*clm-1		;; Generate mask used to detect every (2*clm)-th iteration for prefetching
+	mov	r8, pass2blkdst		;; Prefetching large stride distance
+	lea	r12, [-clm*128+r8]	;; Generate large stride prefetching increment
+	mov	rax, NORMRTN		;; Addr of normalization routine
+	call	rax
+	end_timer 28
+
+	c_call	PASS1_POST_CARRIES	;; Make post-normalization callback
+
+	and	al, al			;; Test returned flag
+	jne	do_forward_fft		;; Do forward FFT if flag set
+	;; Fall through to copy data from scratch area back to FFT data area
+	;; and then jump to loop end to get next block to process
+
+	ENDM
+
+;; Get next block at end of pass 1 loop
+
+zpass1_get_next_block MACRO pass2, c0b, b0b
+	LOCAL	again, done
+
+again:	c_call	PASS1_GET_NEXT_BLOCK	;; C callback routine
+
+	cmp	al, 1			;; Test return code
+	jl	c0b			;; Do another inverse FFT/norm/FFT
+	je	b0b			;; Do another forward FFT
+	cmp	al, 4
+	jl	short done		;; Pass 1 main thread done or pass 1 auxiliary thread done
+	je	pass2			;; Start pass 2
+
+;; Propagate the carries back into the FFT data.
+
+	start_timer 29
+	mov	rax, ZMM_CARRIES_ROUTINE
+	call	rax
+	end_timer 29
+	jmp	short again
+
+;; All done, end timer and fall through to exit code
+
+done:	end_timer 1
+	ENDM
+
+;;
+;; Macros to copy clm pass 1 blocks (8*clm*pass1_size/16 double cache lines) to and from scratch area
+;;
+
+copy_scratch_data_to_fft MACRO
+	LOCAL	a0b
+	start_timer 30
+	mov	rsi, scratch_area	;; Get address of scratch area
+	mov	rcx, DATA_ADDR		;; Load source address
+	mov	r8, pass2blkdst		;; blkdst
+	loops_init 8*clm*pass1_size/16
+a0b:	vmovapd	zmm0, [rsi]		;; Copy two cache lines
+	vmovapd	zmm1, [rsi+64]
+	vmovapd	[rcx], zmm0
+	vmovapd	[rcx+64], zmm1
+	bump	rsi, 128		;; Next source pointer
+	bump	rcx, blkdstreg		;; Next dest pointer
+	loops	8, short a0b		;; Test loop counter
+	neg	blkdstreg
+	bump	rcx, 8*blkdstreg+128	;; Next dest pointer
+	neg	blkdstreg
+	loops	clm, short a0b		;; Test loop counter
+	bump	rsi, -8*clm*128+clmblkdst ;; Next source pointer
+	bump	rcx, -clm*128+8*blkdstreg ;; Next dest pointer
+	IF	(pass1_size/16 MOD 8) EQ 0
+	loops	8, short a0b		;; Test loop counter
+	IF	pass1_size/16 GT 8
+	bump	rsi, -8*clmblkdst+clmblkdst8
+	loops	pass1_size/16/8, a0b	;; Test loop counter
+	ENDIF
+	ENDIF
+	IF	(pass1_size/16 MOD 8) NE 0
+	loops	pass1_size/16, a0b	;; Test loop counter
+	ENDIF
+	end_timer 30
+	ENDM
+
+copy_fft_data_to_scratch MACRO
+	LOCAL	a0b
+	start_timer 31
+	mov	rsi, DATA_ADDR		;; Load source address
+	add	rsi, DIST_TO_FFTSRCARG
+	mov	rcx, scratch_area	;; Get address of scratch area
+	mov	r8, pass2blkdst		;; blkdst
+	loops_init 8*clm*pass1_size/16
+a0b:	vmovapd	zmm0, [rsi]		;; Copy two cache lines
+	vmovapd	zmm1, [rsi+64]
+	vmovapd	[rcx], zmm0
+	vmovapd	[rcx+64], zmm1
+	bump	rsi, blkdstreg		;; Next source pointer
+	bump	rcx, 128		;; Next dest pointer
+	loops	8, short a0b		;; Test loop counter
+	neg	blkdstreg
+	bump	rsi, 8*blkdstreg+128	;; Next source pointer
+	neg	blkdstreg
+	loops	clm, short a0b		;; Test loop counter
+	bump	rsi, -clm*128+8*blkdstreg ;; Next source pointer
+	bump	rcx, -8*clm*128+clmblkdst ;; Next dest pointer
+	IF	(pass1_size/16 MOD 8) EQ 0
+	loops	8, short a0b		;; Test loop counter
+	IF	pass1_size/16 GT 8
+	bump	rcx, -8*clmblkdst+clmblkdst8
+	loops	pass1_size/16/8, a0b	;; Test loop counter
+	ENDIF
+	ENDIF
+	IF	(pass1_size/16 MOD 8) NE 0
+	loops	pass1_size/16, a0b	;; Test loop counter
+	ENDIF
+	end_timer 31
+	ENDM
+
+
+;; This macro sets the prefetch pointers needed by the zloop macros
+
+set_data_prefetch_ptrs MACRO
+	IF PREFETCHING NE 0
+	mov	rcx, DATA_PREFETCH	;; Load source address for prefetching
+	ENDIF
+	ENDM
+
+
+;; zloop initialization
+
+zloop_init MACRO count, first_completed, first_iters
+;;	loops_init count, first_completed, first_iters
+;; BUG - loops_init with first completed is not working.  If one does "zloop_init 8, 1, 8", then rax is set to 256/8
+;; expecting looping to be done with add 256/8 instructions.  However looping is actually done with add al, 1;  test al, 7
+;; instructions.  We've coded up an ugly hack for now.
+	loops_init count
+	IFNB <first_completed>
+	zloop_adjust first_completed
+	ENDIF
+	zloop_prefetch_type = 0
+	zloop_prefetch_iter = 0
+	zloop_bump_iter = 0
+	zloop_prefetched_early = 0
+	zloop_unrolled_count = 0
+	zloop_adjustment = 0
+	ENDM
+
+; Predefined zloop prefetching rates
+
+ZNONE = 0			;; Prefetch no cache lines every macro call
+ZOCT = 1			;; Prefetch 8 cache lines every macro call
+ZSEPT = 2			;; Prefetch 7 cache lines every macro call (not for use with clm prefetching)
+ZSEXT = 3			;; Prefetch 6 cache lines every macro call (not for use with clm prefetching)
+ZQUINT = 4			;; Prefetch 5 cache lines every macro call (not for use with clm prefetching)
+ZQUAD = 5			;; Prefetch 4 cache lines every macro call
+ZTRIPLE = 6			;; Prefetch 3 cache lines every macro call (not for use with clm prefetching)
+ZDOUBLE = 7			;; Prefetch 2 cache lines every macro call
+ZSINGLE = 8			;; Prefetch 1 cache line every macro call
+ZHALF = 9			;; Prefetch 1 cache line every 2 macro calls
+ZQUARTER = 10			;; Prefetch 1 cache line every 4 macro calls
+ZOTHER = 11			;; Prefetch 1 cache line every N macro calls
+
+;; Set zloop prefetching to L2 cache.  Plain vanilla prefetching, prefetch pointer is bumped
+;; one cache line at a time.  Used to prefetch sin/cos data in pass 1.
+
+zloop_set_prefetch MACRO rate, arg1, arg2
+	zloop_prefetch_type = 1			;; Increment prefetch pointer by 64
+	zloop_prefetch_t2 = 0			;; Prefetch to L2 cache
+	zloop_prefetch_rw = 0
+	zloop_pfreg EQU rcx
+	zloop_set_rate rate, arg1
+	ENDM
+
+;; Set zloop prefetching to L2 cache with write intent.  Plain vanilla prefetching, prefetch pointer
+;; is bumped one cache line at a time.  Used to prefetch FFT data in pass 2.
+
+zloop_set_rw_prefetch MACRO rate, arg1, arg2
+	zloop_prefetch_type = 1			;; Increment prefetch pointer by 64
+	zloop_prefetch_t2 = 0			;; Prefetch to L2 cache
+	zloop_prefetch_rw = 1
+	zloop_pfreg EQU rcx
+	zloop_set_rate rate, arg1
+	ENDM
+
+;; Set zloop prefetching to L2 cache with write intent.  In this type of prefetching, the prefetch pointer
+;; is bumped by blkdst after clm*128 bytes are prefetched.  Used to prefetch FFT data in pass 1.
+
+zloop_set_clm_prefetch MACRO rate
+	zloop_prefetch_type = 2			;; Increment prefetch pointer by clm*128
+	zloop_prefetch_t2 = 0			;; Prefetch to L2 cache
+	zloop_prefetch_rw = 1			;; Write-intent when Intel chips support prefetchwt1.
+	zloop_set_rate rate
+	ENDM
+
+;; Set zloop prefetching to L3 cache (test code).  Prefetch pointer is bumped one cache line at a time.
+;; Could be used to prefetch FFT data in larger pass 2s where everything won't fit in the L2 cache.
+
+zloop_set_L3_prefetch MACRO rate, arg1, arg2
+	zloop_prefetch_type = 1			;; Increment prefetch pointer by 64
+	zloop_prefetch_t2 = 1			;; Prefetch to L3 cache
+	zloop_prefetch_rw = 0			;; Do not prefetch with write intent, anyway there is no prefetchwt2 instruction.
+	zloop_pfreg EQU rcx
+	zloop_set_rate rate, arg1
+	ENDM
+
+;; Set zloop prefetching to L3 cache (test code).  In this type of prefetching, the prefetch pointer
+;; is bumped by blkdst after clm*128 bytes are prefetched.  Could be used to prefetch FFT data in larger
+;; pass 1s where data all data will not fit in the L2 cache.
+
+zloop_set_clm_L3_prefetch MACRO rate
+	zloop_prefetch_type = 2			;; Increment prefetch pointer by clm*128
+	zloop_prefetch_t2 = 1			;; Prefetch to L3 cache
+	zloop_prefetch_rw = 0			;; Do not prefetch with write intent, anyway there is no prefetchwt2 instruction.
+	zloop_set_rate rate
+	ENDM
+
+;; Set alternate prefetch pointer increment.  The zloops macros were built on the premise
+;; of bumping the prefetch pointer by one cache line (64 bytes) on every prefetch.  This
+;; macros lets us choose a smaller increment so that the caller can avoid prefetching
+;; too many cache lines.  For example, if the caller loops 100 times but only wants to
+;; prefetch 80 cache lines then we can set our prefetch increment to 64 * 80 / 100 bytes.
+;; Note this is not the preferred solution.  In the example above it would be better to
+;; back up the prefetch pointer by 20 cache lines sometime during the looping process.
+;; This is preferred because there is no guarantee (due to rounding) that we can prefetch
+;; exactly the number of cache lines requested.  Unfortunately, the looping structure
+;; or a register shortage may prevent us from using the preferred solution.
+
+zloop_set_alternate_prefetch_increment MACRO cache_lines_to_prefetch, number_of_loops
+	;; Set increment so that we prefetch at least the requested number of cache lines
+	;; The formula is (cache_lines_to_prefetch * 64) / number_of_loops
+	zloop_pfincr = ((cache_lines_to_prefetch) * 64) / (number_of_loops)
+	ENDM
+
+;; Adjust the loop counter so that fewer iterations are performed.  This is an ugly hack
+;; as it requires the caller to understand the inner workings of how looping is implemented.
+zloop_adjust MACRO new_loop_count
+	add	eax, new_loop_count
+	zloop_adjustment = new_loop_count
+	ENDM
+
+;; This macro loops the specified number of times, prefetching 64-byte cache lines as
+;; necessary.  Prefetch pointer is bumped to the next block after clm*128 bytes prefetched.
+zloop MACRO iters, label1, incr_rsi, pm_incr_reg, pm_incr_amt, sc_incr_reg, sc_incr_amt, pf_incr_reg, pf_incr_amt, alt_incr_reg, alt_incr_amt, alt2_incr_reg, alt2_incr_amt, alt3_incr_reg, alt3_incr_amt
+
+	;; Init local variables
+	zlocal_iters = iters
+
+	;; If we haven't reached the prefetch iteration, then see if we need to prefetch now
+	IF loops_completed LT zloop_prefetch_iter
+
+		;; Emulate the first loops call to set loops_completed.
+		IF loops_completed EQ 0
+			zloop_emulate_first_loops_call
+		ENDIF
+
+		;; Perform iterations before issuing prefetch instruction
+		IF zloop_prefetch_iter GE loops_completed * zlocal_iters
+			loops	zlocal_iters, label1	;; Test loop counter
+			zlocal_iters = 1
+		ELSEIF zloop_prefetch_iter GT loops_completed
+			small_count = zloop_prefetch_iter / loops_completed
+			IF (zlocal_iters MOD small_count) NE 0
+				zerror_with_non_power_of_2_and_prefetching
+			ENDIF
+			loops	small_count, label1	;; Test loop counter
+			zlocal_iters = zlocal_iters / small_count
+		ENDIF
+
+		;; Issue prefetch instruction(s)
+		IF loops_completed GE zloop_prefetch_iter
+			zloop_prefetch
+		ENDIF
+
+		;; Handle the awkward case where we need to do a bump because of unrolling.
+		;; An example: Unrolled 4 times with a prefetch_iter of 2 and a bump_iter of 4.
+		IF zloop_bump_iter GT zloop_prefetch_iter AND loops_completed GE zloop_bump_iter
+			bump	rcx, -clm*128+blkdst		;; Next prefetch pointer
+		ENDIF
+
+	;; Otherwise, if unrolling then emulate the first loops call.
+	ELSEIF loops_completed EQ 0 AND zloop_unrolled_count GT 0
+		zloop_emulate_first_loops_call
+	ENDIF
+
+	;; If we haven't reached the bump iteration, then see if we need to bump the prefetch pointer now
+	IF loops_completed LT zloop_bump_iter
+
+		;; Perform iterations before issuing prefetch instruction
+		IF zloop_bump_iter LT loops_completed * zlocal_iters
+			small_count = zloop_bump_iter / loops_completed
+			IF (zlocal_iters MOD small_count) NE 0
+				zerror_with_non_power_of_2_and_prefetching
+			ENDIF
+			loops	small_count, label1		;; Test loop counter
+			zlocal_iters = zlocal_iters / small_count
+		ELSE
+			loops	zlocal_iters, label1		;; Test loop counter
+			zlocal_iters = 1
+		ENDIF
+
+		;; Issue "clm prefetching" bump instruction where we bump the prefetch pointer every 128*clm bytes
+		IF loops_completed EQ zloop_bump_iter
+			bump	rcx, -clm*128+blkdst		;; Next prefetch pointer
+		ENDIF
+	ENDIF
+
+	;; Loop any remaining iterations
+	IF zlocal_iters GT 1 OR loops_completed EQ 0
+		loops	zlocal_iters, label1
+	ENDIF
+
+	;; Clear count of unrolled building blocks (in case loops_undo or loops_reset is called)
+	zloop_prefetched_early = 0
+	zloop_unrolled_count = 0
+	zloop_adjustment = 0
+
+	;; Optionally bump pointers
+	bump	rsi, incr_rsi			;; Next source pointer
+	bump	pm_incr_reg, pm_incr_amt	;; Next premultiplier pointer
+	bump	sc_incr_reg, sc_incr_amt	;; Next sin/cos pointer
+	bump	pf_incr_reg, pf_incr_amt	;; Next prefetching pointer
+	bump	alt_incr_reg, alt_incr_amt	;; Next pointer to whatever
+	bump	alt2_incr_reg, alt2_incr_amt	;; Next pointer to whatever
+	bump	alt3_incr_reg, alt3_incr_amt	;; Next pointer to whatever
+	ENDM
+
+;; This macro is called by the building block macros to try and distribute ZDOUBLE, ZQUAD, ZOCT prefetching a bit more uniformly.
+;; It may also help the ZSINGLE case by moving the prefetch away from the zstores that are bunched at the end of building block macros.
+
+zloop_optional_early_prefetch MACRO
+
+	;; If we prefetch every iteration and we haven't already prefetched the required amount, then prefetch one now.
+	IF zloop_prefetch_iter EQ 1
+	IF zloop_prefetched_early LT zloop_prefetch_count
+		;; Handle standard prefetching
+		IF zloop_prefetch_type EQ 1
+			zprefetcht1 [zloop_pfreg + zloop_prefetched_early * PREFETCHING]
+			zloop_prefetched_early = zloop_prefetched_early + 1
+		;; Handle "clm prefetching" where we bump the prefetch pointer every clm*128 bytes
+		ELSEIF zloop_prefetch_type EQ 2
+			IF (zloop_prefetched_early * PREFETCHING)/(clm*128) EQ 0
+				zprefetcht1 [rcx + (zloop_prefetched_early * PREFETCHING mod (clm*128))]
+			ELSEIF ((zloop_prefetched_early * PREFETCHING)/(clm*128) EQ 3) AND (((OPATTR([blkdst])) AND 100b) EQ 0)
+				add	rcx, blkdst
+				zprefetcht1 [rcx + 2*blkdst + (zloop_prefetched_early * PREFETCHING mod (clm*128))]
+				sub	rcx, blkdst
+			ELSE
+				zprefetcht1 [rcx + (zloop_prefetched_early * PREFETCHING)/(clm*128)*blkdst + (zloop_prefetched_early * PREFETCHING mod (clm*128))]
+			ENDIF
+			zloop_prefetched_early = zloop_prefetched_early + 1
+		ENDIF
+	ENDIF
+	ENDIF
+
+	ENDM
+
+;; This macro is called by the building block macros when they are unrolling a building block.   We must
+;; do any required prefetching and record each unrolled iteration so that we don't loop as much in zloop.
+
+zloop_unrolled_one MACRO
+
+	;; Bump the count of unrolled building blocks
+	zloop_unrolled_count = zloop_unrolled_count + 1
+
+	;; If we're at a prefetch iteration, then prefetch
+	IF zloop_prefetch_iter GT 0
+	IF (zloop_unrolled_count + zloop_adjustment) MOD zloop_prefetch_iter EQ 0
+		zloop_prefetch
+	ENDIF
+	ENDIF
+
+	;; Handle "clm prefetching" where we bump the prefetch pointer every 128*clm bytes
+	;; Note that zloop_prefetch handled this in some cases (where prefetch count fetched a multiple of 128*clm bytes)
+	IF zloop_bump_iter GT 1
+	IF (zloop_prefetch_count * PREFETCHING) MOD (clm*128) NE 0
+	IF (zloop_unrolled_count + zloop_adjustment) MOD zloop_bump_iter EQ 0
+		bump	rcx, -clm*128+blkdst		;; Next prefetch pointer
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDM
+
+;; Internal macro to set zloop prefetching rate.
+
+zloop_set_rate MACRO rate, N
+	IF (rate EQ ZNONE)
+		zloop_prefetch_type = 0
+		zloop_prefetch_iter = 0
+	ELSEIF (rate EQ ZOCT)
+		zloop_prefetch_iter = 1
+		zloop_prefetch_count = 8
+	ELSEIF (rate EQ ZSEPT) AND (zloop_prefetch_type EQ 1)
+		zloop_prefetch_iter = 1
+		zloop_prefetch_count = 7
+	ELSEIF (rate EQ ZSEXT) AND (zloop_prefetch_type EQ 1)
+		zloop_prefetch_iter = 1
+		zloop_prefetch_count = 6
+	ELSEIF (rate EQ ZQUINT) AND (zloop_prefetch_type EQ 1)
+		zloop_prefetch_iter = 1
+		zloop_prefetch_count = 5
+	ELSEIF (rate EQ ZQUAD)
+		zloop_prefetch_iter = 1
+		zloop_prefetch_count = 4
+	ELSEIF (rate EQ ZTRIPLE) AND (zloop_prefetch_type EQ 1)
+		zloop_prefetch_iter = 1
+		zloop_prefetch_count = 3
+	ELSEIF (rate EQ ZDOUBLE)
+		zloop_prefetch_iter = 1
+		zloop_prefetch_count = 2
+	ELSEIF (rate EQ ZSINGLE)
+		zloop_prefetch_iter = 1
+		zloop_prefetch_count = 1
+	ELSEIF (rate EQ ZHALF)
+		zloop_prefetch_iter = 2
+		zloop_prefetch_count = 1
+	ELSEIF (rate EQ ZQUARTER)
+		zloop_prefetch_iter = 4
+		zloop_prefetch_count = 1
+	ELSEIF (rate EQ ZOTHER)
+		zloop_prefetch_iter = N
+		zloop_prefetch_count = 1
+	ELSE
+		bad_zloop_prefetch_rate
+	ENDIF
+	zloop_pfincr = 64
+	;; Handle supported prefetch amounts
+	IF (PREFETCHING EQ 0)
+		zloop_prefetch_rate = ZNONE
+	ELSEIF (PREFETCHING EQ 128)
+		IF (zloop_prefetch_count EQ 1)
+			zloop_prefetch_iter = zloop_prefetch_iter * 2
+		ELSE
+			zloop_prefetch_count = (zloop_prefetch_count+1)/2
+		ENDIF
+	ENDIF
+	;; Calculate the iteration where we'll bump the prefetch pointer to the next block
+	IF zloop_prefetch_type EQ 2
+		zloop_bump_iter = zloop_prefetch_iter * (clm * 128) / (zloop_prefetch_count * PREFETCHING)
+	ELSE
+		zloop_bump_iter = 0
+	ENDIF
+	ENDM
+
+;; Internal macro to emulate the first loops call.  We increment eax and set loops_completed.
+
+zloop_emulate_first_loops_call MACRO
+	IF loops_count LT 256
+		add al, zloop_unrolled_count+1
+	ELSE
+		add eax, zloop_unrolled_count+1
+	ENDIF
+	loops_incr_needed = 0
+	loops_completed = zloop_unrolled_count+1
+	IF zloop_unrolled_count GT 0 AND (loops_completed + zloop_adjustment) EQ zlocal_iters
+		loops_completed = loops_completed + zloop_adjustment
+	ENDIF
+	IF zlocal_iters MOD loops_completed NE 0
+		bad_zloop_emulate_first_loops_call
+	ENDIF
+
+	;; Handle hard non-power-of-2 case.  For example: zloop 20 where we've unrolled 5 times.
+	IF (zlocal_iters AND (zlocal_iters-1)) NE 0 AND (loops_completed AND (loops_completed-1)) NE 0
+		next_power_2 = zlocal_iters
+		next_power_2 = next_power_2 OR (next_power_2 SHR 1)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 2)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 4)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 8)
+		next_power_2 = (next_power_2 OR (next_power_2 SHR 16)) + 1
+		non_power_2_adjustment = next_power_2 - zlocal_iters
+		loops_np2_initial_value_adjust = non_power_2_adjustment
+		overwrite_initial_loop_count loops_np2_initial_value_adjust
+		loops_count = loops_count / zlocal_iters * next_power_2
+		zlocal_iters = next_power_2
+
+		next_power_2 = loops_completed
+		next_power_2 = next_power_2 OR (next_power_2 SHR 1)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 2)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 4)
+		next_power_2 = next_power_2 OR (next_power_2 SHR 8)
+		next_power_2 = (next_power_2 OR (next_power_2 SHR 16)) + 1
+		loops_completed = next_power_2
+	ENDIF
+
+	zlocal_iters = zlocal_iters / loops_completed
+ENDM
+
+;; Internal macro to issue the prefetch instructions and bump the prefetch register
+
+zprefetcht1 MACRO ops:vararg
+	;; Handle read-only prefetching
+	IF zloop_prefetch_rw EQ 0
+		;; Handle read-only prefetching into the L2 or L3 cache
+		IF zloop_prefetch_t2 EQ 0
+			prefetcht1 &ops
+		ELSE
+			prefetcht2 &ops
+		ENDIF
+	ENDIF
+	;; Handle read-write prefetching
+	IF zloop_prefetch_rw EQ 1
+		prefetchwt1 &ops
+	ENDIF
+ENDM
+
+zloop_prefetch MACRO
+
+	;; Handle standard prefetching
+	IF zloop_prefetch_type EQ 1
+
+		IF zloop_prefetched_early LT 1
+			zprefetcht1 [zloop_pfreg]
+		ENDIF
+		IF zloop_prefetch_count GE 2 AND zloop_prefetched_early LT 2
+			zprefetcht1 [zloop_pfreg + zloop_pfincr]
+		ENDIF
+		IF zloop_prefetch_count GE 3 AND zloop_prefetched_early LT 3
+			zprefetcht1 [zloop_pfreg + 2 * zloop_pfincr]
+		ENDIF
+		IF zloop_prefetch_count GE 4 AND zloop_prefetched_early LT 4
+			zprefetcht1 [zloop_pfreg + 3 * zloop_pfincr]
+		ENDIF
+		IF zloop_prefetch_count GE 5 AND zloop_prefetched_early LT 5
+			zprefetcht1 [zloop_pfreg + 4 * zloop_pfincr]
+		ENDIF
+		IF zloop_prefetch_count GE 6 AND zloop_prefetched_early LT 6
+			zprefetcht1 [zloop_pfreg + 5 * zloop_pfincr]
+		ENDIF
+		IF zloop_prefetch_count GE 7 AND zloop_prefetched_early LT 7
+			zprefetcht1 [zloop_pfreg + 6 * zloop_pfincr]
+		ENDIF
+		IF zloop_prefetch_count GE 8 AND zloop_prefetched_early LT 8
+			zprefetcht1 [zloop_pfreg + 7 * zloop_pfincr]
+		ENDIF
+		IF zloop_prefetch_count GE 9 AND zloop_prefetched_early LT 9
+			prefetch_count_too_large
+		ENDIF
+
+		bump	zloop_pfreg, zloop_prefetch_count * zloop_pfincr	;; Next prefetch pointer
+
+	;; Handle "clm prefetching" where we bump the prefetch pointer every 128*clm bytes
+	ELSEIF zloop_prefetch_type EQ 2
+
+		IF zloop_prefetched_early LT 1
+			zprefetcht1 [rcx]
+		ENDIF
+		IF zloop_prefetch_count GE 2 AND zloop_prefetched_early LT 2
+			IF (PREFETCHING)/(clm*128) EQ 0
+				zprefetcht1 [rcx + (PREFETCHING mod (clm*128))]
+			ELSE
+				zprefetcht1 [rcx + (PREFETCHING)/(clm*128)*blkdst + (PREFETCHING mod (clm*128))]
+			ENDIF
+		ENDIF
+		IF zloop_prefetch_count GE 3 AND zloop_prefetched_early LT 3
+			IF (2*PREFETCHING)/(clm*128) EQ 0
+				zprefetcht1 [rcx + ((2*PREFETCHING) mod (clm*128))]
+			ELSE
+				zprefetcht1 [rcx + (2*PREFETCHING)/(clm*128)*blkdst + ((2*PREFETCHING) mod (clm*128))]
+			ENDIF
+		ENDIF
+		IF zloop_prefetch_count GE 4 AND zloop_prefetched_early LT 4
+			IF (3*PREFETCHING)/(clm*128) EQ 0
+				zprefetcht1 [rcx + ((3*PREFETCHING) mod (clm*128))]
+			ELSEIF ((3*PREFETCHING)/(clm*128) EQ 3) AND (((OPATTR([blkdst])) AND 100b) EQ 0)
+				add	rcx, blkdst
+				zprefetcht1 [rcx + 2*blkdst + ((3*PREFETCHING) mod (clm*128))]
+				sub	rcx, blkdst
+			ELSE
+				zprefetcht1 [rcx + (3*PREFETCHING)/(clm*128)*blkdst + ((3*PREFETCHING) mod (clm*128))]
+			ENDIF
+		ENDIF
+		IF zloop_prefetch_count GE 5 AND zloop_prefetched_early LT 5
+			IF (4*PREFETCHING)/(clm*128) EQ 0
+				zprefetcht1 [rcx + ((4*PREFETCHING) mod (clm*128))]
+			ELSEIF ((4*PREFETCHING)/(clm*128) EQ 3) AND (((OPATTR([blkdst])) AND 100b) EQ 0)
+				add	rcx, blkdst
+				zprefetcht1 [rcx + 2*blkdst + ((4*PREFETCHING) mod (clm*128))]
+				sub	rcx, blkdst
+			ELSE
+				zprefetcht1 [rcx + (4*PREFETCHING)/(clm*128)*blkdst + ((4*PREFETCHING) mod (clm*128))]
+			ENDIF
+		ENDIF
+		IF zloop_prefetch_count GE 6 AND zloop_prefetched_early LT 6
+			IF (5*PREFETCHING)/(clm*128) EQ 0
+				zprefetcht1 [rcx + ((5*PREFETCHING) mod (clm*128))]
+			ELSEIF ((5*PREFETCHING)/(clm*128) EQ 3) AND (((OPATTR([blkdst])) AND 100b) EQ 0)
+				add	rcx, blkdst
+				zprefetcht1 [rcx + 2*blkdst + ((5*PREFETCHING) mod (clm*128))]
+				sub	rcx, blkdst
+			ELSE
+				zprefetcht1 [rcx + (5*PREFETCHING)/(clm*128)*blkdst + ((5*PREFETCHING) mod (clm*128))]
+			ENDIF
+		ENDIF
+		IF zloop_prefetch_count GE 7 AND zloop_prefetched_early LT 7
+			IF (6*PREFETCHING)/(clm*128) EQ 0
+				zprefetcht1 [rcx + ((6*PREFETCHING) mod (clm*128))]
+			ELSEIF ((6*PREFETCHING)/(clm*128) EQ 3) AND (((OPATTR([blkdst])) AND 100b) EQ 0)
+				add	rcx, blkdst
+				zprefetcht1 [rcx + 2*blkdst + ((6*PREFETCHING) mod (clm*128))]
+				sub	rcx, blkdst
+			ELSE
+				zprefetcht1 [rcx + (6*PREFETCHING)/(clm*128)*blkdst + ((6*PREFETCHING) mod (clm*128))]
+			ENDIF
+		ENDIF
+		IF zloop_prefetch_count GE 8 AND zloop_prefetched_early LT 8
+			IF (7*PREFETCHING)/(clm*128) EQ 0
+				zprefetcht1 [rcx + ((7*PREFETCHING) mod (clm*128))]
+			ELSEIF ((7*PREFETCHING)/(clm*128) EQ 3) AND (((OPATTR([blkdst])) AND 100b) EQ 0)
+				add	rcx, blkdst
+				zprefetcht1 [rcx + 2*blkdst + ((7*PREFETCHING) mod (clm*128))]
+				sub	rcx, blkdst
+			ELSE
+				zprefetcht1 [rcx + (7*PREFETCHING)/(clm*128)*blkdst + ((7*PREFETCHING) mod (clm*128))]
+			ENDIF
+		ENDIF
+		IF zloop_prefetch_count GE 9 AND zloop_prefetched_early LT 9
+			zloop_prefetch_count_too_large
+		ENDIF
+
+		IF (zloop_prefetch_count*PREFETCHING)/(clm*128) EQ 0
+			bump	rcx, ((zloop_prefetch_count*PREFETCHING) mod (clm*128))	;; Next prefetch pointer
+		ELSE
+			bump	rcx, (zloop_prefetch_count*PREFETCHING)/(clm*128)*blkdst + ((zloop_prefetch_count*PREFETCHING) mod (clm*128))	;; Next prefetch pointer
+		ENDIF
+
+	ENDIF
+	ENDM
+
+
+; ********************************************************
+; ********************************************************
+; ******************  PASS 2 MACROS  *********************
+; ********************************************************
+; ********************************************************
+
+;
+; Macros used in pass 2 of a two pass FFT.
+;
+
+; Pass 2s are named using this scheme:
+;
+;	zpass2 zfft_type options zpass2_size zarch
+;
+; where zfft_type is (not all are implemented):
+;	r4 = radix-4 DJB
+;	r4delay = radix-4/8 DJB with delayed application of the first pass 1 levels sin/cos data
+;	r4dwpn = r4delay with partial normalization.
+;	sr = split-radix
+; options are:
+;	_np for no_prefetch
+; zpass2_size is:
+;	number of complex values handled in pass 2
+;
+; zarch indicates FFT is optimized for one of these architectures:
+;	SKX		Skylake-X and later Intel CPUs
+;	ZENPLUS		future generation AMD64 chips
+;
+; Examples:
+;	zpass2_r4_4096_SKX
+;	zpass2_r4_np_5120_ZENPLUS
+
+;; Create a for this fft type, pass 2 levels, and architecture combination
+
+zpass2gen MACRO p2_size
+	LOCAL	complex_loop, get_next, procname, procname
+	LOCAL	realmacro, complexmacro
+
+;; Generate the procedure name
+
+	procname CATSTR <zpass2_>,zfft_type
+	IF PREFETCHING EQ 0
+	procname CATSTR procname,<_np>
+	ENDIF
+	procname CATSTR procname,<_>,%p2_size,<_>,zarch
+
+;; Generate the macro names
+
+	realmacro CATSTR <z>,zfft_type,<_>,<pass2_>,%p2_size,<_real>
+	complexmacro CATSTR <z>,zfft_type,<_>,<pass2_>,%p2_size,<_complex>
+
+;; Define pass 2 constants.  Each 4KB page is padded with 64 to 192 bytes.
+
+	IF p2_size EQ 3072 OR p2_size EQ 3584 OR p2_size EQ 3840 OR p2_size EQ 4096 OR p2_size EQ 5120 OR p2_size EQ 5376 OR p2_size EQ 6144 OR p2_size GE 7168
+		fourKBgap = 64
+	ELSE
+		fourKBgap = 0
+	ENDIF
+	dist1 = 128			;; AVX-512 FFTs stores data in 128-byte double cache lines
+	dist32 = (32*128+fourKBgap)	;; Optionally introduce padding every 4KB
+
+;; Generate the procedure
+
+	PROCF	procname
+	int_prolog 0,0,1
+
+;; Entry point for real FFTs: do one real and many complex blocks, also
+;; entry point for all-complex FFTs: do all complex blocks
+
+	mov	rax, OFFSET complex_loop ;; Auxiliary thread entry point
+	mov	THREAD_WORK_ROUTINE, rax ;; Save addr for C code to call
+	c_call	PASS2_WAKE_UP_THREADS	;; C callback routine
+	cmp	ALL_COMPLEX_FFT, 1	;; Test if there is a real-data block
+	je	complex_loop		;; Jump to process all-complex blocks
+
+	realmacro			; Do the real data block
+	jmp	get_next		; Go process complex blocks
+
+complex_loop:
+	complexmacro
+
+;; GET_NEXT_BLOCK returns TRUE if we are done.  Otherwise, it calculates
+;; the next blocks to process and prefetch.
+
+get_next:
+	c_call	PASS2_GET_NEXT_BLOCK	;; C callback routine
+	and	rax, rax		;; Test return code
+	jz	complex_loop		;; If false, process another block
+
+;; All done
+
+	int_epilog 0,0,1
+	procname ENDP	
+	ENDM
+

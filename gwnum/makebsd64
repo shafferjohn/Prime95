@@ -1,0 +1,32 @@
+# Makefile for FreeBSD 11.0 64-bit gwnum library
+#
+
+CC ?= cc
+CFLAGS += -I.. -I../sqlite-amalgamation-3180000 -I$(LOCALBASE)/include -DX86_64 -O2
+
+CXX ?= cc
+CXXFLAGS += -I.. -I../qd -DX86_64 -O2
+
+AR ?= ar
+
+LINUXOBJS = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o ecmstag1.o
+
+LIB = gwnum.a
+
+#########################################################################
+
+$(LIB): $(LINUXOBJS)
+	cp linux64/gwnum.a .
+	$(AR) -rs $(LIB) $(LINUXOBJS)
+
+clean:
+	rm -f $(LINUXOBJS)
+
+distclean: clean
+	rm -f $(LIB)
+
+.c.o:
+	$(CC) $(CFLAGS) -c $<
+
+.cpp.o:
+	$(CXX) $(CXXFLAGS) -c $<

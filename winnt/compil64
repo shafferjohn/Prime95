@@ -1,0 +1,27 @@
+# Choose compiler switches 
+
+cl64=cl /GF /W3 /MT /D_CRT_SECURE_NO_DEPRECATE /O2 /c
+cl64d=cl /GF /W3 /MT /D_CRT_SECURE_NO_DEPRECATE /DGDEBUG /Zi /c
+
+# Standard options
+copt=/I.. /I..\gwnum /I\libcurl /Ic:\hwloc-win32-build-2.0.4\include /Ic:\gmp64
+
+# This line allows NMAKE to work as well
+
+all: ntprime64.exe
+
+# Update the object files if necessary
+
+amd64\main.obj: main.c main.h prime95.h
+    $(cl64) $(copt) /Foamd64\main.obj main.c
+
+amd64\service.obj: service.c service.h
+    $(cl64) $(copt) /Foamd64\service.obj service.c
+
+amd64\prime.obj: prime.c prime95.h ..\commonc.c ..\commonb.c
+    $(cl64) $(copt) /Foamd64\prime.obj prime.c
+
+# Update the executable file
+
+ntprime64.exe: amd64\main.obj amd64\prime.obj amd64\service.obj
+    link @main64.lnk
