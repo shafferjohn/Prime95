@@ -24,6 +24,7 @@ jobs:
 
     - name: Update Ranking List
       run: |
+        go env -w GO111MODULE=on
         pushd .sync
         go get -v -t -d ./...
         popd
