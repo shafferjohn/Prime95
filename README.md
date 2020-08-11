@@ -5,3 +5,8 @@
 This repo is a mirror to [Free Mersenne Prime Search Software](https://www.mersenne.org/download/) source code for Windows, Linux, FreeBSD, and Mac OS X.
 
 You could download the latest code from [GIMPS](https://www.mersenne.org) or [release page](https://github.com/shafferjohn/Prime95/releases).
+
+Mirror rank from [PrimeNet Top Overall Teams](https://www.mersenne.org/report_top_teams/)
+
+<!-- PrimeNet Top Rank start -->
+<!-- PrimeNet Top Rank end -->
