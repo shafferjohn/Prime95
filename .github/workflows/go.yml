@@ -27,8 +27,10 @@ jobs:
         go env -w GO111MODULE=on
         pushd .sync
         go get -v -t -d ./...
+        go build main.go
+        chmod +x main
         popd
-        go run .sync/main.go
+        .sync/main
       env:
         ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
