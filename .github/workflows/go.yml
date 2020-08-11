@@ -22,19 +22,15 @@ jobs:
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
 
-    - name: Get dependencies
-      run: |
-        cd .sync
-        go get -v -t -d ./...
-        if [ -f Gopkg.toml ]; then
-            curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
-            dep ensure
-        fi
-
     - name: Update Ranking List
-      run: go run .sync/main.go
+      run: |
+        pushd .sync
+        go get -v -t -d ./...
+        popd
+        go run .sync/main.go
       env:
         ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Push Results
       env:
         GITHUB_USER: "Shaffer John"
