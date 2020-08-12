@@ -10,78 +10,78 @@ Mirror rank from [PrimeNet Top Overall Teams](https://www.mersenne.org/report_to
 
 <!-- PrimeNet Top Rank start -->
 
-Top producers for the last year<br/>This hourly report generated 2020-08-12 06:00 UTC
+Top producers for the last year<br/>This hourly report generated 2020-08-12 07:00 UTC
 |Rank|Team Name|Total GHz Days|90 day|30 day|7 day|1 day|TF|P-1|LL/PRP|DC|ECM|ECM-F|
 |----|----|----|----|----|----|----|----|----|----|----|----|----|
-|1|[BitMEX Research](https://research.bitmex.com)|43663250.203|||||||99.6|0.4|||
-|2|[PrimeNet](http://www.mersenne.org/primenet/)|22878312.306|||||86.1|0.1|8.8|5.0|||
-|3|[GPU to 72](http://www.gpu72.com/)|5754505.177|||||93.5|2.2|2.0|2.3|||
-|4|[UCM-curtisc](http://cs.ucmo.edu/~cnc8851/index.html)|4233096.452|||||0.3|0.4|95.7|3.6|||
-|5|[More Power!!!](http://www.mersenneforum.org/showthread.php?t=654)|3528367.593|||||90.1|3.6|3.7|2.4|0.2||
-|6|[GIMPSChina](http://www.equn.com)|2277698.077|||||91.8|0.3|5.0|2.9|||
-|7|Team Belgium|1698437.472|⬆ 2|⬆ 1|||97.0|0.5|2.1|0.4|||
-|8|Ozzie Prime|1569829.641|⬇ 1|⬇ 1|||91.9|0.1|6.0|1.9||0.1|
+|1|[BitMEX Research](https://research.bitmex.com)|43668307.219|||||||99.6|0.4|||
+|2|[PrimeNet](http://www.mersenne.org/primenet/)|22877848.660|||||86.1|0.1|8.8|5.0|||
+|3|[GPU to 72](http://www.gpu72.com/)|5753939.117|||||93.5|2.2|2.0|2.3|||
+|4|[UCM-curtisc](http://cs.ucmo.edu/~cnc8851/index.html)|4233118.503|||||0.3|0.4|95.7|3.6|||
+|5|[More Power!!!](http://www.mersenneforum.org/showthread.php?t=654)|3528219.652|||||90.1|3.6|3.7|2.4|0.2||
+|6|[GIMPSChina](http://www.equn.com)|2277698.121|||||91.8|0.3|5.0|2.9|||
+|7|Team Belgium|1698453.538|⬆ 2|⬆ 1|||97.0|0.5|2.1|0.4|||
+|8|Ozzie Prime|1570167.141|⬇ 1|⬇ 1|||91.9|0.1|6.0|1.9||0.1|
 |9|[Team Tartan](http://www.cmu.edu)|1464210.094|⬇ 1||||77.3||16.6|6.1|||
-|10|[GW's legions](http://mersenne.org)|1455867.591|⬆ 1||||6.2||93.5|0.2|0.1||
+|10|[GW's legions](http://mersenne.org)|1456631.896|⬆ 1||||6.2||93.5|0.2|0.1||
 |11|[GIMPS.Korea](http://cafe.naver.com/prime95)|1248047.320|⬆ 2||||92.5|0.1|6.5|0.9|||
-|12|[MOXA](http://www.moxa.com)|1234786.937|⬇ 2||||96.3||3.2|0.5|||
-|13|POLAND|1165804.112|⬇ 1||||91.4|2.2|4.2|1.0|1.0||
-|14|SASAKI|932393.402|⬆ 1||||100.0||||||
-|15|[GIMPS.Russia](http://Mersenne.ru?from=GIMPS)|780430.543|⬇ 1||||60.2|3.2|29.0|6.1|1.0|0.3|
+|12|[MOXA](http://www.moxa.com)|1234786.543|⬇ 2||||96.3||3.2|0.5|||
+|13|POLAND|1165805.673|⬇ 1||||91.4|2.2|4.2|1.0|1.0||
+|14|SASAKI|932415.473|⬆ 1||||100.0||||||
+|15|[GIMPS.Russia](http://Mersenne.ru?from=GIMPS)|780548.302|⬇ 1||||60.2|3.2|29.0|6.1|1.0|0.3|
 |16|tsc|629372.567|⬆ 7|⬆ 3|||94.2|3.6|2.1|0.1|||
 |17|[GVPT](http://www.gvpt.sk)|618293.605|⬆ 3|⬆ 3|||92.1|0.4|6.2|1.3|||
-|18|[dc801](https://www.dc801.org)|533351.993|⬇ 2|⬇ 2|||||99.8|0.2|||
+|18|[dc801](https://www.dc801.org)|532688.194|⬇ 2|⬇ 2|||||99.8|0.2|||
 |19|Canada|517524.195|⬇ 1|⬇ 2|||82.8|0.4|12.4|4.3|||
 |20|[Team_Italia](http://www.gimps.it)|502932.670|⬇ 3|⬇ 2|||80.7|0.1|8.2|2.2|5.6|0.6|
-|21|[Numberphile](https://www.youtube.com/user/numberphile)|445772.707|⬇ 2||||44.7|0.4|42.9|11.7|0.2||
-|22|[SEL-ROC Systems](https://www.selroc.systems)|391582.282|⬆ 3||||27.7|0.5|66.0|5.7|||
+|21|[Numberphile](https://www.youtube.com/user/numberphile)|445791.121|⬇ 2||||44.7|0.4|42.9|11.7|0.2||
+|22|[SEL-ROC Systems](https://www.selroc.systems)|391623.717|⬆ 3||||27.7|0.5|66.0|5.7|||
 |23|[ComputerraRU](http://team.larin.name)|339148.685|⬇ 1||||80.2|0.2|4.7|0.7|5.8|8.3|
 |24|Team-Deutschland|329027.566|||||39.4|0.7|33.4|14.2|11.1|0.2|
-|25|Swedes Of Primes|319303.257|⬆ 9|⬆ 2|||2.8|2.3|84.9|10.0|||
-|26|Team Lucerne|297572.264|||||41.5|10.8|37.5|2.0|6.1||
+|25|Swedes Of Primes|319311.921|⬆ 9|⬆ 2|||2.8|2.3|84.9|10.0|||
+|26|Team Lucerne|297585.716|||||41.5|10.8|37.5|2.0|6.1||
 |27|The_Dude_Abides|271354.146|⬆ 23|⬆ 11|⬆ 1||75.2|0.2|22.4|2.2|||
-|28|zeit|261988.553|⬇ 7|⬇ 3|⬇ 1||36.1|2.2|49.9|8.6|0.6|0.4|
-|29|Granada|243865.888|⬇ 1|⬇ 1|||71.3|0.1|26.0|2.5|||
+|28|zeit|261961.924|⬇ 7|⬇ 3|⬇ 1||36.1|2.2|49.9|8.6|0.6|0.4|
+|29|Granada|243869.653|⬇ 1|⬇ 1|||71.3|0.1|26.0|2.5|||
 |30|[Ars Technica Team Prime Rib](http://www.teamprimerib.com/rr1/)|239915.032|⬇ 3|⬇ 1|||24.0|1.9|33.0|38.7|2.3||
 |31|[Hungary](http://www.hungary.com/)|236716.157|⬇ 2|⬇ 1||||0.2|55.7|44.0|||
 |32|[nranks](https://old.reddit.com)|209571.510|⬇ 2|⬇ 1|||83.3|2.3|11.7|1.7|1.0||
-|33|TeamUK|204975.886|⬇ 2|⬇ 1|||5.4|0.3|41.7|48.5|3.0||
+|33|TeamUK|204978.536|⬇ 2|⬇ 1|||5.4|0.3|41.7|48.5|3.0||
 |34|[irowiki](http://irowiki.org/)|155473.682|⬇ 2|⬇ 1||||0.2|73.9|26.0|||
 |35|[PC Master Raceâ„¢](http://www.reddit.com/r/pcmasterrace)|132922.559||⬇ 1|||14.5|1.5|67.9|16.2|||
 |36|[GIMPS.California](http://alvinbunk.wordpress.com/gimps-california/)|87037.202|||||76.9|3.8|3.9|9.4|3.1|0.4|
 |37|Cap'n Entropy's Cavalcade of Wonderment|84176.301||⬇ 2|||75.8|1.9|19.8|2.6|||
 |38|[Rechenkraft.net](http://www.rechenkraft.net)|83628.814|⬆ 5|⬆ 3|⬆ 1||71.8|0.6|10.9|13.2|0.7|1.3|
 |39|Slovakia|82951.779|⬆ 22|⬆ 3|⬇ 1||69.5|4.1|23.5|2.9|||
-|40|The Goodest Team|79989.683||⬇ 1|⬆ 1||4.8|0.5|33.1|60.0|||
-|41|[SHADO](http://ufoseries.com/computerGraphics/shadoLogo.gif)|78580.094||⬇ 1|⬆ 1||0.4|1.0|77.5|17.7|1.4|1.6|
+|40|The Goodest Team|79998.705||⬇ 1|⬆ 1||4.8|0.5|33.1|60.0|||
+|41|[SHADO](http://ufoseries.com/computerGraphics/shadoLogo.gif)|78580.203||⬇ 1|⬆ 1||0.4|1.0|77.5|17.7|1.4|1.6|
 |42|[OverclockerAustralia](http://www.overclockers.com.au/)|78457.783|⬇ 4|⬇ 5|⬇ 2||73.2|1.0|12.0|13.8|||
-|43|Porta Kruse|71109.970|⬆ 34|⬆ 1|||71.4|3.0|4.8|9.0|6.0|0.1|
+|43|Porta Kruse|71110.284|⬆ 34|⬆ 1|||71.4|3.0|4.8|9.0|6.0|0.1|
 |44|[Mensa](http://mensa.org)|70816.461|⬆ 1|⬆ 1|||3.5|2.7|56.2|33.4||2.3|
-|45|S485122|67613.368|⬇ 3|⬇ 2||||17.9||82.1|||
+|45|S485122|67604.588|⬇ 3|⬇ 2||||17.9||82.1|||
 |46|[Portland State University](https://www.pdx.edu/computer-science/)|65893.120|⬆ 36|⬆ 18|⬆ 9||2.3|0.3|92.4|5.0|||
 |47|YahsTeam|65329.230|⬇ 3|⬇ 1|⬇ 1||81.5|0.2|16.3|2.0|||
-|48|GIMPS.NZ|62994.755|⬆ 3|⬆ 1|||15.3|0.4|69.6|14.7|||
-|49|GIMPS.France|62356.282|⬇ 2|⬇ 2|⬇ 2||2.7|0.9|78.0|18.5|||
+|48|GIMPS.NZ|62984.588|⬆ 3|⬆ 1|||15.3|0.4|69.6|14.7|||
+|49|GIMPS.France|62080.191|⬇ 2|⬇ 2|⬇ 2||2.7|0.9|77.9|18.6|||
 |50|madpoo|59528.417|⬆ 4||⬇ 1|||17.5|4.0|78.4|||
 |51|[Ensurtec](https://ensurtec.com)|57882.871|⬇ 12|⬇ 3|⬇ 1|||0.3|95.5|4.2|||
 |52|[PROMYS](http://promys.org)|54741.530|⬆ 1|⬇ 1|⬇ 1||75.9|0.1|1.2|20.2|1.3||
 |53|GIMPS.216|53595.263|⬆ 15|⬆ 6|⬇ 1||9.7|0.2|76.4|13.6|||
 |54|Eratosthenes Sieve|51158.901|⬆ 6|⬆ 4|||1.8|1.5|93.3|3.4|||
-|55|unsafe_unsafe|49994.819|⬆ 28|⬆ 10|⬆ 4||100.0||||||
+|55|unsafe_unsafe|50008.932|⬆ 28|⬆ 10|⬆ 3||100.0||||||
 |56|[KRAMBU](http://www.krambu.com)|49528.381|⬇ 7|⬇ 2|⬇ 3||4.7|0.1|93.1|2.1|||
 |57|[GIMPS.Japan](http://www34.atwiki.jp/gimpsjapan/)|48245.155|⬇ 5|⬇ 4|⬇ 1||14.7|4.9|70.3|10.0|||
-|58|[Dutch Power Cows](http://www.dutchpowercows.org)|47300.342|⬇ 2|⬇ 1|||3.2|7.5|44.5|41.9|2.5||
+|58|[Dutch Power Cows](http://www.dutchpowercows.org)|47300.342|⬇ 2|⬇ 1|⬆ 1||3.2|7.5|44.5|41.9|2.5||
 |59|Nerdfighters for Mersenne Primes|46847.407|⬇ 4|⬇ 7|⬇ 2||||37.5|62.5|||
 |60|[Danpi for GIMPS](http://www.digitsofphiandpi.yolasite.com)|46515.772|⬇ 1||⬆ 1||92.2||7.6|0.2|||
-|61|[Subutai Open Source P2P Cloud Peers](http://subutai.cow.dk/#!/bp-gimps)|45638.492|⬇ 15|⬇ 6|⬇ 1||||84.4|15.1|0.5||
-|62|One Man Team|45207.070|⬇ 14|⬇ 6|⬆ 1||42.9|1.8|51.0|3.3||0.9|
-|63|Team Austria|44838.251|⬇ 5|⬇ 2|⬇ 1||0.1|1.2|96.7|2.0|||
+|61|Team Austria|45778.643|⬇ 3||⬆ 1|⬆ 2|0.1|1.1|96.5|2.2|||
+|62|[Subutai Open Source P2P Cloud Peers](http://subutai.cow.dk/#!/bp-gimps)|45638.492|⬇ 16|⬇ 7|⬇ 2|⬇ 1|||84.4|15.1|0.5||
+|63|One Man Team|45186.788|⬇ 15|⬇ 7||⬇ 1|42.9|1.8|51.0|3.3||0.9|
 |64|[Shaffer's Studio](https://shaffer.cn)|42040.430|⬇ 2|⬇ 2|||14.2|0.1|79.5|6.2|||
 |65|[AMD Users](http://www.amdusers.com)|36514.530|⬇ 1|⬆ 1|||12.0|0.6|69.7|17.6|||
 |66|[SU Prime Pirates](https://sites.google.com/view/prime-pirates/)|35375.786|⬇ 9|⬇ 3|||5.4|1.2|80.9|12.5|||
-|67|[FreeBSD](http://www.freebsd.org/)|33778.378|||||35.5|0.2|43.6|6.6|14.2||
+|67|[FreeBSD](http://www.freebsd.org/)|33779.392|||||35.5|0.2|43.5|6.6|14.2||
 |68|[Optimists Prime](http://prime.ingearweb.com)|30096.380|⬆ 1||||21.0|0.3|64.1|14.5|||
-|69|Net-Work|28872.049|⬆ 7|⬆ 2|⬆ 2||51.1|18.8|2.6|11.7|12.8||
+|69|Net-Work|28878.547|⬆ 7|⬆ 2|⬆ 2||51.1|18.8|2.6|11.7|12.8||
 |70|reticula|28371.404|⬆ 96|⬆ 81|||76.0|0.1|18.7|5.2|||
 |71|Closed Group|28347.210|⬇ 6|⬇ 2|⬇ 2||91.2|||8.8|||
 |72|Math_Lovers|25920.528|⬇ 2||||1.2|0.1|83.0|15.7|||
@@ -90,11 +90,11 @@ Top producers for the last year<br/>This hourly report generated 2020-08-12 06:0
 |75|[UKRAINE](https://gimps.in.ua)|22654.903|⬇ 9|||⬇ 1|31.0|0.2|45.6|6.7||16.5|
 |76|Georgia Tech|22335.382|⬇ 4|⬇ 3|⬇ 2|||0.1|97.3|2.6|||
 |77|NvidiaRTX|21630.517|⬆ 242|⬆ 16|⬇ 1||100.0||||||
-|78|Crunching@EVGA|20613.172|⬆ 20|⬇ 4|||32.8|4.5|15.7|31.0|1.7|0.4|
+|78|Crunching@EVGA|20617.590|⬆ 20|⬇ 4|||32.8|4.5|15.7|31.0|1.7|0.4|
 |79|GIMPS.Portugal|20372.686|⬆ 16|⬆ 2||⬆ 1||0.1|99.7|0.1|||
 |80|[Wikipedia](http://www.wikipedia.org/)|20351.946|⬇ 7|⬇ 4|⬇ 3|⬇ 1|76.2|2.5|16.7||4.6||
 |81|BrainStone|19293.688|⬇ 6|⬇ 4|⬇ 1|||0.4|89.2|10.5|||
-|82|[KingsBridge BCP](http://www.kingsbridgebcp.com)|18628.254|⬆ 14||⬇ 1|||0.5|78.5|20.9|||
+|82|[KingsBridge BCP](http://www.kingsbridgebcp.com)|18628.254|⬆ 14|⬆ 1|⬇ 1|||0.5|78.5|20.9|||
 |83|[Esperanto](http://esperanto.net/)|18505.867|⬆ 52|⬆ 3|⬆ 3||18.6|0.5|65.2|14.1|||
 |84|JiBoTeam|18387.995|⬆ 3|⬇ 4|⬇ 2||76.9|||23.1|||
 |85|[Brigham Young University](http://www.byu.edu)|17891.191|⬇ 5|⬇ 7|⬇ 2|⬆ 1|17.7|0.9|62.7|18.7|||
@@ -102,8 +102,8 @@ Top producers for the last year<br/>This hourly report generated 2020-08-12 06:0
 |87|nmbarek_team|17452.220|⬇ 13|⬆ 4|⬇ 3||0.7|0.3|96.3|2.8|||
 |88|[Artists of Fine Art](http://vovo2000.com/)|16720.691|⬆ 21|⬆ 2||||0.3|71.8|27.9|||
 |89|Team CH|16124.956|⬇ 5|⬇ 5||⬆ 1|4.3|5.3|69.3|13.9|0.2|6.7|
-|90|Team Retired|15859.280|⬇ 11|⬇ 7||⬇ 1||0.2|85.7|14.1|||
-|91|Ilmatar|15177.558|⬆ 21|⬆ 5|⬆ 1||99.3|||0.7|||
+|90|Team Retired|15859.280|⬇ 11|⬇ 8||⬇ 1||0.2|85.7|14.1|||
+|91|Ilmatar|15179.131|⬆ 21|⬆ 5|⬆ 1||99.3|||0.7|||
 |92|moeses|14729.657|⬇ 2|⬇ 5|⬇ 1|||0.5|98.7|0.8|||
 |93|[TurkishMath](http://www.yekose.com)|14663.471|⬇ 7|⬇ 5|⬆ 1|||0.5|96.8|2.7|||
 |94|[Phi Kappa Theta](http://www.phikaps.org)|14363.545|⬇ 9|⬇ 9|⬇ 1|||0.4|89.7|10.0|||
@@ -172,24 +172,24 @@ Top producers for the last year<br/>This hourly report generated 2020-08-12 06:0
 |157|Neptunus|5011.888|⬇ 5|⬇ 3|⬇ 2||87.9|||12.1|||
 |158|[University of Georgia](http://www.uga.edu)|4896.847|⬇ 1|⬆ 8|⬇ 1|||0.3|82.1|17.6|||
 |159|[Team Norway](http://www.team-norway.org/)|4596.582|⬆ 1|⬇ 2||||0.6|72.1|27.3|||
-|160|JCL_sonjohan|4546.810|⬆ 5|⬆ 1|⬆ 1|||||100.0|||
-|161|[LinusTechTips GIMPS Team](http://linustechtips.com)|4525.391|⬆ 26|⬇ 2|⬇ 1|||2.7|81.4|15.9|||
+|160|JCL_sonjohan|4546.810|⬆ 5|⬆ 1||||||100.0|||
+|161|[LinusTechTips GIMPS Team](http://linustechtips.com)|4525.391|⬆ 26|⬇ 2||||2.7|81.4|15.9|||
 |162|jxc french team|4426.698|⬇ 4|⬆ 2|⬆ 2|||1.5|93.7|4.8|||
 |163|Hermessz|4302.915|⬆ 10|⬇ 1|⬇ 1||10.6|0.5|33.3|55.7|||
 |164|[Debian](http://debian.org)|4288.231|⬇ 8|⬇ 1|⬇ 1|||1.2|96.7|2.2|||
 |165|Technologieeinsatz II - 2020S|3901.581|⬆ 43|⬆ 12|⬆ 8|||1.1|47.0|52.0|||
-|166|[Wakley Team](http://the3rdhalf.com/)|3898.407|⬆ 68|⬆ 20|⬆ 8|⬆ 9|0.4|5.1|70.6|23.9|||
+|166|[Wakley Team](http://the3rdhalf.com/)|3898.407|⬆ 68|⬆ 20|⬆ 8|⬆ 10|0.4|5.1|70.6|23.9|||
 |167|Aarhus University|3889.542|⬇ 17||⬇ 2|⬇ 1|5.8||94.2||||
 |168|Nerds from Hong Kong|3757.958|⬆ 8|⬆ 6||⬇ 1|65.7|0.8|33.5||||
 |169|FindThatPrime|3724.903|⬇ 1|⬆ 1||⬇ 1|0.2|0.2|45.0|13.6|40.9||
-|170|[His Dark Materials](http://e.broock.ca)|3695.221|⬆ 2|⬆ 6|⬆ 7|⬆ 7||0.7|23.2|15.6|60.6||
-|171|IJM-s|3647.616|⬇ 1||⬇ 1|⬇ 2||1.0|90.6|8.4|||
-|172|[Olympic College](http://www.olympic.edu)|3623.291|⬇ 11|⬆ 13|⬆ 4|⬇ 2|||90.5|9.5|||
-|173|GIMPS Hams|3533.653|⬇ 14|⬇ 5|⬇ 7|⬇ 2||0.9|96.3|2.9|||
-|174|GIMPS Team Philippines|3504.971|⬆ 12|⬇ 1|⬇ 2|⬇ 1||1.3|72.1|19.6||7.0|
-|175|Hogwerts|3360.508|⬇ 36|⬇ 19|⬇ 8|⬇ 1||0.3|82.5|17.3|||
-|176|[TeAm AnandTech](http://forums.anandtech.com/forums/distributed-computing.15/)|3345.737|⬇ 143|⬇ 1|⬇ 1||96.8|||3.2|||
-|177|Outsider Education|3249.673|⬇ 24|⬇ 8|⬇ 6|⬇ 5|||100.0||||
+|170|[His Dark Materials](http://e.broock.ca)|3695.221|⬆ 2|⬆ 6|⬆ 7|⬇ 1||0.7|23.2|15.6|60.6||
+|171|IJM-s|3647.616|⬇ 1||⬇ 1|⬇ 1||1.0|90.6|8.4|||
+|172|[Olympic College](http://www.olympic.edu)|3623.291|⬇ 11|⬆ 13|⬆ 4|⬇ 1|||90.5|9.5|||
+|173|GIMPS Hams|3533.653|⬇ 14|⬇ 5|⬇ 7|⬇ 1||0.9|96.3|2.9|||
+|174|GIMPS Team Philippines|3504.971|⬆ 12|⬇ 1|⬇ 2|||1.3|72.1|19.6||7.0|
+|175|Hogwerts|3360.508|⬇ 36|⬇ 19|⬇ 8|||0.3|82.5|17.3|||
+|176|[TeAm AnandTech](http://forums.anandtech.com/forums/distributed-computing.15/)|3345.737|⬇ 143|⬇ 1|⬇ 1|⬆ 1|96.8|||3.2|||
+|177|Outsider Education|3249.673|⬇ 24|⬇ 8|⬇ 6|⬇ 4|||100.0||||
 |178|[Channel 4](http://www.channel4.com)|3245.348||⬆ 2||||0.4|47.5|52.1|||
 |179|rights_for_bytes|3225.037||||||1.0|87.4|11.6|||
 |180|cr_colorado|3212.366|⬆ 8|⬇ 8||||1.1|72.6|26.3|||
@@ -208,7 +208,7 @@ Top producers for the last year<br/>This hourly report generated 2020-08-12 06:0
 |193|54875487|2300.438|⬇ 1|⬇ 2|⬇ 1||15.8|1.5|72.8|8.5|0.9|0.4|
 |194|VLG|2262.797|⬇ 1|⬇ 1|||||59.5|40.2|0.3||
 |195|[CEMELAB](http://suleymancanan.wordpress.com)|2241.611|⬆ 24|⬆ 14|⬆ 2|⬆ 3||0.3|74.8|24.9|||
-|196|alan145|2230.346|⬆ 66|⬆ 18||⬇ 1|53.2|11.5||21.6|3.8|0.4|
+|196|alan145|2232.513|⬆ 66|⬆ 18||⬇ 1|53.2|11.5||21.6|3.8|0.4|
 |197|[#limbargmasterrace](https://tobyfox.bandcamp.com/track/dogsong)|2190.232|⬆ 6|⬇ 5|⬇ 2|⬇ 1||0.5|89.6|9.9|||
 |198|Croatian|2176.261|⬇ 16|⬇ 11|⬇ 11|⬇ 1|||73.9|26.1|||
 |199|[eMBeeJay Consulting](http://www.embeejay.com)|2070.605|⬆ 17|⬇ 2||||1.5|28.8|69.7|||
@@ -246,7 +246,7 @@ Top producers for the last year<br/>This hourly report generated 2020-08-12 06:0
 |231|[THE DUDE ABIDES](http://www.youtube.com/watch?v=sYsw0KVRjCM)|1045.943|⬆ 88|⬆ 39|⬆ 5|⬆ 2|31.0|||69.0|||
 |232|[sannerud.com](http://www.sannerud.com)|1012.431|⬇ 19|⬇ 11||⬇ 1|49.9||||25.7|24.3|
 |233|The Bluth Company|1002.656|⬇ 5|||⬇ 1||3.1|86.2|10.7|||
-|234|GreeceIsNotDead|947.259|⬆ 43|⬆ 6|||58.5|0.6||40.4|0.5||
+|234|GreeceIsNotDead|951.869|⬆ 43|⬆ 6|||58.7|0.6||40.2|0.5||
 |235|SGDynamo Dresden|900.723|⬆ 15|⬆ 3|||62.8|||8.1|29.1||
 |236|Moldova|891.663|⬇ 82|⬇ 31|⬇ 11||||100.0||||
 |237|TTT|835.257|⬇ 53|⬇ 22|||||66.7|33.3|||
