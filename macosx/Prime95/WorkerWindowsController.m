@@ -3,7 +3,7 @@
 //  Prime95
 //
 //  Created by George Woltman on 4/26/09.
-//  Copyright 2009-2017 Mersenne Research, Inc. All rights reserved.
+//  Copyright 2009-2020 Mersenne Research, Inc. All rights reserved.
 //
 
 #import "WorkerWindowsController.h"
@@ -16,40 +16,32 @@ int map_work_pref_to_sel (
 	switch (work_pref) {
 	case PRIMENET_WP_WHATEVER:
 		return (0);
-	case PRIMENET_WP_LL_FIRST:
-		return (1);
-	case PRIMENET_WP_LL_WORLD_RECORD:
-		return (2);
-	case PRIMENET_WP_LL_DBLCHK:
-		return (3);
 	case PRIMENET_WP_PRP_FIRST:
-		return (4);
+		return (1);
 	case PRIMENET_WP_PRP_WORLD_RECORD:
-		return (5);
+		return (2);
 	case PRIMENET_WP_PRP_DBLCHK:
-		return (6);
+		return (3);
 	case PRIMENET_WP_FACTOR:
-		return (7);
+		return (4);
 	case PRIMENET_WP_PFACTOR:
-		return (8);
+		return (5);
 	case PRIMENET_WP_PRP_100M:
-		return (9);
-	case PRIMENET_WP_LL_100M:
-		return (10);
+		return (6);
 	case PRIMENET_WP_PRP_COFACTOR:
-		return (11);
+		return (7);
 	case PRIMENET_WP_PRP_COFACTOR_DBLCHK:
-		return (12);
+		return (8);
 	case PRIMENET_WP_ECM_SMALL:
-		return (13);
+		return (9);
 	case PRIMENET_WP_ECM_COFACTOR:
-		return (14);
+		return (10);
 	case PRIMENET_WP_ECM_FERMAT:
-		return (15);
+		return (11);
 	case PRIMENET_WP_FACTOR_LMH:
-		return (16);
+		return (12);
 	default:
-		return (17);
+		return (13);
 	}
 }
 
@@ -60,36 +52,28 @@ int map_sel_to_work_pref (
 	case 0:
 		return (PRIMENET_WP_WHATEVER);
 	case 1:
-		return (PRIMENET_WP_LL_FIRST);
-	case 2:
-		return (PRIMENET_WP_LL_WORLD_RECORD);
-	case 3:
-		return (PRIMENET_WP_LL_DBLCHK);
-	case 4:
 		return (PRIMENET_WP_PRP_FIRST);
-	case 5:
+	case 2:
 		return (PRIMENET_WP_PRP_WORLD_RECORD);
-	case 6:
+	case 3:
 		return (PRIMENET_WP_PRP_DBLCHK);
-	case 7:
+	case 4:
 		return (PRIMENET_WP_FACTOR);
-	case 8:
+	case 5:
 		return (PRIMENET_WP_PFACTOR);
-	case 9:
+	case 6:
 		return (PRIMENET_WP_PRP_100M);
-	case 10:
-		return (PRIMENET_WP_LL_100M);
-	case 11:
+	case 7:
 		return (PRIMENET_WP_PRP_COFACTOR);
-	case 12:
+	case 8:
 		return (PRIMENET_WP_PRP_COFACTOR_DBLCHK);
-	case 13:
+	case 9:
 		return (PRIMENET_WP_ECM_SMALL);
-	case 14:
+	case 10:
 		return (PRIMENET_WP_ECM_COFACTOR);
-	case 15:
+	case 11:
 		return (PRIMENET_WP_ECM_FERMAT);
-	case 16:
+	case 12:
 		return (PRIMENET_WP_FACTOR_LMH);
 	}
 	return (-1);
@@ -205,6 +189,48 @@ int AreAllTheSame (
 	int	new_options = FALSE;
 
 	[[self window] makeFirstResponder:nil];			// End any active text field edits
+
+/* If the user has selected 100M tests and per-worker temp disk is not enough for a power=8 proof, then do not permit it. */
+
+	if (CPU_WORKER_DISK_SPACE < 12.0) {
+		int	changed = FALSE;
+		for (i = 0; i < numWorkers; i++) {
+			WorkerData *row = [workerData objectAtIndex:i];
+			if (map_sel_to_work_pref ([row typeOfWork]) == PRIMENET_WP_PRP_100M) {
+				[row setTypeOfWork:map_work_pref_to_sel(PRIMENET_WP_PRP_FIRST)];
+				changed = TRUE;
+			}
+		}
+		if (changed) {
+			NSAlert *alert = [[NSAlert alloc] init];
+			[alert addButtonWithTitle:@"OK"];
+			[alert setMessageText:@"The 100 million digit work preference requires setting per-worker temporary disk space to 12GB or more.  Work preference changed to first-time primality testing."];
+			[alert setAlertStyle:NSWarningAlertStyle];
+			[alert runModal];
+			[alert release];
+		}
+	}
+
+/* If the user has selected first-time tests and per-worker temp disk is not enough for a power=6 proof, then warn the user. */
+
+		if (CPU_WORKER_DISK_SPACE < 1.5) {
+			int	warn = FALSE;
+			for (i = 0; i < numWorkers; i++) {
+				WorkerData *row = [workerData objectAtIndex:i];
+				if (map_sel_to_work_pref ([row typeOfWork]) == PRIMENET_WP_PRP_FIRST ||
+				    map_sel_to_work_pref ([row typeOfWork]) == PRIMENET_WP_PRP_WORLD_RECORD) {
+					warn = TRUE;
+				}
+			}
+			if (warn) {
+				NSAlert *alert = [[NSAlert alloc] init];
+				[alert addButtonWithTitle:@"OK"];
+				[alert setMessageText:@"The first time prime test work preference may require setting per-worker temporary disk space to at least 1.5GB.""];
+				[alert setAlertStyle:NSWarningAlertStyle];
+				[alert runModal];
+				[alert release];
+			}
+		}
 
 /* Make sure user has not allocated too many cores */
 

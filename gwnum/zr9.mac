@@ -80,6 +80,58 @@ zr9b_nine_complex_djbfft MACRO srcreg,srcinc,d1,screg,scinc,maxrpt,L1pt,L1pd
 ;; -.985r2 -.342r3 +.866r4 +.643r5 -.643r6 -.866r7 +.342r8 +.985r9 +i1 +.174i2 -.940i3 -.500i4 +.766i5 +.766i6 -.500i7 -.940i8 +.174i9
 ;; -.643r2 -.985r3 -.866r4 -.342r5 +.342r6 +.866r7 +.985r8 +.643r9 +i1 +.766i2 +.174i3 -.500i4 -.940i5 -.940i6 -.500i7 +.174i8 +.766i9
 
+// 16 adds, 8 adds, 4 adds, 6 fma, 2 fma, 12 fma, 6 fma, 18 fma, 12 fma = 28 adds, 56 fmas  (wrong, 6 more fmas)
+compared to existing fft9					// 42 cadds, 20 mul by const = 84 adds, 20 muls
+what would 3 FFT3s. followed by 3 more FFT3s look like?
+;; A 3-complex FFT is:
+;; Res1:  (R1+R2+R3) + (I1+I2+I3)i
+;; Res2:  (R1-.5R2-.866I2-.5R3+.866I3) + (I1-.5I2+.866R2-.5I3-.866R3)i
+;; Res3:  (R1-.5R2+.866I2-.5R3-.866I3) + (I1-.5I2-.866R2-.5I3+.866R3)i
+
+;; Res1:  (R1+R4+R7) + (I1+I4+I7)i
+;; Res2:  (R1-.5R4-.866I4-.5R7+.866I7) + (I1-.5I4+.866R4-.5I7-.866R7)i
+;; Res3:  (R1-.5R4+.866I4-.5R7-.866I7) + (I1-.5I4-.866R4-.5I7+.866R7)i
+;; Res1:  (R2+R5+R8) + (I2+I5+I8)i
+;; Res2:  (R2-.5R5-.866I5-.5R8+.866I8) + (I2-.5I5+.866R5-.5I8-.866R8)i	*w^1/9?		(-.383R5 -.577R5)	+ i*.663R5-.321R5
+;; Res3:  (R2-.5R5+.866I5-.5R8-.866I8) + (I2-.5I5-.866R5-.5I8+.866R8)i	*w^2/9?		(-.087R5 +.557R5)	+ i*-.151R5-.492R5
+;; Res1:  (R3+R6+R8) + (I3+I6+I9)i
+;; Res2:  (R3-.5R6-.866I6-.5R9+.866I9) + (I3-.5I6+.866R6-.5I9-.866R9)i	*w^2/9
+;; Res3:  (R3-.5R6+.866I6-.5R9-.866I9) + (I3-.5I6-.866R6-.5I9+.866R9)i	*w^4/9
+step 1: 3 * (4 adds + 2 adds + 2 fma + 4 fma) = 3 * (6 + 6) = 18 + 18  
+step 2: 4 complex muls (w^1,2 and w^2,4)? = 4 * (2 muls + 2 fmas) = 8 + 8
+step 3:  18 + 18
+total:  36 adds, 8 muls, 44 fmas .....  fewer adds (80 vs 84?), fewer constants??   Worthwhile in AVX512 prime95??
+
+-.958R5 * -.5 = .479R5		.342R5 * -.866 = -.296R5
+.470R5 * -.5 = -.235R5		-.643R5 * .866 = -.557R5
+
+Maybe mul by w^1,-1 and w^2,-2?  YES!
+
+0..0..0..	.0..0..0.	..0..0..0
+0..3..6..	.0..3..6.	..0..3..6
+0..6..3..	.0..6..3.	..0..6..3
+
+now mul:
+
+0..0..0..	.0..0..0.	..0..0..0
+0..3..6..	.1..4..7.	..2..5..8
+0..6..3..	.8..5..2.	..7..4..1
+
+now fft3 again (this time the rows)
+
+000000000	036036036	063063063		0,3,6th
+012345678	048372615	075318642		1,4,7th
+087654321	051627324	024681357		8,5,2nd
+
+check!
+
+for in-between complex muls use cos, cos/sin methods to allow more FMAs!
+
+;; w^1 = .766 + .643i		
+;; w^2 = .174 + .985i
+;; w^3 = -.500 + .866
+;; w^4 = -.940 + .342i
+
 ;; Simplifying, we get:
 ;;R1 = r1     +(r4+r7)     +((r2+r9)+(r3+r8)+(r5+r6))
 ;;R4 = r1     +(r4+r7) -.500((r2+r9)+(r3+r8)+(r5+r6))  -.866((i2-i9)-(i3-i8)+(i5-i6))
@@ -100,6 +152,8 @@ zr9b_nine_complex_djbfft MACRO srcreg,srcinc,d1,screg,scinc,maxrpt,L1pt,L1pd
 ;;I8 = i1 -.500(i4+i7) +.174(i2+i9) -.940(i3+i8) +.766(i5+i6) -.985(r2-r9) -.342(r3-r8) +.866(r4-r7) +.643(r5-r6)
 ;;I5 = i1 -.500(i4+i7) -.940(i2+i9) +.766(i3+i8) +.174(i5+i6) +.342(r2-r9) -.643(r3-r8) +.866(r4-r7) -.985(r5-r6)
 ;;I6 = i1 -.500(i4+i7) -.940(i2+i9) +.766(i3+i8) +.174(i5+i6) -.342(r2-r9) +.643(r3-r8) -.866(r4-r7) +.985(r5-r6)
+
+16 adds, 8 adds, 2 adds, 2 adds, 6 fmas, 2 fmas, 12 fma, 12 fma, 18 fma, 12 fma = 28 adds, 62 fmas == worse!
 
 zr9_9c_djbfft_cmn_preload MACRO
 	vbroadcastsd zmm31, ZMM_P901		;; .901

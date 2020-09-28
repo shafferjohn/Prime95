@@ -2097,8 +2097,11 @@ void gwinit2 (
 /* AMD Bulldozer is faster using SSE2 rather than AVX. */
 /* Why do we do this here when calculate_bif selects K10 FFTs???  Is it so that gwnum_map_to_timing and other */
 /* informational routines return more accurate information?   Since the code below seems to work, leave it as is. */
+/* 2019: A user reports that 3rd & 4th generation Bulldozer (Steamroller & Excavator) is better at AVX. */
+/* I'm confident that 1st and 2nd are dismal (Bulldozer and Piledriver).  Consequently the code below was changed to */
+/* check the extended model number using the chart at https://en.wikipedia.org/wiki/List_of_AMD_CPU_microarchitectures */
 
-	if (CPU_ARCHITECTURE == CPU_ARCHITECTURE_AMD_BULLDOZER)
+	if (CPU_ARCHITECTURE == CPU_ARCHITECTURE_AMD_BULLDOZER && ((CPU_SIGNATURE >> 16) & 0xF) < 3)
 		gwdata->cpu_flags &= ~(CPU_AVX512F | CPU_AVX | CPU_FMA3);
 }
 
@@ -9249,6 +9252,7 @@ void gwsquare2 (		/* Square a number */
 	double	sumdiff;
 
 	ASSERTG (((uint32_t *) s)[-1] >= 1);
+	ASSERTG (((uint32_t *) s)[-7] != 3);	// Make sure input has not already been completely FFTed (we could turn this into a gwfftfftmul)
 
 /* If we are converting gwsquare calls into gwsquare_carefully calls */
 /* do so now.  Turn off option to do a partial forward FFT on the result. */
@@ -9322,6 +9326,8 @@ void gwfftmul (			/* Multiply already FFTed source with dest */
 
 	ASSERTG (((uint32_t *) s)[-1] >= 1);
 	ASSERTG (((uint32_t *) d)[-1] >= 1);
+	ASSERTG (((uint32_t *) s)[-7] == 3);	// Make sure input has been completely FFTed
+	ASSERTG (((uint32_t *) d)[-7] != 3);	// Make sure input has not already been completely FFTed (we could turn this into a gwfftfftmul)
 
 /* Call the assembly code */
 
@@ -9346,6 +9352,8 @@ void gwfftfftmul (		/* Multiply two already FFTed sources */
 
 	ASSERTG (((uint32_t *) s)[-1] >= 1);
 	ASSERTG (((uint32_t *) s2)[-1] >= 1);
+	ASSERTG (((uint32_t *) s)[-7] == 3);	// Make sure input has been completely FFTed
+	ASSERTG (((uint32_t *) s2)[-7] == 3);	// Make sure input has been completely FFTed
 
 /* Get the unnormalized add count for later use */
 

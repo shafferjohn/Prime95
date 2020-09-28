@@ -2,7 +2,7 @@
 /* so that they can be included in both the command-line mprime version as */
 /* well as the Mac OS X GUI version. */
 
-/* Copyright 1995-2016 Mersenne Research, Inc. */
+/* Copyright 1995-2020 Mersenne Research, Inc. */
 /* Author:  George Woltman */
 /* Email: woltman@alum.mit.edu */
 
@@ -465,5 +465,40 @@ void checkPauseListCallback (void)
 		pclose (fd);
 	}
 #endif
+}
+
+
+/* Get list of file names from the current working directory ending in .proof */
+
+int ProofFileNames (char filenames[50][255])	// Returns number of matching filenames
+{
+	int	num_files;
+	DIR	*dir;				/* pointer to the scanned directory */
+	struct dirent *entry;			/* pointer to one directory entry */
+
+
+	dir = opendir (".");
+	if (!dir) return (-1);			// I don't understand why we cannot open the current working directory
+
+	/* scan the directory matching the pattern *.proof for each file name */
+	num_files = 0;
+	while ((entry = readdir(dir)) != NULL) {
+
+		/* check if the pattern matches */
+		if (strstr (entry->d_name, ".proof") != NULL) {
+			if (num_files < 50) strcpy (filenames[num_files++], entry->d_name);
+		}
+	}
+
+	closedir (dir);
+
+	return (num_files);
+}
+
+/* Get the character that separates directories in a pathname */
+
+char getDirectorySeparator ()
+{
+	return ('/');
 }
 

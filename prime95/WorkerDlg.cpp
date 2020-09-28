@@ -1,6 +1,6 @@
 // WorkerDlg.cpp : implementation file
 //
-// Copyright 1995-2017 Mersenne Research, Inc.  All rights reserved
+// Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
 //
 
 #include "stdafx.h"
@@ -33,8 +33,10 @@ CWorkerDlg::CWorkerDlg(CWnd* pParent /*=NULL*/)
 {
 	//{{AFX_DATA_INIT(CWorkerDlg)
 	m_num_thread = 1;
-	m_priority = 1;
 	thread_num = 0;
+	memset (m_work_pref, 0, sizeof (m_work_pref));
+	memset (m_numcpus, 0, sizeof (m_numcpus));
+	m_cert_work = 1;
 	//}}AFX_DATA_INIT
 }
 
@@ -47,8 +49,6 @@ void CWorkerDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_THREAD, c_num_thread);
 	DDX_Text(pDX, IDC_THREAD, m_num_thread);
 	DDV_MinMaxUInt(pDX, m_num_thread, 1, max_num_workers ());
-	DDX_Text(pDX, IDC_PRIORITY, m_priority);
-	DDV_MinMaxUInt(pDX, m_priority, 1, 10);
 	DDX_Control(pDX, IDC_WORKGROUP, c_workgroup);
 
 	DDX_Control(pDX, IDC_THREADNUM_TEXT, c_threadnum_text);
@@ -60,15 +60,8 @@ void CWorkerDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_NUMCPUS_TEXT, c_numcpus_text);
 	DDX_Control(pDX, IDC_NUMCPUS, c_numcpus);
 
-	DDX_Check(pDX, IDC_HYPER_TF, m_hyper_tf);
-	DDX_Control(pDX, IDC_HYPER_TF, c_hyper_tf);
-	DDX_Check(pDX, IDC_HYPER_LL, m_hyper_ll);
-	DDX_Control(pDX, IDC_HYPER_LL, c_hyper_ll);
-
-	DDX_Control(pDX, IDC_WARN1, c_warn1_text);
-	DDX_Control(pDX, IDC_WARN2, c_warn2_text);
-	DDX_Control(pDX, IDC_WARN3, c_warn3_text);
-
+	DDX_Control(pDX, IDC_CERT, c_cert_work);
+	DDX_Check(pDX, IDC_CERT, m_cert_work);
 	//}}AFX_DATA_MAP
 	c_num_thread_text.EnableWindow (max_num_workers () > 1);
 	c_num_thread.EnableWindow (max_num_workers () > 1);
@@ -79,16 +72,13 @@ void CWorkerDlg::DoDataExchange(CDataExchange* pDX)
 	c_work_pref.EnableWindow (USE_PRIMENET);
 	c_numcpus_text.EnableWindow (m_num_thread < NUM_CPUS || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
 	c_numcpus.EnableWindow (m_num_thread < NUM_CPUS || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
-	c_hyper_tf.EnableWindow (CPU_HYPERTHREADS > 1);
-	c_hyper_ll.EnableWindow (CPU_HYPERTHREADS > 1);
+	c_cert_work.EnableWindow (USE_PRIMENET);
 }
 
 
 BEGIN_MESSAGE_MAP(CWorkerDlg, CDialog)
 	//{{AFX_MSG_MAP(CWorkerDlg)
 	ON_EN_KILLFOCUS(IDC_THREAD, &CWorkerDlg::OnEnKillfocusNumThread)
-	ON_EN_SETFOCUS(IDC_PRIORITY, &CWorkerDlg::OnEnSetfocusPriority)
-	ON_EN_KILLFOCUS(IDC_PRIORITY, &CWorkerDlg::OnEnKillfocusPriority)
 	ON_CBN_SELCHANGE(IDC_COMBO1, &CWorkerDlg::OnCbnKillfocusThreadNum)
 	ON_CBN_KILLFOCUS(IDC_COMBO1, &CWorkerDlg::OnCbnKillfocusThreadNum)
 	ON_CBN_KILLFOCUS(IDC_COMBO2, &CWorkerDlg::OnCbnKillfocusWorkType)
@@ -115,40 +105,32 @@ int map_work_pref_to_sel (
 	switch (work_pref) {
 	case PRIMENET_WP_WHATEVER:
 		return (0);
-	case PRIMENET_WP_LL_FIRST:
-		return (1);
-	case PRIMENET_WP_LL_WORLD_RECORD:
-		return (2);
-	case PRIMENET_WP_LL_DBLCHK:
-		return (3);
 	case PRIMENET_WP_PRP_FIRST:
-		return (4);
+		return (1);
 	case PRIMENET_WP_PRP_WORLD_RECORD:
-		return (5);
+		return (2);
 	case PRIMENET_WP_PRP_DBLCHK:
-		return (6);
+		return (3);
 	case PRIMENET_WP_FACTOR:
-		return (7);
+		return (4);
 	case PRIMENET_WP_PFACTOR:
-		return (8);
+		return (5);
 	case PRIMENET_WP_PRP_100M:
-		return (9);
-	case PRIMENET_WP_LL_100M:
-		return (10);
+		return (6);
 	case PRIMENET_WP_PRP_COFACTOR:
-		return (11);
+		return (7);
 	case PRIMENET_WP_PRP_COFACTOR_DBLCHK:
-		return (12);
+		return (8);
 	case PRIMENET_WP_ECM_SMALL:
-		return (13);
+		return (9);
 	case PRIMENET_WP_ECM_COFACTOR:
-		return (14);
+		return (10);
 	case PRIMENET_WP_ECM_FERMAT:
-		return (15);
+		return (11);
 	case PRIMENET_WP_FACTOR_LMH:
-		return (16);
+		return (12);
 	default:
-		return (17);
+		return (13);
 	}
 }
 
@@ -159,36 +141,28 @@ int map_sel_to_work_pref (
 	case 0:
 		return (PRIMENET_WP_WHATEVER);
 	case 1:
-		return (PRIMENET_WP_LL_FIRST);
-	case 2:
-		return (PRIMENET_WP_LL_WORLD_RECORD);
-	case 3:
-		return (PRIMENET_WP_LL_DBLCHK);
-	case 4:
 		return (PRIMENET_WP_PRP_FIRST);
-	case 5:
+	case 2:
 		return (PRIMENET_WP_PRP_WORLD_RECORD);
-	case 6:
+	case 3:
 		return (PRIMENET_WP_PRP_DBLCHK);
-	case 7:
+	case 4:
 		return (PRIMENET_WP_FACTOR);
-	case 8:
+	case 5:
 		return (PRIMENET_WP_PFACTOR);
-	case 9:
+	case 6:
 		return (PRIMENET_WP_PRP_100M);
-	case 10:
-		return (PRIMENET_WP_LL_100M);
-	case 11:
+	case 7:
 		return (PRIMENET_WP_PRP_COFACTOR);
-	case 12:
+	case 8:
 		return (PRIMENET_WP_PRP_COFACTOR_DBLCHK);
-	case 13:
+	case 9:
 		return (PRIMENET_WP_ECM_SMALL);
-	case 14:
+	case 10:
 		return (PRIMENET_WP_ECM_COFACTOR);
-	case 15:
+	case 11:
 		return (PRIMENET_WP_ECM_FERMAT);
-	case 16:
+	case 12:
 		return (PRIMENET_WP_FACTOR_LMH);
 	}
 	return (-1);
@@ -221,7 +195,7 @@ void CWorkerDlg::InitComboBoxText (void)
 // Populate the work type combo box
 
 	c_work_pref.ResetContent ();
-	if (thread_num)
+	if (thread_num > 0)
 		sel = map_work_pref_to_sel (m_work_pref[thread_num-1]);
 	else if (AreAllTheSame (m_work_pref))
 		sel = map_work_pref_to_sel (m_work_pref[0]);
@@ -230,16 +204,12 @@ void CWorkerDlg::InitComboBoxText (void)
 		sel = 0;
 	}
 	c_work_pref.AddString ("Whatever makes the most sense");
-	c_work_pref.AddString ("First time LL tests");
-	c_work_pref.AddString ("World record sized numbers to LL test");
-	c_work_pref.AddString ("Double-check LL tests");
-	c_work_pref.AddString ("First time PRP tests");
-	c_work_pref.AddString ("World record sized numbers to PRP test");
-	c_work_pref.AddString ("Double-check PRP tests");
+	c_work_pref.AddString ("First time prime tests");
+	c_work_pref.AddString ("World record sized numbers to prime test");
+	c_work_pref.AddString ("Double-check prime tests");
 	c_work_pref.AddString ("Trial factoring");
 	c_work_pref.AddString ("P-1 factoring");
-	c_work_pref.AddString ("100,000,000 digit numbers to PRP test");
-	c_work_pref.AddString ("100,000,000 digit numbers to LL test (not recommended)");
+	c_work_pref.AddString ("100,000,000 digit numbers to prime test");
 	c_work_pref.AddString ("First time PRP on Mersenne cofactors");
 	c_work_pref.AddString ("Double-check PRP on Mersenne cofactors");
 	c_work_pref.AddString ("ECM for first factors of Mersenne numbers");
@@ -251,7 +221,7 @@ void CWorkerDlg::InitComboBoxText (void)
 
 // Populate the num cpus edit box.
 
-	if (thread_num) {
+	if (thread_num > 0) {
 		sprintf (buf, "%d", m_numcpus[thread_num-1]);
 		c_numcpus.SetWindowText (buf);
 	} else if (AreAllTheSame (m_numcpus)) {
@@ -271,10 +241,6 @@ void CWorkerDlg::InitComboBoxText (void)
 BOOL CWorkerDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
-
-	c_warn1_text.EnableWindow (FALSE);
-	c_warn2_text.EnableWindow (FALSE);
-	c_warn3_text.EnableWindow (FALSE);
 
 	InitComboBoxText ();
 
@@ -299,20 +265,6 @@ void CWorkerDlg::OnEnKillfocusNumThread()
 				// Might change thread_num if we reduced
 				// number of worker threads
 	}
-}
-
-void CWorkerDlg::OnEnSetfocusPriority()
-{
-	c_warn1_text.EnableWindow (TRUE);
-	c_warn2_text.EnableWindow (TRUE);
-	c_warn3_text.EnableWindow (TRUE);
-}
-
-void CWorkerDlg::OnEnKillfocusPriority()
-{
-	c_warn1_text.EnableWindow (FALSE);
-	c_warn2_text.EnableWindow (FALSE);
-	c_warn3_text.EnableWindow (FALSE);
 }
 
 void CWorkerDlg::OnCbnKillfocusThreadNum()

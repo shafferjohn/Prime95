@@ -27,7 +27,7 @@ typedef struct {
 } MD5_CTX;
 
 void MD5Init (MD5_CTX *);
-void MD5Update (MD5_CTX *, unsigned char *, unsigned int);
+void MD5Update (MD5_CTX *, const void *, unsigned int);
 void MD5Final (unsigned char [16], MD5_CTX *);
 
 /* Constants for MD5Transform routine. */
@@ -49,9 +49,9 @@ void MD5Final (unsigned char [16], MD5_CTX *);
 #define S43 15
 #define S44 21
 
-void MD5Transform (uint32_t [4], unsigned char [64]);
-void Encode (unsigned char *, uint32_t *, unsigned int);
-void Decode (uint32_t *, unsigned char *, unsigned int);
+void MD5Transform (uint32_t [4], const unsigned char [64]);
+void Encode (unsigned char *, const uint32_t *, unsigned int);
+void Decode (uint32_t *, const unsigned char *, unsigned int);
 
 unsigned char PADDING[64] = {
   0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -107,7 +107,7 @@ void MD5Init (MD5_CTX *context)                           /* context */
   context. */
 void MD5Update (
 	MD5_CTX *context,                                /* context */
-	unsigned char *input,                            /* input block */
+	const void *input,                         /* input block */
 	unsigned int inputLen)                     /* length of input block */
 {
   unsigned int i, index, partLen;
@@ -125,12 +125,11 @@ void MD5Update (
 
   /* Transform as many times as possible. */
   if (inputLen >= partLen) {
- memcpy
-   ((unsigned char *)&context->buffer[index], (unsigned char *)input, partLen);
+ memcpy (&context->buffer[index], input, partLen);
  MD5Transform (context->state, context->buffer);
 
  for (i = partLen; i + 63 < inputLen; i += 64)
-   MD5Transform (context->state, &input[i]);
+   MD5Transform (context->state, &((const unsigned char *)input)[i]);
 
  index = 0;
   }
@@ -138,9 +137,7 @@ void MD5Update (
  i = 0;
 
   /* Buffer remaining input */
-  memcpy
- ((unsigned char *)&context->buffer[index], (unsigned char *)&input[i],
-  inputLen-i);
+  memcpy (&context->buffer[index], &((const unsigned char *)input)[i], inputLen-i);
 }
 
 /* MD5 finalization. Ends an MD5 message-digest operation, writing the
@@ -174,7 +171,7 @@ void MD5Final (
 /* MD5 basic transformation. Transforms state based on block. */
 void MD5Transform (
 	uint32_t state[4],
-	unsigned char block[64])
+	const unsigned char block[64])
 {
   uint32_t a = state[0], b = state[1], c = state[2], d = state[3], x[16];
 
@@ -265,7 +262,7 @@ void MD5Transform (
   a multiple of 4. */
 void Encode (
 	unsigned char *output,
-	uint32_t *input,
+	const uint32_t *input,
 	unsigned int len)
 {
   unsigned int i, j;
@@ -282,7 +279,7 @@ void Encode (
   a multiple of 4. */
 void Decode (
 	uint32_t *output,
-	unsigned char *input,
+	const unsigned char *input,
 	unsigned int len)
 {
   unsigned int i, j;
@@ -290,49 +287,6 @@ void Decode (
   for (i = 0, j = 0; j < len; i++, j += 4)
  output[i] = ((uint32_t)input[j]) | (((uint32_t)input[j+1]) << 8) |
    (((uint32_t)input[j+2]) << 16) | (((uint32_t)input[j+3]) << 24);
-}
-
-/* Digests a string and converts to 16 byte output. */
-void md5_raw_output (
-	unsigned char output[16],
-	char *string)
-{
-	MD5_CTX context;
-	unsigned int len = (unsigned int) strlen (string);
-  
-	MD5Init (&context);
-	MD5Update (&context, (unsigned char *) string, len);
-	MD5Final (output, &context);
-}
-
-/* Digests a string and converts to 32 byte hex string output. */
-void md5_raw_input (
-	char output[33],
-	unsigned char *buf,
-	unsigned int len)
-{
-	MD5_CTX context;
-	unsigned char digest[16];
-	int	i;
-  
-	MD5Init (&context);
-	MD5Update (&context, buf, len);
-	MD5Final (digest, &context);
-
-	for (i = 0; i < 16; i++) {
-		sprintf (output, "%02x", digest[i]);
-		output += 2;
-	}
-}
-
-/* Digests a string and converts to 32 byte hex string output. */
-void md5 (
-	char output[33],
-	const char *string)
-{
-	md5_raw_input (output,
-		       (unsigned char *) string,
-		       (unsigned int) strlen (string));
 }
 
 #undef F
@@ -343,3 +297,106 @@ void md5 (
 #undef GG
 #undef HH
 #undef II
+
+/* Convert a digest to a 32 byte hex string output. */
+void md5_hexdigest_from_digest (
+	char output[33],
+	const unsigned char digest[16])
+{
+	int	i;
+	for (i = 0; i < 16; i++) {
+		sprintf (output+i*2, "%02x", digest[i]);
+	}
+}
+
+/* Digests a buffer and converts to 16 byte output. */
+void md5_digest_buffer (
+	unsigned char output[16],
+	const void *buf,
+	unsigned int len)
+{
+	MD5_CTX context;
+	MD5Init (&context);
+	MD5Update (&context, buf, len);
+	MD5Final (output, &context);
+}
+
+/* Digests a string and converts to 16 byte output. */
+void md5_digest_string (
+	unsigned char output[16],
+	const char *string)
+{
+	md5_digest_buffer (output, string, (unsigned int) strlen (string));
+}
+
+/* Digests a buffer and converts to 32 byte hex string output. */
+void md5_hexdigest_buffer (
+	char output[33],
+	const void *buf,
+	unsigned int len)
+{
+	unsigned char digest[16];
+	md5_digest_buffer (digest, buf, len);
+	md5_hexdigest_from_digest (output, digest);
+}
+
+/* Digests a string and converts to 32 byte hex string output. */
+void md5_hexdigest_string (
+	char output[33],
+	const char *string)
+{
+	md5_hexdigest_buffer (output, string, (unsigned int) strlen (string));
+}
+
+/* Digests a file and returns the 16-byte output */
+
+void md5_digest_file_from_offset (
+	unsigned char digest[16],
+	const char *filename,
+	int64_t	offset)
+{
+	MD5_CTX context;
+	FILE *f;
+	char	buf[16384];
+	int	i;
+
+	MD5Init (&context);
+
+	f = fopen (filename, "rb");
+	if (offset) _fseeki64 (f, offset, SEEK_SET);
+	for ( ; ; ) {
+		i = (int) fread (&buf, 1, sizeof (buf), f);
+		if (i <= 0) break;
+		MD5Update (&context, buf, i);
+	}
+	fclose (f);
+
+	MD5Final (digest, &context);
+}
+
+void md5_digest_file (
+	unsigned char digest[16],
+	const char *filename)
+{
+	md5_digest_file_from_offset (digest, filename, 0);
+}
+
+/* Digests a file and returns the 32-byte hex string output */
+
+void md5_hexdigest_file_from_offset (
+	char output[33],
+	const char *filename,
+	int64_t	offset)
+{
+	unsigned char digest[16];
+	md5_digest_file_from_offset (digest, filename, offset);
+	md5_hexdigest_from_digest (output, digest);
+}
+
+void md5_hexdigest_file (
+	char output[33],
+	const char *filename)
+{
+	md5_hexdigest_file_from_offset (output, filename, 0);
+}
+

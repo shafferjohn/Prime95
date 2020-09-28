@@ -1,8 +1,8 @@
-/* Copyright 1995-2019 Mersenne Research, Inc.  All rights reserved */
+/* Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved */
 
 /* Constants */
 
-#define VERSION		"29.8"
+#define VERSION		"30.3"
 #define BUILD_NUM	"6"
 /* The list of assigned OS ports follows: */
 /* Win9x (prime95) #1 */
@@ -69,7 +69,7 @@
 	      facbench * (1 + LOG2 (maxp/35000000) / 19) / lltime / 1.02) = p
 */
 
-/* These breakeven points we're calculated on a 2.5 GHz Core 2 using 64-bit prime95 v26.6: */
+/* These breakeven points were calculated on a 2.5 GHz Core 2 using 64-bit prime95 v26.6: */
 /* These should be recalculated for version 29 which now supports multithreaded TF and AVX-512 support */
 /* However, GPUs make all these numbers somewhat obsolete. */
 
@@ -158,6 +158,7 @@ extern int volatile SUM_INPUTS_ERRCHK;	/* 1 to turn on sum(inputs) != sum(output
 extern unsigned int PRIORITY;		/* Desired priority level */
 extern int MANUAL_COMM;			/* Set on if user explicitly starts */
 					/* all communication with the server */
+extern float volatile CPU_WORKER_DISK_SPACE; /* Disk space in GB each worker is allowed to use */
 extern unsigned int volatile CPU_HOURS;	/* Hours per day program will run */
 extern int CLASSIC_OUTPUT;		/* LL and PRP output to worker windows should use the pre-v28.5 classic style */
 extern int OUTPUT_ROUNDOFF;		/* LL and PRP output to worker windows shound include the roundoff error */
@@ -203,13 +204,11 @@ extern int RDTSC_TIMING;		/* True if RDTSC is used to time */
 extern int TIMESTAMPING;		/* True is timestamps to be output */
 extern int CUMULATIVE_TIMING;		/* True if outputting cumulative time */
 extern int CUMULATIVE_ROUNDOFF;		/* True if outputting cumulative min and max roundoff error */
-extern int SEQUENTIAL_WORK;		/* TRUE (the  default) if undocumented */
-					/* SequentialWorkToDo is set */
-extern int WELL_BEHAVED_WORK;		/* TRUE if undocumented feature */
-					/* "well behaved worktodo file" */
-					/* is on.  This reduces the number */
-					/* of times worktodo.ini is read */
-					/* and written. */
+extern int SEQUENTIAL_WORK;		/* 1 (the  default from early 2000's to 2020) -- No work is priority work */
+					/* 0 (the default from 1996 to early 2000's) -- LL/PRP tests needing TF and P-1 are priority work */
+					/* -1 (the default from 2020 on) -- Only certification work is priority work */
+extern int WELL_BEHAVED_WORK;		/* TRUE if undocumented feature "well behaved worktodo file" is on. */
+					/* This reduces the number of times worktodo.ini is read and written. */
 extern unsigned long INTERIM_FILES;	/* Create save file every N iters */  
 extern unsigned long INTERIM_RESIDUES;	/* Print residue every N iterations */
 extern unsigned long HYPERTHREADING_BACKOFF; /* Pause prime95 if iterations */
@@ -229,8 +228,8 @@ extern unsigned int WORKTODO_COUNT;	/* Count of valid work lines */
 extern int GIMPS_QUIT;			/* TRUE if we just successfully */
 					/* quit the GIMPS project */
 
-extern gwthread COMMUNICATION_THREAD;	/* Handle for comm thread.  Set when */
-					/* comm thread is active. */
+extern gwthread COMMUNICATION_THREAD;	/* Handle for comm thread.  Set when comm thread is active. */
+extern gwthread UPLOAD_THREAD;		/* Handle for proof file upload thread */
 
 extern gwevent AUTOBENCH_EVENT;		/* Event to wake up workers after an auto-benchmark */
 
@@ -310,6 +309,7 @@ void ChangeIcon (int, int);
 void BlinkIcon (int, int);
 EXTERNC void OutputBoth (int, const char *);
 void OutputBothBench (int, const char *);
+void OutputBothErrno (int);
 void OutputStr (int, const char *);
 void OutputStrNoTimeStamp (int, const char *);
 void RealOutputStr (int, const char *);
@@ -327,6 +327,7 @@ int OutOfMemory (int);
 #define WORK_PMINUS1		5
 #define WORK_PFACTOR		6
 #define WORK_PRP		10
+#define WORK_CERT		11
 #define WORK_NONE		100	/* Comment line in worktodo.ini */
 #define WORK_DELETED		101	/* Deleted work_unit */
 
@@ -353,6 +354,7 @@ struct work_unit {		/* One line from the worktodo file */
 	unsigned int prp_base;	/* PRP base to use */	
 	int	prp_residue_type; /* PRP residue to output -- see primenet.h */
 	int	prp_dblchk;	/* True if this is a doublecheck of a previous PRP */
+	int	cert_squarings; /* Number of squarings required for PRP proof certification */
 	char	*known_factors;	/* ECM, P-1, PRP - list of known factors */
 	char	*comment;	/* Comment line in worktodo.ini */
 		/* Runtime variables */
@@ -399,8 +401,10 @@ void guess_pminus1_bounds (int, double, unsigned long, unsigned long, signed lon
 			   unsigned long *, unsigned long *, double *);
 
 void strupper (char *);
+int isHex (const char *);
 void tempFileName (struct work_unit *, char *);
 int fileExists (const char *);
+void DirPlusFilename (char *, const char *);
 
 int read_array (int fd, char *buf, unsigned long len, unsigned long *sum);
 int write_array (int fd, const char *buf, unsigned long len, unsigned long *sum);
@@ -452,10 +456,16 @@ void spoolMessage (short, void *);
 void spoolExistingResultsFile (void);
 int unreserve (unsigned long);
 void salvageCorruptSpoolFile (void);
+void proofUploader (void *);
 
 int LoadPrimeNet (void);
 void UnloadPrimeNet (void);
 int PRIMENET (short, void *);
+int ProofFileNames (char filenames[50][255]);
+void ProofUpload (char *);
+int ProofGetData (char *, void *, int, char *);
+char getDirectorySeparator ();
+
 
 /******************************************************************************
 *                           Timed Events Handler                              *
@@ -463,7 +473,7 @@ int PRIMENET (short, void *);
 
 #define TE_MEM_CHANGE		0	/* Night/day memory change event */
 #define TE_PAUSE_WHILE		1	/* Check pause_while_running event */
-#define TE_WORK_QUEUE_CHECK	2	/* Check work queue event */
+#define TE_WORK_QUEUE_CHECK	2	/* Check for CERT work timer.  Also check regular work queue which also get checked for results sent, etc. */
 #define TE_COMM_SERVER		3	/* Retry communication with server event */
 #define TE_COMM_KILL		4	/* Kill hung communication thread event */
 #define TE_PRIORITY_WORK	5	/* Check for priority work event */
@@ -473,8 +483,7 @@ int PRIMENET (short, void *);
 #define TE_BATTERY_CHECK	9	/* Check battery status frequently */
 #define TE_ROLLING_AVERAGE	10	/* Adjust rolling average */
 #define TE_READ_PAUSE_DATA	11	/* Reread PauseWhileRunning info */
-#define TE_READ_INI_FILE	12	/* Reread prime.txt settings because */
-					/* a during/else time period has ended */
+#define TE_READ_INI_FILE	12	/* Reread prime.txt settings because a during/else time period has ended */
 #define TE_LOAD_AVERAGE		13	/* Linux/FreeBSD/Apple load average check */
 #define TE_BENCH		14	/* Generate benchmark data for best FFT selection */
 #define TE_JACOBI		15	/* Trigger a Jacobi error check */
@@ -496,8 +505,7 @@ int is_timed_event_active (
 time_t timed_event_fire_time (
 	int	event_number);		/* Which event to get fire time of */
 
-#define TE_WORK_QUEUE_CHECK_FREQ 6*60*60 /* Check work queue every 6 hrs. */
-#define TE_PRIORITY_WORK_FREQ	 6*60*60 /* Check priority work every 6 hrs. */
+#define TE_PRIORITY_WORK_FREQ	 1*60*60 /* Check priority work every hour. */
 #define TE_BATTERY_CHECK_FREQ	 15	/* Check battery every 15 sec. */
 #define TE_THROTTLE_FREQ	 5	/* Throttle every 5 sec. */
 #define TE_ROLLING_AVERAGE_FREQ	 12*60*60 /* Adjust rolling every 12 hr. */

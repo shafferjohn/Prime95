@@ -7,12 +7,12 @@
 # http://www.agner.org/optimize/#objconv
 
 #### -EP can be useful instead of a listing
-masm64=uasm32 /c /DX86_64 /DWINDOWS64 -win64
-#masm64=uasm32 /c /DX86_64 /DWINDOWS64 /Fl /Sf /Sa -win64
+masm64=uasm64 /c /DX86_64 /DWINDOWS64 -win64
+#masm64=uasm64 /c /DX86_64 /DWINDOWS64 /Fl /Sf /Sa -win64
 #masm64=ml64 /c /DX86_64 /DWINDOWS64
 #masm64=ml64 /c /DX86_64 /DWINDOWS64 /Fl /Sf /Sa
-masm64lx=uasm32 /c /DX86_64 /DLINUX64 -win64
-#masm64lx=uasm32 /c /DX86_64 /DLINUX64 /Fl /Sf /Sa -win64
+masm64lx=uasm64 /c /DX86_64 /DLINUX64 -win64
+#masm64lx=uasm64 /c /DX86_64 /DLINUX64 /Fl /Sf /Sa -win64
 #masm64lx=ml64 /c /DX86_64 /DLINUX64
 objconv=c:\objconv\objconv
 

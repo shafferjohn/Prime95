@@ -4,7 +4,7 @@ cl=cl /GF /W3 /MT /D_CRT_SECURE_NO_DEPRECATE /O2 /c
 cld=cl /GF /W3 /MT /D_CRT_SECURE_NO_DEPRECATE /DGDEBUG /Zi /c
 
 # Standard options
-copt=/I.. /I..\gwnum /I\libcurl /Ic:\hwloc-win32-build-2.0.4\include /Ic:\gmp
+copt=/I.. /I..\gwnum /Ic:\curl-7.70.0-win32-mingw\include\curl /Ic:\hwloc-win32-build-2.2.0\include /Ic:\gmp32
 
 # This line allows NMAKE to work as well
 

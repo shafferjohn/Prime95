@@ -66,7 +66,7 @@ public:
 public:
     HINSTANCE GotoURL(LPCTSTR url, int showcmd);
 protected:
-    void ReportError(int nError);
+    void ReportError(LONG64 nError);
     LONG GetRegKey(HKEY key, LPCTSTR subkey, LPTSTR retdata);
     void PositionWindow();
     void SetDefaultCursor();

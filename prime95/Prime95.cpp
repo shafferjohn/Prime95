@@ -1,4 +1,4 @@
-/* Copyright 1995-2014 Mersenne Research, Inc.  All rights reserved */
+/* Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved */
 
 // Prime95.cpp : Defines the class behaviors for the application.
 //
@@ -86,7 +86,21 @@ BOOL CPrime95App::InitInstance()
 	int	torture_test = 0;
 	char	*p;
 
-	// Standard initialization
+	// VS2019 standard initialization
+	
+	// InitCommonControlsEx() is required on Windows XP if an application
+	// manifest specifies use of ComCtl32.dll version 6 or later to enable
+	// visual styles.  Otherwise, any window creation will fail.
+	INITCOMMONCONTROLSEX InitCtrls;
+	InitCtrls.dwSize = sizeof(InitCtrls);
+	// Set this to include all the common control classes you want to use
+	// in your application.
+	InitCtrls.dwICC = ICC_WIN95_CLASSES;
+	InitCommonControlsEx(&InitCtrls);
+
+	CWinApp::InitInstance ();
+
+	// Standard initialization from MSVC 2005
 	// If you are not using these features and wish to reduce the size
 	//  of your final executable, you should remove from the following
 	//  the specific initialization routines you do not need.
@@ -129,9 +143,7 @@ BOOL CPrime95App::InitInstance()
 	if (!ProcessShellCommand(cmdInfo))
 		return FALSE;
 
-/* Change the working directory to the same directory that */
-/* the executable is located.  This is especially important */
-/* for running prime95 as a Windows 95 service */
+/* Change the working directory to the same directory that the executable is located. */
 
 	{
 		char	buf[256];
@@ -146,12 +158,6 @@ BOOL CPrime95App::InitInstance()
 
 	StopCheckRoutine = stopCheck;
 	OutputBothRoutine = OutputBoth;
-
-/* NT services are not passed command line arguments.  In this case we */
-/* encode the -An information in the NT service name. */
-
-	if (NTSERVICENAME[0] && NTSERVICENAME[15] == '-')
-		named_ini_files = atoi (&NTSERVICENAME[16]);
 
 // Process command line switches
 
@@ -363,11 +369,6 @@ simple_mutex:	 	g_hMutexInst = CreateMutex (
 	// Put prime95 in the system tray
 	if (TRAY_ICON) TrayMessage (NIM_ADD, "Prime95", 0);
 
-	// See if we are running as a Windows95 service
-	WINDOWS95_SERVICE = IniGetInt (INI_FILE, "Windows95Service", 0);
-	WINDOWS95_A_SWITCH = named_ini_files;
-	Service95 ();
-
 	// Run the torture test if asked to by a command line argument
 	if (torture_test) {
 		m_pMainWnd->ShowWindow (orig_cmdShow);
@@ -534,8 +535,6 @@ void CPrime95App::OnAppAbout()
 
 int	EXIT_IN_PROGRESS = 0;
 
-int	WINDOWS95_SERVICE = 0;
-int	WINDOWS95_A_SWITCH = 0;
 LONG	WM_ENDSESSION_LPARAM = 0;
 int	WINDOWS95_TRAY_ADD = 0;
 

@@ -57,15 +57,15 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		089C165DFE840E0CC02AAC07 /* English */ = {isa = PBXFileReference; fileEncoding = 10; lastKnownFileType = text.plist.strings; name = English; path = English.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		1058C7A1FEA54F0111CA2CBB /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = /System/Library/Frameworks/Cocoa.framework; sourceTree = "<absolute>"; };
 		13E42FB307B3F0F600E4EEF1 /* CoreData.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreData.framework; path = /System/Library/Frameworks/CoreData.framework; sourceTree = "<absolute>"; };
-		1DDD58150DA1D0A300B32029 /* English */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = English; path = English.lproj/MainMenu.xib; sourceTree = "<group>"; };
 		29B97316FDCFA39411CA2CEA /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		29B97324FDCFA39411CA2CEA /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = /System/Library/Frameworks/AppKit.framework; sourceTree = "<absolute>"; };
 		29B97325FDCFA39411CA2CEA /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = /System/Library/Frameworks/Foundation.framework; sourceTree = "<absolute>"; };
 		32CA4F630368D1EE00C91783 /* Prime95_Prefix.pch */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Prime95_Prefix.pch; sourceTree = "<group>"; };
 		5EBA78AF0F96D6B900F79624 /* Mersenne.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Mersenne.icns; sourceTree = "<group>"; };
+		5EC4104A23906A8F008E7198 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
+		5EC4104B23906A99008E7198 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		5ED7E7F50F98F7CB00BC5767 /* AppController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AppController.h; sourceTree = "<group>"; };
 		5ED7E7F60F98F7CB00BC5767 /* AppController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = AppController.m; sourceTree = "<group>"; };
 		5ED7E8640F9918C400BC5767 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = /System/Library/Frameworks/IOKit.framework; sourceTree = "<absolute>"; };
@@ -315,17 +315,19 @@
 		29B97313FDCFA39411CA2CEA /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				LastUpgradeCheck = 1120;
 				ORGANIZATIONNAME = "Mersenne Research, Inc.";
 			};
 			buildConfigurationList = C01FCF4E08A954540054247B /* Build configuration list for PBXProject "Prime95" */;
 			compatibilityVersion = "Xcode 3.2";
-			developmentRegion = English;
+			developmentRegion = en;
 			hasScannedForEncodings = 1;
 			knownRegions = (
-				English,
-				Japanese,
-				French,
-				German,
+				fr,
+				Base,
+				de,
+				en,
+				ja,
 			);
 			mainGroup = 29B97314FDCFA39411CA2CEA /* Prime95 */;
 			projectDirPath = "";
@@ -372,7 +374,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		5ECC058E1FD9F3FB00971B38 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
+			buildActionMask = 12;
 			files = (
 			);
 			inputPaths = (
@@ -381,7 +383,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cp /usr/local/lib/libgmp.10.dylib $BUILT_PRODUCTS_DIR/$EXECUTABLE_FOLDER_PATH\ninstall_name_tool -change /usr/local/lib/libgmp.10.dylib @executable_path/libgmp.10.dylib $BUILT_PRODUCTS_DIR/$EXECUTABLE_FOLDER_PATH/Prime95\n";
+			shellScript = "#cp /usr/local/lib/libgmp.10.dylib $BUILT_PRODUCTS_DIR/$EXECUTABLE_FOLDER_PATH\n#install_name_tool -change /usr/local/lib/libgmp.10.dylib @executable_path/libgmp.10.dylib $BUILT_PRODUCTS_DIR/$EXECUTABLE_FOLDER_PATH/Prime95\n\nrm -f $BUILT_PRODUCTS_DIR/$EXECUTABLE_FOLDER_PATH/libgmp.10.dylib\n\n#/usr/bin/codesign --force --sign - --entitlements $BUILT_PRODUCTS_DIR/$EXECUTABLE_FOLDER_PATH/Prime95.app.xcent --timestamp=none $BUILT_PRODUCTS_DIR/$EXECUTABLE_FOLDER_PATH/libgmp.10.dylib\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -421,7 +423,7 @@
 		089C165CFE840E0CC02AAC07 /* InfoPlist.strings */ = {
 			isa = PBXVariantGroup;
 			children = (
-				089C165DFE840E0CC02AAC07 /* English */,
+				5EC4104B23906A99008E7198 /* en */,
 			);
 			name = InfoPlist.strings;
 			sourceTree = "<group>";
@@ -429,7 +431,7 @@
 		1DDD58140DA1D0A300B32029 /* MainMenu.xib */ = {
 			isa = PBXVariantGroup;
 			children = (
-				1DDD58150DA1D0A300B32029 /* English */,
+				5EC4104A23906A8F008E7198 /* Base */,
 			);
 			name = MainMenu.xib;
 			sourceTree = "<group>";
@@ -441,21 +443,19 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = "$(ARCHS_STANDARD)";
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
 				CONFIGURATION_TEMP_DIR = "$(BUILD_DIR)/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 7.0;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				"DEBUG_INFORMATION_FORMAT[sdk=*]" = dwarf;
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
-				"GCC_MODEL_PPC64[arch=i386]" = NO;
 				"GCC_MODEL_PPC64[arch=x86_64]" = YES;
 				GCC_MODEL_TUNING = G5;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = Prime95_Prefix.pch;
-				"GCC_PREPROCESSOR_DEFINITIONS[arch=i386]" = GDEBUG;
 				"GCC_PREPROCESSOR_DEFINITIONS[arch=x86_64]" = (
 					X86_64,
 					GDEBUG,
@@ -478,22 +478,16 @@
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
 				ONLY_ACTIVE_ARCH = NO;
 				OTHER_LDFLAGS = "";
-				"OTHER_LDFLAGS[arch=i386]" = (
-					../../prime95/macosx/factor32.o,
-					../../gwnum/debug/gwnum.a,
-					"-lhwloc",
-					"-lcurl",
-					"-lstdc++",
-				);
 				"OTHER_LDFLAGS[arch=x86_64]" = (
 					../../prime95/macosx64/factor64.o,
 					../../gwnum/amd64/debug/gwnum.a,
 					/usr/local/lib/libhwloc.a,
 					"-lcurl",
 					"-lstdc++",
-					"-lgmp",
+					/usr/local/lib/libgmp.a,
 				);
 				PRELINK_LIBS = "";
+				PRODUCT_BUNDLE_IDENTIFIER = org.mersenne.Prime95;
 				PRODUCT_NAME = Prime95;
 				SDKROOT = macosx;
 				SYMROOT = "$(SRCROOT)/build";
@@ -506,17 +500,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = "$(ARCHS_STANDARD)";
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
 				CONFIGURATION_TEMP_DIR = "$(BUILD_DIR)/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
+				CURRENT_PROJECT_VERSION = 7.0;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				FRAMEWORK_SEARCH_PATHS = "";
-				"GCC_MODEL_PPC64[arch=i386]" = NO;
 				"GCC_MODEL_PPC64[arch=x86_64]" = YES;
 				GCC_MODEL_TUNING = "";
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = Prime95_Prefix.pch;
 				GCC_PREPROCESSOR_DEFINITIONS = "";
-				"GCC_PREPROCESSOR_DEFINITIONS[arch=i386]" = NS_BLOCK_ASSERTIONS;
 				"GCC_PREPROCESSOR_DEFINITIONS[arch=x86_64]" = (
 					X86_64,
 					NS_BLOCK_ASSERTIONS,
@@ -537,21 +530,16 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
 				OTHER_LDFLAGS = "";
-				"OTHER_LDFLAGS[arch=i386]" = (
-					../../prime95/macosx/factor32.o,
-					../../gwnum/release/gwnum.a,
-					"-lhwloc",
-					"-lcurl",
-				);
 				"OTHER_LDFLAGS[arch=x86_64]" = (
 					../../prime95/macosx64/factor64.o,
 					../../gwnum/amd64/release/gwnum.a,
 					/usr/local/lib/libhwloc.a,
 					"-lcurl",
 					"-lstdc++",
-					"-lgmp",
+					/usr/local/lib/libgmp.a,
 				);
 				PRELINK_LIBS = "";
+				PRODUCT_BUNDLE_IDENTIFIER = org.mersenne.Prime95;
 				PRODUCT_NAME = Prime95;
 				SDKROOT = macosx;
 				SYMROOT = "$(SRCROOT)/build";
@@ -563,7 +551,7 @@
 		C01FCF4F08A954540054247B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD)";
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
 				GCC_C_LANGUAGE_STANDARD = c99;
 				"GCC_MODEL_PPC64[arch=i386]" = NO;
 				"GCC_MODEL_PPC64[arch=x86_64]" = YES;
@@ -572,7 +560,7 @@
 				GCC_WARN_ABOUT_RETURN_TYPE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
-				ONLY_ACTIVE_ARCH = YES;
+				ONLY_ACTIVE_ARCH = NO;
 				OTHER_CFLAGS = "";
 				"OTHER_CFLAGS[arch=i386]" = (
 					"-malign-double",
@@ -580,22 +568,23 @@
 				);
 				PREBINDING = NO;
 				SDKROOT = macosx;
-				VALID_ARCHS = "i386 x86_64";
+				VALID_ARCHS = x86_64;
 			};
 			name = Debug;
 		};
 		C01FCF5008A954540054247B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD)";
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
 				GCC_C_LANGUAGE_STANDARD = c99;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
+				ONLY_ACTIVE_ARCH = NO;
 				"OTHER_CFLAGS[arch=i386]" = "-malign-double";
 				PREBINDING = NO;
 				SDKROOT = macosx;
-				VALID_ARCHS = "i386 x86_64";
+				VALID_ARCHS = x86_64;
 			};
 			name = Release;
 		};

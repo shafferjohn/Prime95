@@ -8,7 +8,7 @@
 | NOTE:  These routines only work if you open no more than 10 ini files.  Also,
 | you must not change the working directory at any time during program execution.
 |
-| Copyright 2016-2017 Mersenne Research, Inc.  All rights reserved
+| Copyright 2016-2020 Mersenne Research, Inc.  All rights reserved
 +---------------------------------------------------------------------*/
 
 /* Include files */
@@ -698,7 +698,7 @@ void IniSectionWriteFloat (		/* Write a floating point value to the specified se
 	/* Assume FLT_MAX is 3.40282e+038, the maximum significant digits that */
 	/* can be stored in this buf is 12. ((sizeof(buf))-sizeof("-.E+038")) */
  	char	buf[20];
-	sprintf (buf, "%11g", val);
+	sprintf (buf, "%g", val);
  	IniSectionWriteString (filename, section, keyword, buf);
 }
 

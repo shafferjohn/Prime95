@@ -1,6 +1,6 @@
 // Prime95Doc.cpp : implementation of the CPrime95Doc class
 //
-// Copyright 1995-2019 Mersenne Research, Inc.  All rights reserved
+// Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
 //
 
 #include "stdafx.h"
@@ -19,6 +19,7 @@
 #include "Pminus1Dlg.h"
 #include "PreferencesDlg.h"
 #include "PrimeNetDlg.h"
+#include "ResourcesDlg.h"
 #include "StartDlg.h"
 #include "StopDlg.h"
 #include "TestDlg.h"
@@ -51,11 +52,10 @@ BEGIN_MESSAGE_MAP(CPrime95Doc, CDocument)
 	ON_UPDATE_COMMAND_UI(IDM_STOP_SWITCHER, OnUpdateStopSwitcher)
 	ON_COMMAND(IDM_STOP_SWITCHER, OnStopSwitcher)
 	ON_COMMAND(IDM_STOP, OnStop)
-	ON_UPDATE_COMMAND_UI(IDM_SUMINP_ERRCHK, OnUpdateSuminpErrchk)
-	ON_COMMAND(IDM_SUMINP_ERRCHK, OnSuminpErrchk)
 	ON_UPDATE_COMMAND_UI(IDM_ERRCHK, OnUpdateErrchk)
 	ON_COMMAND(IDM_ERRCHK, OnErrchk)
 	ON_COMMAND(IDM_CPU, OnCpu)
+	ON_COMMAND(IDM_RESOURCES, OnResources)
 	ON_COMMAND(IDM_PREFERENCES, OnPreferences)
 	ON_UPDATE_COMMAND_UI(IDM_TEST, OnUpdateTest)
 	ON_COMMAND(IDM_TEST, OnTest)
@@ -232,21 +232,15 @@ void CPrime95Doc::OnPrimenet()
 		IniWriteInt (INI_FILE, "DialUp", DIAL_UP);
 		strcpy (szProxyHost, (const char *) dlg.m_proxyhost);
 		if (szProxyHost[0] && dlg.m_proxyport != 8080)
-			sprintf (szProxyHost + strlen (szProxyHost), ":%d",
-				 dlg.m_proxyport);
-		IniSectionWriteString (INI_FILE, "PrimeNet",
-				       "ProxyHost", szProxyHost);
-		IniSectionWriteString (INI_FILE, "PrimeNet",
-				       "ProxyUser", dlg.m_proxyuser);
+			sprintf (szProxyHost + strlen (szProxyHost), ":%d", dlg.m_proxyport);
+		IniSectionWriteString (INI_FILE, "PrimeNet", "ProxyHost", szProxyHost);
+		IniSectionWriteString (INI_FILE, "PrimeNet", "ProxyUser", dlg.m_proxyuser);
 		if (strcmp (szProxyPassword, dlg.m_proxypassword)) {
-			IniSectionWriteString (INI_FILE, "PrimeNet",
-					"ProxyPass", dlg.m_proxypassword);
-			IniSectionWriteInt (INI_FILE, "PrimeNet",
-					"ProxyMask", 0);
+			IniSectionWriteString (INI_FILE, "PrimeNet", "ProxyPass", dlg.m_proxypassword);
+			IniSectionWriteInt (INI_FILE, "PrimeNet", "ProxyMask", 0);
 		}
 		if (!dlg.m_debug != !primenet_debug) {
-			IniSectionWriteInt (INI_FILE, "PrimeNet", "Debug",
-					    dlg.m_debug ? 2 : 0);
+			IniSectionWriteInt (INI_FILE, "PrimeNet", "Debug", dlg.m_debug ? 1 : 0);
 		}
 
 		if (dlg.m_userid[0] == 0)
@@ -300,7 +294,6 @@ void CPrime95Doc::OnQuitGimps()
 //bug - either delete file, or delete all work_units and write the file.
 //bug			IniDeleteAllLines (WORKTODO_FILE);
 			stop_workers_for_escape ();
-			if (WINDOWS95_SERVICE) OnService ();
 		}
 	} else {
 		int	res;
@@ -327,18 +320,43 @@ void CPrime95Doc::OnWorkerThreads()
 	int	i;
 
 	dlg.m_num_thread = NUM_WORKER_THREADS;
-	dlg.m_priority = PRIORITY;
-	dlg.m_hyper_tf = HYPERTHREAD_TF;
-	dlg.m_hyper_ll = HYPERTHREAD_LL;
 	for (i = 0; i < MAX_NUM_WORKER_THREADS; i++) {
 		dlg.m_work_pref[i] = WORK_PREFERENCE[i];
 		dlg.m_numcpus[i] = CORES_PER_TEST[i];
 	}
+	dlg.m_cert_work = IniGetInt (LOCALINI_FILE, "CertWork", 1);
 
 again:	if (dlg.DoModal () == IDOK) {
 		int	restart = FALSE;
 		int	new_options = FALSE;
 		unsigned long i, total_num_cores;
+
+/* If the user has selected 100M tests and per-worker temp disk is not enough for a power=8 proof, then do not permit it. */
+
+		if (CPU_WORKER_DISK_SPACE < 12.0) {
+			int	changed = FALSE;
+			for (i = 0; i < dlg.m_num_thread; i++) {
+				if (dlg.m_work_pref[i] == PRIMENET_WP_PRP_100M) {
+					dlg.m_work_pref[i] = PRIMENET_WP_PRP_FIRST;
+					changed = TRUE;
+				}
+			}
+			if (changed)
+				AfxMessageBox (MSG_100M, MB_ICONEXCLAMATION | MB_OK);
+		}
+
+/* If the user has selected first-time tests and per-worker temp disk is not enough for a power=6 proof, then warn the user. */
+
+		if (CPU_WORKER_DISK_SPACE < 1.5) {
+			int	warn = FALSE;
+			for (i = 0; i < dlg.m_num_thread; i++) {
+				if (dlg.m_work_pref[i] == PRIMENET_WP_PRP_FIRST || dlg.m_work_pref[i] == PRIMENET_WP_PRP_WORLD_RECORD) {
+					warn = TRUE;
+				}
+			}
+			if (warn)
+				AfxMessageBox (MSG_FIRST, MB_ICONEXCLAMATION | MB_OK);
+		}
 
 /* If the user has allocated too many cores then raise a severe warning. */
 
@@ -355,17 +373,6 @@ again:	if (dlg.DoModal () == IDOK) {
 		if (dlg.m_num_thread != NUM_WORKER_THREADS) {
 			NUM_WORKER_THREADS = dlg.m_num_thread;
 			IniWriteInt (LOCALINI_FILE, "WorkerThreads", NUM_WORKER_THREADS);
-			new_options = TRUE;
-			restart = TRUE;
-		}
-
-/* If user changed the priority of worker threads, then change */
-/* the INI file.  Restart worker threads so that they are running at */
-/* the new priority. */
-
-		if (PRIORITY != dlg.m_priority) {
-			PRIORITY = dlg.m_priority;
-			IniWriteInt (INI_FILE, "Priority", PRIORITY);
 			new_options = TRUE;
 			restart = TRUE;
 		}
@@ -393,18 +400,9 @@ again:	if (dlg.DoModal () == IDOK) {
 		else for (i = 0; i < (int) NUM_WORKER_THREADS; i++)
 			PTOSetOne (LOCALINI_FILE, "CoresPerTest", NULL, CORES_PER_TEST, i, dlg.m_numcpus[i]);
 
-/* If user changed the hyperthreading options, then save the options to the INI file */
+/* Write the new CertWork setting */
 
-		if (dlg.m_hyper_tf != HYPERTHREAD_TF) {
-			HYPERTHREAD_TF = dlg.m_hyper_tf;
-			IniWriteInt (LOCALINI_FILE, "HyperthreadTF", HYPERTHREAD_TF);
-			restart = TRUE;
-		}
-		if (dlg.m_hyper_ll != HYPERTHREAD_LL) {
-			HYPERTHREAD_LL = dlg.m_hyper_ll;
-			IniWriteInt (LOCALINI_FILE, "HyperthreadLL", HYPERTHREAD_LL);
-			restart = TRUE;
-		}
+		IniWriteInt (LOCALINI_FILE, "CertWork", dlg.m_cert_work);
 
 /* Send new settings to the server */
 
@@ -599,18 +597,6 @@ void CPrime95Doc::OnEcm()
 	}
 }
 
-void CPrime95Doc::OnUpdateSuminpErrchk(CCmdUI* pCmdUI)
-{
-	pCmdUI->SetCheck (SUM_INPUTS_ERRCHK);
-	pCmdUI->Enable (1);
-}
-
-void CPrime95Doc::OnSuminpErrchk()
-{
-	SUM_INPUTS_ERRCHK = !SUM_INPUTS_ERRCHK;
-	IniWriteInt (INI_FILE, "SumInputsErrorCheck", SUM_INPUTS_ERRCHK);
-}
-
 void CPrime95Doc::OnUpdateErrchk(CCmdUI* pCmdUI) 
 {
 	pCmdUI->SetCheck (ERRCHK);
@@ -666,23 +652,12 @@ void CPrime95Doc::OnCpu()
 {
 	CCpuDlg dlg;
 	char	buf[512];
-	unsigned int day_memory, night_memory, day_start_time, day_end_time;
 
 	dlg.m_hours = CPU_HOURS;
-	dlg.m_memory_editable =
-		read_memory_settings (&day_memory, &night_memory,
-				      &day_start_time, &day_end_time);
-	dlg.m_day_memory = day_memory;
-	dlg.m_night_memory = night_memory;
-	minutesToStr (day_start_time, buf);
-	dlg.m_start_time = buf;
-	minutesToStr (day_end_time, buf);
-	dlg.m_end_time = buf;
 	getCpuDescription (buf, 0);
 	dlg.m_cpu_info = buf;
 //again:
 	if (dlg.DoModal () == IDOK) {
-		unsigned int new_day_start_time, new_day_end_time;
 
 		if (CPU_HOURS != dlg.m_hours) {
 			CPU_HOURS = dlg.m_hours;
@@ -695,20 +670,6 @@ void CPrime95Doc::OnCpu()
 			UpdateEndDates ();
 		}
 
-/* Save the new information */
-
-		new_day_start_time = strToMinutes ((char *)(LPCTSTR) dlg.m_start_time);
-		new_day_end_time = strToMinutes ((char *)(LPCTSTR) dlg.m_end_time);
-		if (day_memory != dlg.m_day_memory ||
-		    night_memory != dlg.m_night_memory ||
-		    day_start_time != new_day_start_time ||
-		    day_end_time != new_day_end_time) {
-			write_memory_settings (dlg.m_day_memory, dlg.m_night_memory,
-					       new_day_start_time, new_day_end_time);
-			mem_settings_have_changed ();
-		}
-		spoolMessage (PRIMENET_PROGRAM_OPTIONS, NULL);
-
 // Now that Primenet almost always hands out LL assignments that are P-1'ed,
 // there is little reason to prompt user into allowing us to use more memory.
 //		if (!IniGetInt (INI_FILE, "AskedAboutMemory", 0)) {
@@ -719,6 +680,36 @@ void CPrime95Doc::OnCpu()
 //		}
 	} else
 		STARTUP_IN_PROGRESS = 0;
+}
+
+void CPrime95Doc::OnResources() 
+{
+	CResourcesDlg dlg;
+	char	timebuf[20];
+
+	dlg.m_disk = CPU_WORKER_DISK_SPACE;
+	dlg.m_upload_bandwidth = IniSectionGetFloat (INI_FILE, "PrimeNet", "UploadRateLimit", 0.25);
+	if (dlg.m_upload_bandwidth <= 0.0 || dlg.m_upload_bandwidth > 10000.0) dlg.m_upload_bandwidth = 10000.0;
+	IniSectionGetString (INI_FILE, "PrimeNet", "UploadStartTime", timebuf, sizeof (timebuf), "00:00");
+	if (strcmp (timebuf, "00:00") != 0) minutesToStr (strToMinutes (timebuf), timebuf);
+	dlg.m_upload_start = timebuf;
+	IniSectionGetString (INI_FILE, "PrimeNet", "UploadEndTime", timebuf, sizeof (timebuf), "24:00");
+	if (strcmp (timebuf, "24:00") != 0) minutesToStr (strToMinutes (timebuf), timebuf);
+	dlg.m_upload_end = timebuf;
+	dlg.m_download_mb = IniSectionGetInt (INI_FILE, "PrimeNet", "DownloadDailyLimit", 40);
+	dlg.m_can_upload = IniSectionGetInt (INI_FILE, "PrimeNet", "ProofUploads", 1);
+	if (dlg.DoModal () == IDOK) {
+		// Raise a warning if uesr drops the temp disk space below the threshold for first time work.
+		if (CPU_WORKER_DISK_SPACE >= 1.5 && dlg.m_disk < 1.5) {
+			AfxMessageBox (MSG_DISK, MB_ICONEXCLAMATION | MB_OK);
+		}
+		CPU_WORKER_DISK_SPACE = dlg.m_disk;
+		IniWriteFloat (LOCALINI_FILE, "WorkerDiskSpace", CPU_WORKER_DISK_SPACE);
+		IniSectionWriteFloat (INI_FILE, "PrimeNet", "UploadRateLimit", dlg.m_upload_bandwidth);
+		IniSectionWriteString (INI_FILE, "PrimeNet", "UploadStartTime", (const char *) dlg.m_upload_start);
+		IniSectionWriteString (INI_FILE, "PrimeNet", "UploadEndTime", (const char *) dlg.m_upload_end);
+		IniSectionWriteInt (INI_FILE, "PrimeNet", "DownloadDailyLimit", dlg.m_download_mb);
+	}
 }
 
 void CPrime95Doc::OnPreferences() 
@@ -915,25 +906,67 @@ void CPrime95Doc::OnHide()
 	IniWriteInt (INI_FILE, "TrayIcon", TRAY_ICON);
 }
 
-// When running as an NT service we can delete the service (it will take
-// effect when the service is stopped), but we cannot recreate the service
-// until the next time prime95 is run.  Thus, disable this menu choice once
-// an NT service has turned this option off.  Also, some NT users do not
-// have permission to create and delete services.  For those users, change
-// the menu text to "Start at logon."
+// Check the menu item if start at logon is enabled
+
+static int startup_at_logon_set;
 
 void CPrime95Doc::OnUpdateService(CCmdUI* pCmdUI)
 {
-	pCmdUI->SetText (canModifyServices () ? "Start at Bootup" : "Start at Logon");
-	pCmdUI->Enable (!NTSERVICENAME[0] || WINDOWS95_SERVICE);
-	pCmdUI->SetCheck (WINDOWS95_SERVICE);
+	char	pathname[512];
+	DWORD	rc, dwtype;
+	DWORD	len = sizeof(pathname);
+
+/* See if there is an entry for prime95 */
+
+	rc = RegGetValueA (HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", "Prime95", RRF_RT_REG_SZ, &dwtype, pathname, &len);
+	startup_at_logon_set = (rc == ERROR_SUCCESS && pathname[0]);
+	pCmdUI->Enable (1);
+	pCmdUI->SetCheck (startup_at_logon_set);
 }
 
 void CPrime95Doc::OnService() 
 {
-	WINDOWS95_SERVICE = !WINDOWS95_SERVICE;
-	IniWriteInt (INI_FILE, "Windows95Service", WINDOWS95_SERVICE);
-	Service95 ();
+	char	regkey[20];
+	char	pathname[512];
+	HKEY	hkey;
+	DWORD	rc, disposition;
+
+/* Get handle to the registry entry */
+
+	if (RegCreateKeyEx (
+			HKEY_CURRENT_USER,
+			"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+			0,
+			NULL,
+			REG_OPTION_NON_VOLATILE,
+			KEY_ALL_ACCESS,
+			NULL,
+			&hkey,
+			&disposition) != ERROR_SUCCESS) {
+		OutputStr (MAIN_THREAD_NUM, "Can't access Run registry key.\n");
+		return;
+	}
+
+/* Now create or delete an entry for prime95 */
+
+	strcpy (regkey, "Prime95");
+	startup_at_logon_set = !startup_at_logon_set;
+	if (startup_at_logon_set) {
+		GetModuleFileName (NULL, pathname, sizeof (pathname));		/* Get pathname of executable */
+		rc = RegSetValueEx (hkey, regkey, 0, REG_SZ,
+				(BYTE *) pathname, (DWORD) strlen (pathname) + 1);
+		if (rc != ERROR_SUCCESS) {
+			OutputStr (MAIN_THREAD_NUM, "Can't write Run registry entry.\n");
+			return;
+		}
+	} else {
+		rc = RegDeleteValue (hkey, regkey);
+		if (rc != ERROR_SUCCESS && rc != ERROR_FILE_NOT_FOUND){
+			OutputStr (MAIN_THREAD_NUM, "Can't delete Run registry entry.\n");
+			return;
+		}
+	}
+	RegCloseKey (hkey);
 }
 
 // Window menu
@@ -1083,9 +1116,9 @@ void CPrime95Doc::OnWelcome()
 		IniWriteInt (INI_FILE, "StressTester", 0);
 		USE_PRIMENET = 1;
 		IniWriteInt (INI_FILE, "UsePrimenet", 1);
-		if (!WINDOWS95_SERVICE) OnService ();
 		OnPrimenet();
 		if (USE_PRIMENET && STARTUP_IN_PROGRESS) OnCpu ();
+		if (STARTUP_IN_PROGRESS) OnResources ();
 		if (USE_PRIMENET && STARTUP_IN_PROGRESS) OnWorkerThreads ();
 		if (USE_PRIMENET && STARTUP_IN_PROGRESS) {
 			STARTUP_IN_PROGRESS = 0;
@@ -1141,6 +1174,11 @@ void flashWindowAndBeep ()
 #else
 #define PORT	1
 #endif
+#include "cJSON.h"
+#include "cJSON.c"
+#include "pm1prob.h"
+#include "pm1prob.c"
+#include "md5.c"
 #include "comm95b.c"
 #include "comm95c.c"
 #include "commona.c"
@@ -1148,6 +1186,8 @@ void flashWindowAndBeep ()
 #include "commonc.c"
 #include "ecm.c"
 #include "primenet.c"
+#include "proof_upload.c"
+#include "proof_getdata.c"
 #include "gwtest.c"
 
 /* Do some work prior to launching worker threads */

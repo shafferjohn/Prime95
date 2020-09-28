@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2019 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
 |
 | This file contains routines and global variables that are common for
 | all operating systems the program has been ported to.  It is included
@@ -9,12 +9,6 @@
 | Commonb contains information used only during execution
 | Commonc contains information used during setup and execution
 +---------------------------------------------------------------------*/
-
-/* Routines missing from GMP */
-
-#define mpz_add_si(d,s,addin)	if (addin >= 0) mpz_add_ui(d,s,(unsigned int)addin); else mpz_sub_ui(d,s,(unsigned int)-addin);
-#define mpz_mul_d(d,s,flt)	{ mpz_t t; mpz_init_set_d(t,flt); mpz_mul(d,s,t); mpz_clear(t); }
-#define mpz_eq(a,b)		mpz_cmp(a,b) == 0
 
 /* Globals for error messages */
 
@@ -852,7 +846,7 @@ void restart_one_waiting_worker (
 void stop_workers_for_escape (void)
 {
 	if (WORKER_THREADS_ACTIVE) {
-		OutputStr (MAIN_THREAD_NUM, "Stopping all worker threads.\n");
+		OutputStr (MAIN_THREAD_NUM, "Stopping all worker windows.\n");
 		WORKER_THREADS_STOPPING = TRUE;
 		restart_waiting_workers (RESTART_ALL);
 		raiseAllWorkerThreadPriority ();
@@ -869,7 +863,7 @@ void stop_workers_for_restart (void)
 	if (WORKER_THREADS_ACTIVE &&
 	    LAUNCH_TYPE == LD_CONTINUE &&
 	    ! STOP_FOR_RESTART) {
-		OutputStr (MAIN_THREAD_NUM, "Restarting all worker threads.\n");
+		OutputStr (MAIN_THREAD_NUM, "Restarting all worker windows.\n");
 		STOP_FOR_RESTART = TRUE;
 		restart_waiting_workers (RESTART_ALL);
 		if (NUM_WORKER_THREADS > WORKER_THREADS_ACTIVE)
@@ -883,7 +877,7 @@ void stop_workers_for_restart (void)
 void stop_workers_for_add_files (void)
 {
 	if (WORKER_THREADS_ACTIVE && ! STOP_FOR_RESTART) {
-		OutputStr (MAIN_THREAD_NUM, "Restarting all worker threads to process .add file.\n");
+		OutputStr (MAIN_THREAD_NUM, "Restarting all worker windows to process .add file.\n");
 		STOP_FOR_RESTART = TRUE;
 		restart_waiting_workers (RESTART_ALL);
 	}
@@ -896,7 +890,7 @@ void stop_workers_for_add_files (void)
 void stop_workers_for_reread_ini (void)
 {
 	if (WORKER_THREADS_ACTIVE && ! STOP_FOR_REREAD_INI) {
-		OutputStr (MAIN_THREAD_NUM, "Restarting all worker threads with new timed INI settings.\n");
+		OutputStr (MAIN_THREAD_NUM, "Restarting all worker windows with new timed INI settings.\n");
 		STOP_FOR_REREAD_INI = TRUE;
 		restart_waiting_workers (RESTART_ALL);
 	}
@@ -933,7 +927,7 @@ void stop_worker_for_priority_work (
 	int	thread_num)
 {
 	if (WORKER_THREADS_ACTIVE && ! STOP_FOR_PRIORITY_WORK[thread_num]) {
-		OutputStr (thread_num, "Restarting worker to do factoring prior to LL test.\n");
+		OutputStr (thread_num, "Restarting worker to do priority work.\n");
 		STOP_FOR_PRIORITY_WORK[thread_num] = 1;
 	}
 }
@@ -1219,9 +1213,8 @@ int are_threads_using_lots_of_memory (
 
 	for (i = 0; i < (int) NUM_WORKER_THREADS; i++)
 		if (i != thread_num &&
-		    (MEM_FLAGS[i] & MEM_VARIABLE_USAGE ||
-		     MEM_FLAGS[i] & MEM_WILL_BE_VARIABLE_USAGE) &&
-		    MEM_IN_USE[i] >= 50) {
+		    (MEM_FLAGS[i] & MEM_VARIABLE_USAGE || MEM_FLAGS[i] & MEM_WILL_BE_VARIABLE_USAGE) &&
+		    MEM_IN_USE[i] >= (unsigned int) IniGetInt (LOCALINI_FILE, "HighMemThreshold", 50)) {
 			max_high_mem--;
 			if (max_high_mem == 0) return (TRUE);
 		}
@@ -1862,7 +1855,7 @@ void implement_stop_autobench (
 
 void start_priority_work_timer (void)
 {
-	if (SEQUENTIAL_WORK) return;
+	if (SEQUENTIAL_WORK == 1) return;
 	add_timed_event (TE_PRIORITY_WORK, TE_PRIORITY_WORK_FREQ);
 }
 
@@ -1876,12 +1869,14 @@ void stop_priority_work_timer (void)
 int isPriorityWork (
 	struct work_unit *w)
 {
+	if (w->work_type == WORK_CERT) return (TRUE);
 	if (w->work_type == WORK_ADVANCEDTEST) return (TRUE);
-	if ((w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK) &&
-	    (w->sieve_depth < w->factor_to || !w->pminus1ed))
-		return (TRUE);
-	if (w->work_type == WORK_PRP && w->tests_saved > 0.0)
-		return (TRUE);
+	if (SEQUENTIAL_WORK == 0) {
+		if ((w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK) && (w->sieve_depth < w->factor_to || !w->pminus1ed))
+			return (TRUE);
+		if (w->work_type == WORK_PRP && (w->sieve_depth < w->factor_to || w->tests_saved > 0.0))
+			return (TRUE);
+	}
 	return (FALSE);
 }
 
@@ -3026,7 +3021,7 @@ again:	clearThreadHandleArray ();
 /* NUM_WORKER_THREADS. */
 
 	if (stop_reason == STOP_RESTART) {
-		OutputStr (MAIN_THREAD_NUM, "Restarting all worker threads using new settings.\n");
+		OutputStr (MAIN_THREAD_NUM, "Restarting all worker windows using new settings.\n");
 		goto again;
 	}
 
@@ -3035,7 +3030,7 @@ again:	clearThreadHandleArray ();
 /* is a change to NUM_WORKER_THREADS. */
 
 	if (stop_reason == STOP_REREAD_INI) {
-		OutputStr (MAIN_THREAD_NUM, "Restarting all worker threads using new timed prime.txt settings.\n");
+		OutputStr (MAIN_THREAD_NUM, "Restarting all worker windows using new timed prime.txt settings.\n");
 		goto again;
 	}
 
@@ -3156,19 +3151,15 @@ int primeContinue (
 
 	clear_memory_restart_flags (thread_num);
 
-/* Make three passes over the worktodo.ini file looking for the ideal */
-/* piece of work to do.  In pass 1, we look for high-priority work.  This */
-/* includes trial and P-1 factoring prior to an LL test.  If a factor is */
-/* found, it can reduce the amount of work we have queued up, requiring */
-/* us to ask the server for more.  We also do AdvancedTest= lines in */
-/* pass 1.  In pass 2, we process the file in order (except for LL tests */
-/* that are not yet ready because the P-1 factoring has not completed). */
-/* In pass 3, as a last resort we start P-1 stage 2 even if they will share */
-/* memory with another P-1 in stage 2 and we start LL tests where P-1 */
-/* factoring is stalled because of low memory. */
-/* Skip first pass on large well-behaved work files. */
+/* Make three passes over the worktodo.txt file looking for the ideal piece of work to do.  In pass 1, we look */
+/* for high-priority work.  This includes certification assignments as well as trial and P-1 factoring prior to */
+/* an LL/PRP test.  If a factor is found, it can reduce the amount of work we have queued up, requiring us to ask */
+/* the server for more.  We also do AdvancedTest= lines in pass 1.  In pass 2, we process the file in order (except */
+/* for LL tests that are not yet ready because the P-1 factoring has not completed).  In pass 3, as a last resort we */
+/* start P-1 stage 2 even if they will share memory with another P-1 in stage 2 and we start LL/PRP tests where P-1 */
+/* factoring is stalled because of low memory.  Skip first pass on large well-behaved work files. */
 
-	for (pass = (WELL_BEHAVED_WORK || SEQUENTIAL_WORK) ? 2 : 1;
+	for (pass = (WELL_BEHAVED_WORK || SEQUENTIAL_WORK == 1) ? 2 : 1;
 	     pass <= 3;
 	     pass++) {
 
@@ -3235,6 +3226,12 @@ int primeContinue (
 			stop_reason = prp (thread_num, &sp_info, w, pass);
 		}
 
+/* Do proof certification work */
+
+		if (w->work_type == WORK_CERT && pass == 1) {
+			stop_reason = cert (thread_num, &sp_info, w, pass);
+		}
+
 /* Set us back to default memory usage */
 
 		set_default_memory_usage (thread_num);
@@ -3257,6 +3254,14 @@ int primeContinue (
 			stop_reason = 0;
 		}
 
+/* If a work unit is stopping but will retry later (such as an error downloading CERT start value) */
+/* then continue processing the next worktodo entry. */
+
+		if (stop_reason == STOP_RETRY_LATER) {
+			OutputStr (thread_num, "Aborting processing of this work unit -- will try again later.\n");
+			stop_reason = 0;
+		}
+
 /* If we are aborting this work unit (probably because it is being deleted) */
 /* then print a message. */
 
@@ -3276,7 +3281,7 @@ int primeContinue (
 
 	    }
 
-/* Make another pass over the worktodo.ini file */
+/* Make another pass over the worktodo.txt file */
 
 	}
 
@@ -3344,6 +3349,18 @@ check_stop_code:
 
 //bug? - only do this if two attempts are made at executing work?  Because
 // work might have been added to the front of the file???
+
+/* Added November 2019.  Check if user wants to exit when the workers run out of work. */
+
+#if defined (__linux__) || defined (__FreeBSD__)
+	{
+		int	exit_wait_time = IniGetInt (INI_FILE, "ExitWhenOutOfWork", 0);
+		if (exit_wait_time) {
+			Sleep (exit_wait_time * 1000);
+			return (0);
+		}
+	}
+#endif
 
 /* Output a message saying this worker thread is waiting for work */
 
@@ -5272,7 +5289,7 @@ begin:	factor_found = 0;
 
 /* Is exponent already factored enough? This should never happen with */
 /* WORK_FACTOR work units.  However, I suppose the user could have */
-/* manually changed the line in worktodo.ini.  So send a message to */
+/* manually changed the line in worktodo.txt.  So send a message to */
 /* server saying we didn't do any factoring but we are done with */
 /* this work unit.  Then delete the work unit. */
 
@@ -5628,6 +5645,7 @@ begin:	factor_found = 0;
 				else {
 					sprintf (buf, WRITEFILEERR, filename);
 					OutputBoth (thread_num, buf);
+					OutputBothErrno (thread_num);
 					if (fd > 0) deleteWriteSaveFile (&write_save_file_state, fd);
 				}
 				if (stop_reason) {
@@ -6432,6 +6450,53 @@ int rotateg (				/* Return false if failed due to memory allocation error */
 	return (1);
 }
 
+/* Rotate a gwnum right n bits.  Only works on Mersenne numbers. */
+
+int gwrotate_right (			// Returns TRUE if successful
+	gwhandle *gwdata,
+	gwnum	x,
+	int	shift_count)
+{
+	giant	tmp;
+
+	ASSERTG (gwdata->k == 1.0 && gwdata->b == 2 && gwdata->c == -1);
+	if (shift_count == 0) return (TRUE);
+
+/* This is not the most efficient solution as the caller often will immediately convert the result to binary. */
+/* However, it produces more readable code and we don't think this happens often enough to worry about optimization. */
+/* We could have two flavors, one that returns a giant and one that returns a gwnum. */
+
+	tmp = popg (&gwdata->gdata, ((unsigned long) gwdata->bit_length >> 5) + 5);
+	if (tmp == NULL) return (FALSE);
+
+	if (gwtogiant (gwdata, x, tmp)) {
+		pushg (&gwdata->gdata, 1);
+		return (FALSE);
+	}
+
+	// Rotate
+	rotateg (tmp, gwdata->n, shift_count, &gwdata->gdata);
+
+	// Convert back to gwnum
+	gianttogw (gwdata, tmp, x);
+
+	// Cleanup and return
+	pushg (&gwdata->gdata, 1);
+	return (TRUE);
+}
+
+/* Rotate a gwnum right n bits.  Only works on Mersenne numbers. */
+
+int gwrotate_left (			// Returns TRUE if successful
+	gwhandle *gwdata,
+	gwnum	x,
+	int	shift_count)
+{
+	ASSERTG (gwdata->k == 1.0 && gwdata->b == 2 && gwdata->c == -1);
+	if (shift_count == 0) return (TRUE);
+	return (gwrotate_right (gwdata, x, gwdata->n - shift_count));
+}
+
 /* Perform a Jacobi test on the current LL iteration.  This check has a 50% chance of catching */
 /* a calculation error.  See http://www.mersenneforum.org/showthread.php?t=22471 especially */
 /* starting at post #30. */
@@ -6528,7 +6593,7 @@ int prime (
 	double	reallyminerr = 1.0;
 	double	reallymaxerr = 0.0;
 	double	*addr1;
-	int	Jacobi_testing_enabled;
+	int	Jacobi_testing_enabled, pass_to_factor;
 	int	first_iter_msg, near_fft_limit, sleep5;
 	unsigned long high32, low32;
 	int	rc, isPrime, stop_reason;
@@ -6562,8 +6627,10 @@ int prime (
 /* to find a factor.  The P-1 test will probably be needed anyway and */
 /* may find a factor thus saving us from doing the last bit level. */
 
-	if ((w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK) &&
-	    ! IniGetInt (INI_FILE, "SkipTrialFactoring", 0)) {
+	pass_to_factor = (WELL_BEHAVED_WORK || SEQUENTIAL_WORK != 0) ? 2 : 1;
+	if (pass < pass_to_factor) return (0);
+
+	if ((w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK) && ! IniGetInt (INI_FILE, "SkipTrialFactoring", 0)) {
 		struct PriorityInfo sp_info_copy;
 		memcpy (&sp_info_copy, sp_info, sizeof (struct PriorityInfo));
 		stop_reason = primeFactor (thread_num, &sp_info_copy, w, 1);
@@ -6578,28 +6645,21 @@ int prime (
 /* In that case, skip onto doing the LL test until more memory becomes */
 /* available. */
 
-	if ((w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK) &&
-	    ! w->pminus1ed && pass != 3) {
-		int	pass_to_pfactor;
-
-		pass_to_pfactor = (WELL_BEHAVED_WORK || SEQUENTIAL_WORK) ? 2 : 1;
-		if (pass != pass_to_pfactor) return (0);
-
+	if ((w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK) && ! w->pminus1ed && pass != 3) {
 		stop_reason = pfactor (thread_num, sp_info, w);
 		if (stop_reason) return (stop_reason);
 	}
 
 /* Do the rest of the trial factoring. */
 
-	if ((w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK) &&
-	    ! IniGetInt (INI_FILE, "SkipTrialFactoring", 0)) {
+	if ((w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK) && ! IniGetInt (INI_FILE, "SkipTrialFactoring", 0)) {
 		struct PriorityInfo sp_info_copy;
 		memcpy (&sp_info_copy, sp_info, sizeof (struct PriorityInfo));
 		stop_reason = primeFactor (thread_num, &sp_info_copy, w, 0);
 		if (stop_reason) return (stop_reason);
 	}
 
-/* Done with pass 1 priority work.  Return to do more priority work. */
+/* Done with pass 1 priority work.  Return to do other priority work. */
 
 	if (pass == 1 && w->work_type != WORK_ADVANCEDTEST) return (0);
 
@@ -6621,7 +6681,7 @@ int prime (
 #endif
 
 /* Init the write save file state.  This remembers which save files are Jacobi-checked.  Do this initialization */
-/* before the restart for roundoff errors so that error recovery does not destroy thw write save file state. */
+/* before the restart for roundoff errors so that error recovery does not destroy the write save file state. */
 
 	tempFileName (w, filename);
 	writeSaveFileStateInit (&write_save_file_state, filename, NUM_JACOBI_BACKUP_FILES);
@@ -6798,11 +6858,9 @@ begin:	gwinit (&lldata.gwdata);
 /* Save if we are stopping, right after we pass an errored iteration, several iterations before retesting */
 /* an errored iteration so that we don't have to backtrack very far to do a gwsquare_carefully iteration */
 /* (we don't do the iteration immediately before because a save operation may change the FFT data and make */
-/* the error non-reproducible), if Jacobi testing, and finally save if the save file timer has gone off. */
+/* the error non-reproducible), and finally save if the save file timer has gone off. */
 
-		saving = counter+1 != p &&
-			 (stop_reason || counter == last_counter-8 || counter == last_counter ||
-			  Jacobi_testing || testSaveFilesFlag (thread_num));
+		saving = counter+1 != p && (stop_reason || counter == last_counter-8 || counter == last_counter || testSaveFilesFlag (thread_num));
 
 /* Run a Jacobi test on the last iteration and the first iteration after the Jacobi timer goes off that we */
 /* happen to be creating a save file.  This works around the minor issue where the save file timer and Jacobi timer */
@@ -7073,6 +7131,7 @@ begin:	gwinit (&lldata.gwdata);
 			if (! writeLLSaveFile (&lldata, &write_save_file_state, w, counter, error_count)) {
 				sprintf (buf, WRITEFILEERR, filename);
 				OutputBoth (thread_num, buf);
+				OutputBothErrno (thread_num);
 			}
 			if (Jacobi_testing) setWriteSaveFileSpecial (&write_save_file_state);
 		}
@@ -7137,7 +7196,12 @@ begin:	gwinit (&lldata.gwdata);
 			sprintf (interimfile, "%s.%03ld", filename, counter / INTERIM_FILES);
 			writeSaveFileStateInit (&state, interimfile, 0);
 			state.num_ordinary_save_files = 99;
-			writeLLSaveFile (&lldata, &state, w, counter, error_count);
+			if (! writeLLSaveFile (&lldata, &state, w, counter, error_count)) {
+				sprintf (buf, WRITEFILEERR, interimfile);
+				OutputBoth (thread_num, buf);
+				OutputBothErrno (thread_num);
+			}
+
 		}
 
 /* If ten iterations take 40% longer than a typical iteration, then */
@@ -7248,7 +7312,7 @@ begin:	gwinit (&lldata.gwdata);
 
 	if (isPrime && !SILENT_VICTORY && !isKnownMersennePrime (p)) {
 		gwthread thread_handle;
-		gwthread_create (&thread_handle, &good_news, (void *) p);
+		gwthread_create (&thread_handle, &good_news, (void *) (intptr_t) p);
 	}
 
 /* All done */
@@ -9621,7 +9685,7 @@ void autoBench (void)
 
 		w = getNextWorkToDoLine (tnum, w, SHORT_TERM_USE);
 		if (w == NULL) break;
-		if (w->work_type == WORK_NONE) continue;
+		if (w->work_type == WORK_NONE || w->work_type == WORK_CERT) continue;
 
 /* Ignore any worktodo entries that will not begin within the next 7 days.  No particular reason for this. */
 /* This reduces the likelihood of an excessively long autobench.  The worktodo entry might be deleted before */
@@ -10093,6 +10157,7 @@ int primeBench (
 /* PRP state to be written to / read from PRP save files */
 
 struct prp_state {
+	int	thread_num;		/* Copy of thread_num passed to prp.  Allows subroutines to output error messages. */
 	gwnum	x;			/* The current value in our left-to-right exponentiation */
 	unsigned long counter;		/* Current "iteration" counter */
 	unsigned long units_bit;	/* For shifting FFT data -- allows more robust double-checking */
@@ -10111,6 +10176,22 @@ struct prp_state {
 	unsigned long start_counter;	/* Counter at start of current Gerbicz or double-check block */
 	unsigned long next_mul_counter;	/* Counter when next Gerbicz multiply takes place */
 	unsigned long end_counter;	/* Counter when current Gerbicz or double-check block ends */
+	unsigned long proof_num_iters;	/* Number of squarings that make up a (could be partial) proof */
+	int	proof_version;		/* 1 = early v30 with excess squarings, 2 = later versions with no excess squarings */
+	int	proof_power;		/* PRP proof power (see Mihai's documents) */
+	int	proof_power_mult;	/* Run the proof power multiple times to simulate a higher power */
+	int	hashlen;		/* Size (in bits) of proof hashes.  Must be between 32 and 64 inclusive */
+	int	isProbablePrime;	/* True is PRP test found a probable prime */
+	int	have_res2048;		/* True if a 2048-bit residue is available */
+	char	residues_filename[500];	/* Filename for the proof interim residues */
+	int	residue_size;		/* Size of one proof residue in bytes */
+	int	md5_residues;		/* True if storing MD5 hash of residue along with the residue */
+	int	max_emergency_allocs;	/* Maximum allowable number of emergency proof residues to store in memory */
+	int	num_emergency_allocs;	/* Number of emergency proof residues in memory */
+	char	**emergency_allocs;	/* Array of emergency memory allocs */
+	int	first_emergency_residue_number; /* Residue number of first entry in emergency_allocs */
+	char	res2048[513];		/* 2048-bit residue at end of PRP test */
+	char	res64[17];		/* 64-bit residue at end of PRP test */
 };
 
 #define PRP_ERRCHK_NONE		0	/* No high-reliability error-checking */
@@ -10126,6 +10207,761 @@ struct prp_state {
 #define PRP_STATE_GERB_END_BLOCK	25	/* After L^2 squarings, do alt squarings to compute 2nd Gerbicz compare value */
 #define PRP_STATE_GERB_END_BLOCK_MULT	26	/* After L alt squarings, do one last mul to compute checksum #2 */
 #define PRP_STATE_GERB_FINAL_MULT	27	/* Do one last mul to compute checksum #1 and then compare checksum values */
+
+/* Create and optionally pre-fill the PRP proof interim residues file */
+
+void createProofResiduesFile (
+	gwhandle *gwdata,
+	struct prp_state *ps,
+	int	prefill)
+{
+	int	fd, i, j;
+	uint64_t total_size, randomizer, *p;
+	char	buf[65536];
+
+// Create the file to hold the interim proof residues
+
+	fd = _open (ps->residues_filename, _O_BINARY | _O_WRONLY | _O_TRUNC | _O_CREAT, CREATE_FILE_ACCESS);
+	if (fd < 0) {
+		sprintf (buf, "Cannot create PRP proof interim residues file: %s\n", ps->residues_filename);
+		OutputBoth (ps->thread_num, buf);
+		OutputBothErrno (ps->thread_num);
+		OutputBoth (ps->thread_num, "PRP test will use emergency memory to hold interim proof residues in hopes the file can be created later.\n");
+		return;
+	}
+
+// Prefill the disk space with random data in case some kind of disk compression is being used
+
+	if (prefill) {
+		// Output a message
+		sprintf (buf, "Preallocating disk space for the proof interim residues file %s\n", ps->residues_filename);
+		OutputStr (ps->thread_num, buf);
+
+		// Create a buffer filled with random data
+		srand ((unsigned) time (NULL));
+		for (i = 0; i < sizeof (buf); i++) buf[i] = rand() & 0xFF;
+
+		// Calculate how much disk space we need to fill
+		if (!ps->md5_residues)
+			total_size = (1ULL << ps->proof_power) * (uint64_t) ps->residue_size;
+		else
+			total_size = (1ULL << ps->proof_power) * (uint64_t) (ps->residue_size + 16);
+
+		// Write out the random bytes, randomize them some more each time
+		for (i = 0; i < (int) divide_rounding_up (total_size, sizeof (buf)); i++) {
+			if (_write (fd, buf, sizeof (buf)) != sizeof (buf)) {
+				int	num_residues, new_power, new_power_mult;
+				sprintf (buf, "Error pre-allocating proof interim residues file\n");
+				OutputBoth (ps->thread_num, buf);
+				OutputBothErrno (ps->thread_num);
+
+				// Calculate a new proof power based on the size we were able to allocate
+				num_residues = (int) ((uint64_t) i * (uint64_t) sizeof (buf) / (uint64_t) (ps->residue_size + 16));
+				if (num_residues <= 31) new_power = 0;	// We couldn't allocate enough disk space for a proof power of 5
+				else if (num_residues <= 63) new_power = 5, new_power_mult = 3;
+				else if (num_residues <= 127) new_power = 6, new_power_mult = 2;
+				else if (num_residues <= 255) new_power = 7, new_power_mult = 2;
+				else if (num_residues <= 511) new_power = 8, new_power_mult = 1;
+				else if (num_residues <= 1023) new_power = 9, new_power_mult = 1;
+				else new_power = 10, new_power_mult = 1;
+
+				// Truncate the file size to the requirements of the new proof power
+				if (new_power) {
+					if (_chsize_s (fd, (1ULL << new_power) * (uint64_t) (ps->residue_size + 16)) < 0) new_power = 0;
+				}
+
+				// Use the new proof power, output a message
+				if (new_power) {
+					sprintf (buf, "Will use proof power %d instead of %d.\n", new_power, ps->proof_power);
+					OutputBoth (ps->thread_num, buf);
+				} else {
+					OutputBoth (ps->thread_num, "Could not create decent sized interim proof residues file.  No PRP proof will be done.\n");
+				}
+
+				// Save new proof power
+				ps->proof_power = new_power;
+				ps->proof_power_mult = new_power_mult;
+				break;
+			}
+
+			// More randomizing the data
+			p = (uint64_t *) buf;
+			randomizer = p[i & (sizeof (buf) / 8 - 1)] << 1;
+			for (j = 0; j < sizeof (buf) / 8; j++) *p++ ^= randomizer;
+		}
+	}
+
+// Close file and return
+
+	_close (fd);
+	if (ps->proof_power == 0) _unlink (ps->residues_filename);
+}
+
+/* Figure out which iteration should save an interim proof residue */
+
+unsigned long proofResidueIteration (
+	struct prp_state *ps,
+	int	residue_number)
+{
+	unsigned long result = 0;
+	unsigned long n = ps->proof_num_iters;
+	unsigned long bit;
+	for (bit = (1 << ps->proof_power); bit; bit >>= 1) {
+		if (residue_number & bit) result += n;
+		n = (n + 1) / 2;
+	}
+	return (result);
+}
+
+/* Output one of the PRP Proof intermediate residues */
+
+void outputProofResidue (
+	gwhandle *gwdata,
+	struct prp_state *ps,
+	int	residue_number,			/* Can be zero to indicate output emergency residues sitting in memory */
+	giant	g)				/* Can be NULL to indicate output emergency residues sitting in memory */
+{
+	int	i, fd;
+
+/* If a new residue was passed in, allocate buffer and convert from giant to zero-padded binary */
+
+	if (residue_number) {
+		char	*buf, *p;
+
+/* If we are out of emergency memory, make one last try at writing residues to disk */
+
+		if (ps->num_emergency_allocs == ps->max_emergency_allocs) {
+			outputProofResidue (gwdata, ps, 0, NULL);
+			if (ps->num_emergency_allocs == ps->max_emergency_allocs) {
+				OutputBoth (ps->thread_num, "No more emergency memory is available to hold interim proof residues.\n");
+				goto abort_proof;
+			}
+		}
+
+// Allocate next emergency memory entry (in case we have a write error and need to leave the residue in memory).
+
+		buf = (char *) malloc (round_up_to_multiple_of (ps->residue_size, 4));
+		if (buf == NULL) {
+			OutputStr (ps->thread_num, "Emergency memory allocation error.\n");
+			goto abort_proof;
+		}
+		ps->emergency_allocs[ps->num_emergency_allocs++] = buf;
+		if (ps->num_emergency_allocs == 1) ps->first_emergency_residue_number = residue_number;
+
+// Format giant as a little-Endian zero-padded fixed size number of bytes
+
+		memset (buf, 0, ps->residue_size);
+		for (i = 0, p = buf; i < g->sign; i++, p += 4) {
+			p[0] = g->n[i] & 0xFF;
+			p[1] = (g->n[i] >> 8) & 0xFF;
+			p[2] = (g->n[i] >> 16) & 0xFF;
+			p[3] = (g->n[i] >> 24) & 0xFF;
+		}
+	}
+
+/* If there are no residues to write, we are done */
+
+	if (ps->num_emergency_allocs == 0) return;
+
+/* Now attempt to write residue(s) to the interim residues file */
+/* If an error occurs, we'll keep the residue in emergency memory and hope */
+/* the disk full error or network disk offline error resolves itself */
+
+	fd = _open (ps->residues_filename, _O_BINARY | _O_WRONLY | _O_CREAT, CREATE_FILE_ACCESS);
+	if (fd < 0) {
+		char	buf[1000];
+		sprintf (buf, "Cannot open PRP proof interim residues file: %s\n", ps->residues_filename);
+		OutputBoth (ps->thread_num, buf);
+		OutputBothErrno (ps->thread_num);
+		OutputStr (ps->thread_num, "Keeping proof interim residues in emergency memory in hopes problem will resolve itself.\n");
+		OutputStr (ps->thread_num, "Errors such as disk full and network disk offline can be temporary.\n");
+		return;
+	}
+
+// Output all the residues we've been saving in memory
+
+	while (ps->num_emergency_allocs) {
+		int	file_residue_number;
+
+		// Convert passed in residue number to a zero-based residue number located in the file.
+		// Proof power multiplier reduces the number of residues written.
+		file_residue_number = ps->first_emergency_residue_number - 1;
+		file_residue_number &= (1 << ps->proof_power) - 1;
+
+		// Write residue to the file
+		if (!ps->md5_residues) {		// Version 30.1 and 30.2
+			if (_lseeki64 (fd, (int64_t) file_residue_number * (int64_t) ps->residue_size, SEEK_SET) < 0 ||
+			    _write (fd, ps->emergency_allocs[0], ps->residue_size) != ps->residue_size) {
+				char	buf[1000];
+				sprintf (buf, "Error writing to PRP proof interim residues file: %s\n", ps->residues_filename);
+				OutputBoth (ps->thread_num, buf);
+				OutputBothErrno (ps->thread_num);
+				OutputStr (ps->thread_num, "Keeping proof interim residues in emergency memory in hopes problem will resolve itself.\n");
+				OutputStr (ps->thread_num, "Errors such as disk full and network disk offline can be temporary.\n");
+				break;
+			}
+		}
+
+		// Write MD5(residue) and residue to the file
+		else {
+			unsigned char MD5[16];
+			md5_digest_buffer (MD5, ps->emergency_allocs[0], ps->residue_size);
+			if (_lseeki64 (fd, (int64_t) file_residue_number * (int64_t) (ps->residue_size + 16), SEEK_SET) < 0 ||
+			    _write (fd, MD5, 16) != 16 ||
+			    _write (fd, ps->emergency_allocs[0], ps->residue_size) != ps->residue_size) {
+				char	buf[1000];
+				sprintf (buf, "Error writing to PRP proof interim residues file: %s\n", ps->residues_filename);
+				OutputBoth (ps->thread_num, buf);
+				OutputBothErrno (ps->thread_num);
+				OutputStr (ps->thread_num, "Keeping proof interim residues in emergency memory in hopes problem will resolve itself.\n");
+				OutputStr (ps->thread_num, "Errors such as disk full and network disk offline can be temporary.\n");
+				break;
+			}
+// BUG - read md5 and data and compare?  reopen file beforehand?  
+		}
+
+		// Free memory, shuffle the emergency array down
+		free (ps->emergency_allocs[0]);
+		ps->num_emergency_allocs--;
+		memmove (ps->emergency_allocs, ps->emergency_allocs + 1, ps->num_emergency_allocs * sizeof (char *));
+		ps->first_emergency_residue_number++;
+	}
+
+// All done
+
+	_close (fd);
+	return;
+
+// We've held residues in emergency memory for as long as we can.  The errors writing interim residues to disk have not gone away.
+// Sadly, we must abort doing the PRP proof.
+
+abort_proof:
+	OutputBoth (ps->thread_num, "Aborting PRP proof.\n");
+	for (i = 0; i < ps->num_emergency_allocs; i++) free (ps->emergency_allocs[i]);
+	ps->num_emergency_allocs = 0;
+	_unlink (ps->residues_filename);
+	ps->proof_power = 0;
+}
+
+#include "exponentiate.c"
+#include "proof_hash.c"
+
+// Read a residue from the big residues file or emergency memory
+int readResidue (			/* Returns TRUE if successful, FALSE for failure that might "get better", -1 for failures that won't "get better" */
+	struct prp_state *ps,
+	gwhandle *gwdata,
+	int	fd,
+	int	residue_number,		/* From 1 to 2^N.  Residue 0 was not written to the file. */
+	gwnum	x)
+{
+	int	i;
+	uint32_t *array;		/* Array to contain the binary value */
+	uint32_t arraylen;		/* Size of the array */
+
+	// Allocate an array for binary value
+	arraylen = divide_rounding_up (ps->residue_size, 4);
+	array = (uint32_t *) malloc (arraylen * sizeof(uint32_t));
+	if (array == NULL) {
+		OutputBoth (ps->thread_num, "Error allocating memory for reading PRP proof interim residue.\n");
+		return (FALSE);
+	}
+	array[arraylen-1] = 0;		// Zero-pad the top few bytes
+
+	// If residue is in emergency memory, copy it from there
+	if (ps->num_emergency_allocs && residue_number >= ps->first_emergency_residue_number) {
+		memcpy (array, ps->emergency_allocs[residue_number - ps->first_emergency_residue_number], ps->residue_size);
+	}
+
+	// Read the residue from the interim residues file
+	else {
+		if (!ps->md5_residues) {	// 30.1 and 30.2 only
+			if (_lseeki64 (fd, ((int64_t) residue_number - 1) * (int64_t) ps->residue_size, SEEK_SET) < 0 ||
+			    _read (fd, array, ps->residue_size) != ps->residue_size) {
+				OutputBoth (ps->thread_num, "Error reading PRP proof interim residues file.\n");
+				OutputBothErrno (ps->thread_num);
+				free (array);
+				return (FALSE);
+			}
+		}
+		else {
+			unsigned char expected_MD5[16];	/* Expected MD5 hash of the residue */
+			unsigned char actual_MD5[16];	/* Actual MD5 hash of the residue */
+			if (_lseeki64 (fd, ((int64_t) residue_number - 1) * (int64_t) (ps->residue_size + 16), SEEK_SET) < 0 ||
+			    _read (fd, expected_MD5, 16) != 16 ||
+			    _read (fd, array, ps->residue_size) != ps->residue_size) {
+				OutputBoth (ps->thread_num, "Error reading PRP proof interim residues file.\n");
+				OutputBothErrno (ps->thread_num);
+				free (array);
+				return (FALSE);
+			}
+			md5_digest_buffer (actual_MD5, array, ps->residue_size);
+			if (memcmp (expected_MD5, actual_MD5, 16) != 0) {
+				OutputBoth (ps->thread_num, "MD5 error reading PRP proof interim residues file.\n");
+				free (array);
+				return (-1);
+			}
+		}
+	}
+
+	// Convert from an array of bytes (LSB to MSB) to an array of uint32_t
+	for (i = 0; i < (int) arraylen; i++) {
+		uint32_t val;
+		val = ((unsigned char *)&array[i])[3];
+		val = (val << 8) + ((unsigned char *)&array[i])[2];
+		val = (val << 8) + ((unsigned char *)&array[i])[1];
+		val = (val << 8) + ((unsigned char *)&array[i])[0];
+		array[i] = val;
+	}
+
+	// Convert binary to gwnum
+	binarytogw (gwdata, array, arraylen, x);
+	free (array);
+	return (TRUE);
+}
+
+// Output a residue to the proof file
+int writeResidue (			// Returns TRUE if successful
+	struct prp_state *ps,
+	gwhandle *gwdata,
+	int	fd,
+	gwnum	x,
+	MD5_CTX *context)
+{
+	long	len;
+	int	i;
+	uint32_t *array;		/* Array to contain the binary value */
+	uint32_t arraylen;		/* Size of the array */
+
+	// Allocate an array for binary value
+	arraylen = divide_rounding_up (ps->residue_size, 4);
+	array = (uint32_t *) malloc (divide_rounding_up (ps->residue_size, 4) * sizeof(uint32_t));
+	if (array == NULL) {
+		OutputBoth (ps->thread_num, "Error allocating memory for writing PRP proof residue.\n");
+		return (FALSE);
+	}
+
+	// Convert gwnum to binary
+	len = gwtobinary (gwdata, x, array, arraylen);
+	if (len < 0) {
+		OutputBoth (ps->thread_num, "Error converting PRP proof residue to binary.\n");
+		free (array);
+		return (FALSE);
+	}
+
+	// Convert from an array of uint32_t to an array of bytes (LSB to MSB).  Zero-pad if necessary.
+	for (i = 0; i < len; i++) {
+		uint32_t val = array[i];
+		((unsigned char *)&array[i])[0] = val & 0xFF;
+		((unsigned char *)&array[i])[1] = (val >> 8) & 0xFF;
+		((unsigned char *)&array[i])[2] = (val >> 16) & 0xFF;
+		((unsigned char *)&array[i])[3] = (val >> 24) & 0xFF;
+	}
+	for ( ; i < (int) arraylen; i++) array[i] = 0;
+
+	// Write the residue
+	if (_write (fd, array, ps->residue_size) != ps->residue_size) {
+		OutputBoth (ps->thread_num, "Error writing proof file.\n");
+		OutputBothErrno (ps->thread_num);
+		free (array);
+		return (FALSE);
+	}
+	if (context != NULL) MD5Update (context, array, ps->residue_size);
+
+	// Success
+	free (array);
+	return (TRUE);
+}
+
+// Cool recursive routine to efficiently calculate a Middle residue value
+// Comes from analyzing an example that combines 16 values to form one Middle:
+// (((r0^h3 * r1)^h2 * r2^h3 * r3)^h1 * (r4^h3 * r5)^h2 * r6^h3 * r7)^h0 * ((r8^h3 * r9)^h2 * r10^h3 * r11)^h1 * (r12^h3 * r13)^h2 * r14^h3 * r15
+
+#ifdef EASY_TO_READ_CODE
+
+int calc_middle (			/* Returns TRUE if successful, FALSE for failure that might "get better", -1 for failures that won't "get better" */
+	struct prp_state *ps,
+	gwhandle *gwdata,
+	int	fd,			// File handle to array of residues
+	int	base,			// Recursion range start
+	int	end,			// Recursion range end
+	int	i,			// Process 2^i values
+	uint64_t *hash_array,		// Array of hashes
+	gwnum	result)			// Return result here
+{
+	gwnum	tmp = NULL;
+	int	rc;
+
+	if (i == 0) return (readResidue (ps, gwdata, fd, (base + end) / 2, result));	// Read and return the one residue
+	// Recurse on the first half
+	rc = calc_middle (ps, gwdata, fd, base, base + (end - base) / 2, i - 1, hash_array + 1, result);
+	if (rc <= 0) goto done;
+	exponentiate (gwdata, result, *hash_array);
+	// Recurse on the second half
+	tmp = gwalloc (gwdata);
+	rc = calc_middle (ps, gwdata, fd, base + (end - base) / 2, end, i - 1, hash_array + 1, tmp);
+	if (rc <= 0) goto done;
+	gwmul (gwdata, tmp, result);
+	rc = TRUE;
+
+/* Cleanup and return */
+
+done:	gwfree (gwdata, tmp);
+	return (rc);
+}
+
+#else					// This version saves one memory allocation
+
+int calc_middle_mult (struct prp_state *, gwhandle *, int, int, int, int, uint64_t *, gwnum);
+
+int calc_middle (			/* Returns TRUE if successful, FALSE for failure that might "get better", -1 for failures that won't "get better" */
+	struct prp_state *ps,
+	gwhandle *gwdata,
+	int	fd,			// File handle to array of residues
+	int	base,			// Recursion range start
+	int	end,			// Recursion range end
+	int	i,			// Process 2^i values
+	uint64_t *hash_array,		// Array of hashes
+	gwnum	result)			// Return result here
+{
+	int	rc;
+
+	if (i == 0) return (readResidue (ps, gwdata, fd, (base + end) / 2, result));	// Read and return the one residue
+	// Recurse on the first half
+	rc = calc_middle (ps, gwdata, fd, base, base + (end - base) / 2, i - 1, hash_array + 1, result);
+	if (rc <= 0) return (rc);
+	exponentiate (gwdata, result, *hash_array);
+	// Recurse on the second half
+	return (calc_middle_mult (ps, gwdata, fd, base + (end - base) / 2, end, i - 1, hash_array + 1, result));
+}
+
+int calc_middle_mult (			/* Returns TRUE if successful, FALSE for failure that might "get better", -1 for failures that won't "get better" */
+	struct prp_state *ps,
+	gwhandle *gwdata,
+	int	fd,			// File handle to array of residues
+	int	base,			// Recursion range start
+	int	end,			// Recursion range end
+	int	i,			// Process 2^i values
+	uint64_t *hash_array,		// Array of hashes
+	gwnum	result)			// Multiply result into here
+{
+	gwnum	tmp;
+	int	rc;
+
+	tmp = gwalloc (gwdata);
+	if (tmp == NULL) {
+		OutputBoth (ps->thread_num, "Error allocating memory for proof hash multiplications.\n");
+		return (FALSE);
+	}
+	if (i == 0) {			// Read and multiply the one residue
+		rc = readResidue (ps, gwdata, fd, (base + end) / 2, tmp);
+		if (rc <= 0) goto err;
+		gwmul (gwdata, tmp, result);
+		gwfree (gwdata, tmp);
+		return (TRUE);
+	}
+	// Recurse on the first half
+	rc = calc_middle (ps, gwdata, fd, base, base + (end - base) / 2, i - 1, hash_array + 1, tmp);
+	if (rc <= 0) goto err;
+	exponentiate (gwdata, tmp, *hash_array);
+	gwmul (gwdata, tmp, result);
+	gwfree (gwdata, tmp);
+	// Recurse on the second half
+	return (calc_middle_mult (ps, gwdata, fd, base + (end - base) / 2, end, i - 1, hash_array + 1, result));
+
+	// Cleanup on error
+err:	gwfree (gwdata, tmp);
+	return (rc);
+}
+
+#endif
+
+/* Generate the PRP proof file */
+
+int generateProofFile (
+	gwhandle *gwdata,		/* GWNUM handle */
+	struct prp_state *ps,		/* PRP state */
+	struct work_unit *w,		/* Worktodo entry */
+	int	proof_number,		/* Which of the proof_power_mult proofs we're outputting (starting at 1) */
+	char	proof_hash[33])		/* Returned MD5 hash of the entire proof file */
+{
+	int	proofgen_waits;
+	char	buf[512];
+
+// Mihai's explanation for how a proof construction works for proof power N:
+//	Hashes must all be derived from the final residue B
+//		roothash = hash(B)
+//		h0 = hash(roothash, M0)
+//		h1 = hash(h0, M1)
+//		h2 = hash(h1, M2), etc.
+//
+//	For computing the middle values M[i], we use a set of saved 2^N residues raised to powers computed from products of h[0] ... h[i-1].
+//	Thus, M0 is always stored in the proof "unadultered" by any hash). Example:
+//		M0 = residue[topK/2]
+//		M1 = residue[topK/4]^h0 * residue[3*topK/4].
+//		M2 = r[topK/8]^(h1*h0) * r[3*topK/8]^h0 * r[5*topK/8]^h1 * r[7*topK/8], etc.
+
+// Get the maximum number of 5 minute waits trying to generate the proof file.
+// We must store the current counter in the INI file when our loop is interrupted by a stop_reason.
+// Otherwise, an infinite loop could occur with the wait counter reset after each interruprion.
+
+	proofgen_waits = IniGetInt (INI_FILE, "MaxProofgenWaits", 48 * 60 / 5);		// Default is 48 hours
+	if (proofgen_waits < 1) proofgen_waits = 1;
+	proofgen_waits = IniGetInt (LOCALINI_FILE, "CurrentProofgenWaits", proofgen_waits);
+
+// Output startup message
+
+	sprintf (buf, "Generating%s proof for %s.  Proof power = %d, Hash length = %d\n",
+		 ps->proof_power_mult > 1 ? " partial" : "", gwmodulo_as_string(gwdata), ps->proof_power, ps->hashlen);
+	OutputStr (ps->thread_num, buf);
+
+// Loop until we successfully generate the proof file
+
+	for ( ; ; ) {
+		int	fd, fdout, rc, i, stop_reason;
+		int64_t	proof_file_start_offset;	
+		uint64_t h[20];
+		hash256_t rooth, *prevh, thish;
+		gwnum	M;
+		char	filename[32], proof_filename[500], tmp_proof_filename[504];
+		MD5_CTX context;
+		unsigned char digest[16];
+		char	MD5_output[33];
+
+// Init
+
+		fd = -1;
+		fdout = -1;
+		M = NULL;
+
+		MD5Init (&context);
+		M = gwalloc (gwdata);
+		if (M == NULL) {
+			OutputBoth (ps->thread_num, "Error allocating proof memory\n");
+			goto pfail;
+		}
+		gwfree_internal_memory (gwdata);
+
+// Open the PRP residues file, create or open the PRP proof file
+
+		fd = _open (ps->residues_filename, _O_BINARY | _O_RDONLY);
+		if (fd < 0) {
+			sprintf (buf, "Cannot open PRP proof interim residues file: %s\n", ps->residues_filename);
+			OutputBoth (ps->thread_num, buf);
+			OutputBothErrno (ps->thread_num);
+			goto pfail;
+		}
+		tempFileName (w, filename);
+		sprintf (proof_filename, "%s.proof", filename);
+		sprintf (tmp_proof_filename, "%s.proof.tmp", filename);
+		if (proof_number == 1)
+			fdout = _open (tmp_proof_filename, _O_BINARY | _O_WRONLY | _O_TRUNC | _O_CREAT, CREATE_FILE_ACCESS);
+		else
+			fdout = _open (tmp_proof_filename, _O_BINARY | _O_WRONLY | _O_APPEND | _O_CREAT, CREATE_FILE_ACCESS);
+		if (fdout < 0) {
+			sprintf (buf, "Cannot create PRP proof file: %s\n", proof_filename);
+			OutputBoth (ps->thread_num, buf);
+			OutputBothErrno (ps->thread_num);
+			goto pfail;
+		}
+		// Get starting file offset for later rereading for MD5 comparison hash
+		proof_file_start_offset = _lseeki64 (fdout, 0, SEEK_END);
+
+// We need to be careful in the case where user rolls back to a much older save file.  If we've written out
+// one or more proofs then we cannot overwrite them as the needed interim residues file was deleted or may have been
+// partially overwritten after the proof was generated.  Determine how many proofs have been written based on the
+// size of the file.  Silently ignore attempts at overwriting.
+
+		int proofs_written = (int) (proof_file_start_offset / ((ps->proof_power + 1) * ps->residue_size));
+		if (proofs_written >= proof_number) {
+			_close (fd);
+			_close (fdout);
+			gwfree (gwdata, M);
+			break;
+		}
+
+// Reset counters and errors, turn on error checking
+
+		gwdata->fft_count = 0;			// Reset count of FFTs performed
+		gw_clear_error (gwdata);
+		gw_clear_maxerr (gwdata);
+		gwsetnormroutine (gwdata, 0, 1, 0);	// Error checking on
+
+// Create the proof file header.  The proof file header looks like this:
+// PRP PROOF\n
+// VERSION=1\n
+// HASHSIZE=64\n
+// POWER=7x2\n
+// NUMBER=M216091\n
+
+		if (proof_number == 1) {
+			sprintf (buf, "PRP PROOF\nVERSION=%d\nHASHSIZE=%d\n", ps->proof_version, ps->hashlen);
+			if (ps->proof_power_mult == 1)
+				sprintf (buf+strlen(buf), "POWER=%d\n", ps->proof_power);
+			else
+				sprintf (buf+strlen(buf), "POWER=%dx%d\n", ps->proof_power, ps->proof_power_mult);
+			if (ps->prp_base != 3) sprintf (buf+strlen(buf), "BASE=%u\n", ps->prp_base);
+			if (_write (fdout, buf, (unsigned int) strlen (buf)) != (int) strlen (buf)) {
+				OutputBoth (ps->thread_num, "Error writing proof file header.\n");
+				OutputBothErrno (ps->thread_num);
+				goto pfail;
+			}
+			MD5Update (&context, buf, (unsigned int) strlen (buf));
+
+			// Output number.  Enclose non-Mersennes with known factors in parentheses.  Append known factors.
+			sprintf (buf, "NUMBER=");
+			if ((w->k != 1.0 || w->c != -1) && w->known_factors != NULL) strcat (buf, "(");
+			strcat (buf, gwmodulo_as_string (gwdata));
+			if ((w->k != 1.0 || w->c != -1) && w->known_factors != NULL) strcat (buf, ")");
+			if (w->known_factors != NULL) {		// Output known factors list
+				char	*p;
+				sprintf (buf + strlen (buf), "/%s", w->known_factors);
+				while ((p = strchr (buf, ',')) != NULL) *p = '/';
+			}
+			strcat (buf, "\n");
+			if (_write (fdout, buf, (unsigned int) strlen (buf)) != (int) strlen (buf)) {
+				OutputBoth (ps->thread_num, "Error writing proof file header.\n");
+				OutputBothErrno (ps->thread_num);
+				goto pfail;
+			}
+			MD5Update (&context, buf, (unsigned int) strlen (buf));
+		}
+
+		// Output final residue
+		rc = readResidue (ps, gwdata, fd, (1 << ps->proof_power), M);
+		if (rc < 0) goto pfail_wont_get_better;
+		if (!rc) goto pfail;
+		if (!writeResidue (ps, gwdata, fdout, M, &context)) goto pfail;
+
+		// Init root hash for computing middles
+		if (!roothash (gwdata, M, &rooth)) {
+			OutputBoth (ps->thread_num, "Error computing proof file root hash.\n");
+			goto pfail;
+		}
+		sprintf (buf, "Root hash = %s\n", hash_to_string (rooth));
+		OutputStr (ps->thread_num, buf);
+
+		// Write the middle residue, M0, unadulterated
+		rc = readResidue (ps, gwdata, fd, (1 << ps->proof_power) / 2, M);
+		if (rc < 0) goto pfail_wont_get_better;
+		if (!rc) goto pfail;
+		if (!writeResidue (ps, gwdata, fdout, M, &context)) goto pfail;
+
+// Iteratively computes:
+//	h0 = hash(rootH, M0)
+//	h1 = hash(h0, M1), ...
+//	M0 = residue[topK/2]
+//	M1 = residue[topK/4]^h0 * residue[3*topK/4].
+//	M2 = r[topK/8]^(h1*h0) * r[3*topK/8]^h0 * r[5*topK/8]^h1 * r[7*topK/8], etc.
+
+		for (i = 0, prevh = &rooth; i < ps->proof_power - 1; i++, prevh = &thish) {
+			if (!hash (gwdata, prevh, M, &thish)) {
+				OutputBoth (ps->thread_num, "Error computing proof file hash.\n");
+				goto pfail;
+			}
+			h[i] = truncate_hash (thish, ps->hashlen);
+			sprintf (buf, "hash%d = %016" PRIX64 "\n", i, h[i]);
+			OutputStr (ps->thread_num, buf);
+			rc = calc_middle (ps, gwdata, fd, 0, 1 << ps->proof_power, i + 1, h, M);
+			if (rc < 0) goto pfail_wont_get_better;
+			if (!rc) goto pfail;
+			if (!writeResidue (ps, gwdata, fdout, M, &context)) goto pfail;
+		}
+		MD5Final (digest, &context);
+		md5_hexdigest_from_digest (MD5_output, digest);
+
+// Close input and output files, free memory
+
+		_close (fd); fd = -1;
+		_close (fdout); fdout = -1;
+		gwfree (gwdata, M); M = NULL;
+
+// Generate an MD5 hash of the bytes just written to the proof file.  This will be a unique identifier to thwart a bad actor from uploading a counterfeit proof file.
+// Compare the MD5 generated during output to the MD5 generated by re-reading the file			
+
+		md5_hexdigest_file_from_offset (proof_hash, tmp_proof_filename, proof_file_start_offset);
+		if (strcmp (MD5_output, proof_hash) != 0) {
+			OutputBoth (ps->thread_num, "The MD5 hash of the proof file is not correct.\n");
+			goto pfail;
+		}
+
+// Return an MD5 hash of the complete proof file.  This will be a unique identifier to thwart a bad actor from uploading
+// a counterfeit proof file.
+
+		if (proof_number == ps->proof_power_mult && proof_file_start_offset != 0)
+			md5_hexdigest_file (proof_hash, tmp_proof_filename);
+
+// Check if an error occurred before publishing our proof
+
+		if (gw_test_for_error (gwdata)) {
+			OutputBoth (ps->thread_num, "An internal error occurred in the gwnum library.  Retrying proof.\n");
+			goto pfail;
+		}
+//BUG
+// In production code, switch to bigger FFT size if round off error was too high???
+#ifdef NOT_CODED_YET
+		if (gw_get_maxerr (gwdata) > 0.45) goto somewhere; ???
+#endif
+
+// Print messages, rename proof file (we used a temp file so that proof uploader thread does not see partial proof files)
+// Delete the large interim residues file
+
+		sprintf (buf, "Proof construction cost %d squarings\n", (int) ceil (gwdata->fft_count / 2.0));
+		OutputStr (ps->thread_num, buf);
+		if (proof_number == ps->proof_power_mult) {
+			unsigned long verify_cost = divide_rounding_up (ps->proof_num_iters, 1 << ps->proof_power);
+			sprintf (buf, "Proof verification will cost %lu squarings\n", verify_cost);
+			OutputStr (ps->thread_num, buf);
+			_unlink (proof_filename);
+			if (rename (tmp_proof_filename, proof_filename)) {
+				sprintf (buf, "Error renaming from %s to %s\n", tmp_proof_filename, proof_filename);
+				OutputBoth (ps->thread_num, buf);
+			}
+			_unlink (ps->residues_filename);
+		}
+		// Otherwise, delete residues file if user has option set to keep interim residues file as small as possible
+		else if (!IniGetInt (LOCALINI_FILE, "PreallocateDisk", 1)) {
+			_unlink (ps->residues_filename);
+		}
+		break;
+
+// Cleanup after a proof failure, close and delete/truncate proof file
+
+pfail_wont_get_better:
+		if (proofgen_waits > 2) proofgen_waits = 2;
+pfail:		if (fd >= 0) _close (fd);
+		if (fdout >= 0) {
+			_close (fdout);
+			if (proof_file_start_offset == 0) _unlink (tmp_proof_filename);
+			else _chsize_s (fd, proof_file_start_offset);
+		}
+		if (M != NULL) gwfree (gwdata, M);
+
+// Test 5 minute counter.  We hope that errors are due to a disk full or disk offline situation, which could resolve itself
+// over 48 hours.  We really, really do not want to give up on generating this proof!
+
+		proofgen_waits--;
+		if (proofgen_waits == 0) {		// We've run out of 5 minute waits.  Give up on trying to generate the proof file.
+			OutputBoth (ps->thread_num, "Proof generation failed.\n");
+			ps->proof_power = 0;		// Clear proof power so that JSON will report no proof file generated
+			_unlink (ps->residues_filename);
+			break;
+		}
+
+// Wait 5 minutes.  Try again to generate the proof file.
+
+		OutputStr (ps->thread_num, "Waiting 5 minutes to try proof generation again.\n");
+		stop_reason = SleepFive (ps->thread_num);
+		if (stop_reason) {
+			IniWriteInt (LOCALINI_FILE, "CurrentProofgenWaits", proofgen_waits);
+			return (stop_reason);
+		}
+	}
+
+// Clear the waits counter, return no-need-to-stop code
+
+	IniWriteString (LOCALINI_FILE, "CurrentProofgenWaits", NULL);
+	return (0);
+}
 
 /* Write intermediate PRP results to a file */
 /* The PRP save file format is: */
@@ -10148,15 +10984,23 @@ struct prp_state {
 /*	u32		error-checking start counter (version number >= 3) */
 /*	u32		error-checking next Gerbicz multiply counter (version number >= 3) */
 /*	u32		error-checking end counter (version number >= 3) */
+/*	u32		proof power (version number >= 5) */
+/*	u32		proof hash length (version number >= 5) */
+/*	u32		isProbablePrime flag (version number >= 5) */
+/*	u32		have_res2048 flag (version number >= 5) */
+/*	char[512]	res2048 (version number >= 5) */
+/*	char[16]	res64 (version number >= 5) */
+/*	u32		proof power multiplier (version number >= 6) */
+/*	u32		md5_residues flag (version number >= 6) */
 /*	gwnum		FFT data for x (u32 len, array u32s) */
 /*	gwnum		FFT data for alt_x (u32 len, array u32s) (version number >= 3) */
 /*	gwnum		FFT data for u0 (u32 len, array u32s) (version number >= 3) */
 /*	gwnum		FFT data for d (u32 len, array u32s) (version number >= 3) */
 
 #define PRP_MAGICNUM		0x87f2a91b
-#define PRP_VERSION		4
+#define PRP_VERSION		7
 
-int writePRPSaveFile (
+int writePRPSaveFile (			// Returns TRUE if successful
 	gwhandle *gwdata,
 	writeSaveFileState *write_save_file_state,
 	struct work_unit *w,
@@ -10164,55 +11008,108 @@ int writePRPSaveFile (
 {
 	int	fd;
 	unsigned long sum = 0;
+	char	buf[512];
+
+/* If there are interim proof residues sitting in emergency memory, do not write a save file.  This is because */
+/* We do not want to resume from such a save file and skip writing one or more of the proof interim residues. */
+
+	if (ps->num_emergency_allocs) {
+		outputProofResidue (gwdata, ps, 0, NULL);		// Try again to write the emergency residues
+		if (ps->num_emergency_allocs) {
+			OutputBoth (ps->thread_num, "Cannot create save files while holding proof interim residues in emergency memory.\n");
+			OutputStr (ps->thread_num, "Continuing without creating this save file.\n");
+			return (FALSE);
+		}
+	}
 
 /* Now save to the intermediate file */
 
 	fd = openWriteSaveFile (write_save_file_state);
-	if (fd < 0) return (FALSE);
+	if (fd < 0) {
+		sprintf (buf, "Unable to create PRP save file: %s\n", write_save_file_state->base_filename);
+		OutputBoth (ps->thread_num, buf);
+		OutputBothErrno (ps->thread_num);
+		return (FALSE);
+	}
 
-	if (!write_header (fd, PRP_MAGICNUM, PRP_VERSION, w)) goto err;
-
-	if (!write_long (fd, ps->error_count, &sum)) goto err;
-	if (!write_long (fd, ps->counter, &sum)) goto err;
-	if (!write_long (fd, ps->prp_base, &sum)) goto err;
-	if (!write_long (fd, ps->units_bit, &sum)) goto err;
-	if (!write_long (fd, ps->two_power_opt, &sum)) goto err;
-	if (!write_long (fd, ps->residue_type, &sum)) goto err;
-	if (!write_long (fd, ps->error_check_type, &sum)) goto err;
-	if (!write_long (fd, ps->state, &sum)) goto err;
-	if (!write_long (fd, ps->alt_units_bit, &sum)) goto err;
-	if (!write_long (fd, ps->L, &sum)) goto err;
-	if (!write_long (fd, ps->start_counter, &sum)) goto err;
-	if (!write_long (fd, ps->next_mul_counter, &sum)) goto err;
-	if (!write_long (fd, ps->end_counter, &sum)) goto err;
-	if (!write_gwnum (fd, gwdata, ps->x, &sum)) goto err;
+	if (!write_header (fd, PRP_MAGICNUM, PRP_VERSION, w)) goto writeerr;
+	if (!write_long (fd, ps->error_count, &sum)) goto writeerr;
+	if (!write_long (fd, ps->counter, &sum)) goto writeerr;
+	if (!write_long (fd, ps->prp_base, &sum)) goto writeerr;
+	if (!write_long (fd, ps->units_bit, &sum)) goto writeerr;
+	if (!write_long (fd, ps->two_power_opt, &sum)) goto writeerr;
+	if (!write_long (fd, ps->residue_type, &sum)) goto writeerr;
+	if (!write_long (fd, ps->error_check_type, &sum)) goto writeerr;
+	if (!write_long (fd, ps->state, &sum)) goto writeerr;
+	if (!write_long (fd, ps->alt_units_bit, &sum)) goto writeerr;
+	if (!write_long (fd, ps->L, &sum)) goto writeerr;
+	if (!write_long (fd, ps->start_counter, &sum)) goto writeerr;
+	if (!write_long (fd, ps->next_mul_counter, &sum)) goto writeerr;
+	if (!write_long (fd, ps->end_counter, &sum)) goto writeerr;
+	if (!write_long (fd, ps->proof_power, &sum)) goto writeerr;
+	if (!write_long (fd, ps->hashlen, &sum)) goto writeerr;
+	if (!write_long (fd, ps->isProbablePrime, &sum)) goto writeerr;
+	if (!write_long (fd, ps->have_res2048, &sum)) goto writeerr;
+	if (!write_array (fd, ps->res2048, 512, &sum)) goto writeerr;
+	if (!write_array (fd, ps->res64, 16, &sum)) goto writeerr;
+	if (!write_long (fd, ps->proof_power_mult, &sum)) goto writeerr;
+	if (!write_long (fd, ps->md5_residues, &sum)) goto writeerr;
+	if (!write_long (fd, ps->proof_version, &sum)) goto writeerr;
+	if (!write_gwnum (fd, gwdata, ps->x, &sum)) {
+		sprintf (buf, "Error writing FFT data named x, state %d, to PRP save file %s\n", ps->state, write_save_file_state->base_filename);
+		OutputBoth (ps->thread_num, buf);
+		OutputBothErrno (ps->thread_num);
+		goto err;
+	}
 
 	if (ps->state != PRP_STATE_NORMAL && ps->state != PRP_STATE_GERB_MID_BLOCK && ps->state != PRP_STATE_GERB_MID_BLOCK_MULT) {
-		if (!write_gwnum (fd, gwdata, ps->alt_x, &sum)) goto err;
+		if (!write_gwnum (fd, gwdata, ps->alt_x, &sum)) {
+			sprintf (buf, "Error writing FFT data named alt_x, state %d, PRP save file %s\n",
+				 ps->state, write_save_file_state->base_filename);
+			OutputBoth (ps->thread_num, buf);
+			OutputBothErrno (ps->thread_num);
+			goto err;
+		}
 	}
 
 	if (ps->state != PRP_STATE_NORMAL && ps->state != PRP_STATE_DCHK_PASS1 && ps->state != PRP_STATE_DCHK_PASS2 &&
 	    ps->state != PRP_STATE_GERB_START_BLOCK && ps->state != PRP_STATE_GERB_FINAL_MULT) {
-		if (!write_gwnum (fd, gwdata, ps->u0, &sum)) goto err;
+		if (!write_gwnum (fd, gwdata, ps->u0, &sum)) {
+			sprintf (buf, "Error writing FFT data named u0, state %d, PRP save file %s\n",
+				 ps->state, write_save_file_state->base_filename);
+			OutputBoth (ps->thread_num, buf);
+			OutputBothErrno (ps->thread_num);
+			goto err;
+		}
 	}
 
 	if (ps->state != PRP_STATE_NORMAL && ps->state != PRP_STATE_DCHK_PASS1 && ps->state != PRP_STATE_DCHK_PASS2 &&
 	    ps->state != PRP_STATE_GERB_START_BLOCK) {
-		if (!write_gwnum (fd, gwdata, ps->d, &sum)) goto err;
+		if (!write_gwnum (fd, gwdata, ps->d, &sum)) {
+			sprintf (buf, "Error writing FFT data named d, state %d, PRP save file %s\n",
+				 ps->state, write_save_file_state->base_filename);
+			OutputBoth (ps->thread_num, buf);
+			OutputBothErrno (ps->thread_num);
+			goto err;
+		}
 	}
 
-	if (!write_checksum (fd, sum)) goto err;
+	if (!write_checksum (fd, sum)) goto writeerr;
 
 	closeWriteSaveFile (write_save_file_state, fd);
 	return (TRUE);
 
 /* An error occured.  Delete the current file. */
 
+writeerr:
+	sprintf (buf, WRITEFILEERR, write_save_file_state->base_filename);
+	OutputBoth (ps->thread_num, buf);
+	OutputBothErrno (ps->thread_num);
 err:	deleteWriteSaveFile (write_save_file_state, fd);
 	return (FALSE);
 }
 
-/* Read the data portion of an intermediate PRP results file */
+/* Read the data portion of an intermediate PRP save file */
 
 int readPRPSaveFile (
 	gwhandle *gwdata,		/* Handle to gwnum */
@@ -10223,34 +11120,38 @@ int readPRPSaveFile (
 	int	fd;
 	unsigned long savefile_prp_base, sum, filesum, version;
 
+	// Open the save file
 	fd = _open (filename, _O_BINARY | _O_RDONLY);
 	if (fd <= 0) return (FALSE);
 
+	// Read the header
 	if (!read_magicnum (fd, PRP_MAGICNUM)) goto err;
 	if (!read_header (fd, &version, w, &filesum)) goto err;
 	if (version == 0 || version > PRP_VERSION) goto err;
 
+	// Read fields that are in all versions of the save file
 	sum = 0;
 	if (!read_long (fd, &ps->error_count, &sum)) goto err;
 	if (!read_long (fd, &ps->counter, &sum)) goto err;
 
-	if (version <= 1) {
-		savefile_prp_base = 3;
-		ps->units_bit = 0;
-		ps->two_power_opt = FALSE;
-	} else {
+	// Read in fields introduced in version 2 save files
+	if (version >= 2) {
 		unsigned long savefile_two_power_opt;
 		if (!read_long (fd, &savefile_prp_base, &sum)) goto err;
 		if (!read_long (fd, &ps->units_bit, &sum)) goto err;
 		if (!read_long (fd, &savefile_two_power_opt, &sum)) goto err;
 		ps->two_power_opt = savefile_two_power_opt;
+	} else {
+		savefile_prp_base = 3;
+		ps->units_bit = 0;
+		ps->two_power_opt = FALSE;
 	}
+
+	// Validate save file's PRP base is the desired PRP base
 	if (savefile_prp_base != ps->prp_base) goto err;
 
-	if (version <= 2) {
-		ps->state = PRP_STATE_NORMAL;
-		ps->error_check_type = PRP_ERRCHK_NONE;
-	} else {
+	// Read in fields introduced in version 3
+	if (version >= 3) {
 		unsigned long savefile_state, savefile_residue_type, savefile_error_check_type;
 		// We might be able to handle some mismatched residue types, for now don't since this should never happen
 		if (!read_long (fd, &savefile_residue_type, &sum)) goto err;
@@ -10266,6 +11167,49 @@ int readPRPSaveFile (
 		if (!read_long (fd, &ps->start_counter, &sum)) goto err;
 		if (!read_long (fd, &ps->next_mul_counter, &sum)) goto err;
 		if (!read_long (fd, &ps->end_counter, &sum)) goto err;
+	} else {
+		ps->state = PRP_STATE_NORMAL;
+		ps->error_check_type = PRP_ERRCHK_NONE;
+	}
+		
+	// Read in fields introduced in version 5
+	if (version >= 5) {
+		unsigned long savefile_proof_power, savefile_hashlen, savefile_isProbablePrime, savefile_have_res2048;
+		if (!read_long (fd, &savefile_proof_power, &sum)) goto err;
+		ps->proof_power = savefile_proof_power;
+		if (!read_long (fd, &savefile_hashlen, &sum)) goto err;
+		ps->hashlen = savefile_hashlen;
+		if (!read_long (fd, &savefile_isProbablePrime, &sum)) goto err;
+		ps->isProbablePrime = savefile_isProbablePrime;
+		if (!read_long (fd, &savefile_have_res2048, &sum)) goto err;
+		ps->have_res2048 = savefile_have_res2048;
+		if (!read_array (fd, ps->res2048, 512, &sum)) goto err;
+		ps->res2048[512] = 0;
+		if (!read_array (fd, ps->res64, 16, &sum)) goto err;
+		ps->res64[16] = 0;
+	} else {
+		ps->proof_power = 0;
+	}
+
+	// Read in fields introduced in version 6
+	if (version >= 6) {
+		unsigned long savefile_proof_power_mult, savefile_md5_residues;
+		if (!read_long (fd, &savefile_proof_power_mult, &sum)) goto err;
+		ps->proof_power_mult = savefile_proof_power_mult;
+		if (!read_long (fd, &savefile_md5_residues, &sum)) goto err;
+		ps->md5_residues = savefile_md5_residues;
+	} else {
+		ps->proof_power_mult = 1;
+		ps->md5_residues = 0;
+	}
+
+	// Read in fields introduced in version 7
+	if (version >= 7) {
+		unsigned long savefile_proof_version;
+		if (!read_long (fd, &savefile_proof_version, &sum)) goto err;
+		ps->proof_version = savefile_proof_version;
+	} else {
+		ps->proof_version = 1;
 	}
 
 	// In version 3, we did not delay the final multiply in calculation of checksum #1.
@@ -10278,7 +11222,7 @@ int readPRPSaveFile (
 	if (!read_gwnum (fd, gwdata, ps->x, &sum)) goto err;
 
 	// In version 3, we only wrote x to the save file at Gerbicz start block.  In version 4, we write x and the
-	// identical alt_x.  There is added error protection by always having at least two gwnum values in memory.
+	// identical alt_x.  There is added error protection by always having at least two gwnum values in memory / on-disk.
 	if (version == 3 && ps->state == PRP_STATE_GERB_START_BLOCK) {
 		gwcopy (gwdata, ps->x, ps->alt_x);
 		ps->alt_units_bit = ps->units_bit;
@@ -10488,8 +11432,8 @@ int prp (
 	struct prp_state ps;
 	gwhandle gwdata;
 	giant	N, exp, tmp;
-	int	first_iter_msg, res, stop_reason;
-	int	echk, near_fft_limit, sleep5, isProbablePrime;
+	int	pass_to_factor, first_iter_msg, i, res, stop_reason;
+	int	echk, near_fft_limit, sleep5;
 	int	interim_counter_off_one, interim_mul, mul_final;
 	unsigned long explen, final_counter, iters;
 	int	slow_iteration_count;
@@ -10501,8 +11445,7 @@ int prp (
 	readSaveFileState read_save_file_state; /* Manage savefile names during reading */
 	writeSaveFileState write_save_file_state; /* Manage savefile names during writing */
 	char	filename[32];
-	char	buf[400], JSONbuf[4000], fft_desc[200], res64[17], res2048[513];
-	int	have_res2048;
+	char	buf[1000], JSONbuf[4000], fft_desc[200];
 	unsigned long last_counter = 0xFFFFFFFF;/* Iteration of last error */
 	int	maxerr_recovery_mode = 0;	/* Big roundoff err rerun */
 	double	last_suminp = 0.0;
@@ -10514,30 +11457,53 @@ int prp (
 	int	error_count_messages;
 	unsigned long restart_error_count = 0;	/* On a restart, use this error count rather than the one from a save file */
 	long	restart_counter = -1;		/* On a restart, this specifies how far back to rollback save files */
+	unsigned long excess_squarings;		/* Number of extra squarings we are doing in order to generate a PRP proof */
+	int	proof_next_interim_residue;	/* The next interim residue to output */
+	unsigned long proof_next_interim_residue_iter; /* The iteration where the next interim residue occurs */
+	unsigned long initial_log2k_iters, initial_nonproof_iters, final_residue_counter;
+	int	proof_residue;			/* True if this iteration must output a PRP proof residue */
+	char	proof_hash[33];			/* 128-bit MD5 hash of the proof file */
 
 /* Init PRP state */
 
 	memset (&ps, 0, sizeof (ps));
+	ps.thread_num = thread_num;
 
-/* See if this number needs P-1 factoring.  We treat P-1 factoring */
-/* that is part of a PRP test as priority work done in pass 1 or as */
-/* regular work done in pass 2 if WellBehavedWork or SequentialWorkTodo */
-/* is set.  The only way we can get to pass 3 and P-1 still needs to be */
-/* done is if pfactor returned STOP_NOT_ENOUGH_MEM on an earlier pass. */
-/* In that case, skip onto doing the PRP test until more memory becomes */
-/* available. */
+/* Do some of the trial factoring on Mersenne numbers.  We treat factoring that is part of a PRP test as priority */
+/* work (done in pass 1).  We don't do all the trial factoring as the last bit level takes a lot of time and is */
+/* unlikely to find a factor.  The P-1 test will probably be needed anyway and may find a factor thus saving us */
+/* from doing the last bit level. */
+
+	pass_to_factor = (WELL_BEHAVED_WORK || SEQUENTIAL_WORK != 0) ? 2 : 1;
+	if (pass < pass_to_factor) return (0);
+
+	if (w->work_type == WORK_PRP && w->k == 1.0 && w->b == 2 && w->c == -1 && ! IniGetInt (INI_FILE, "SkipTrialFactoring", 0)) {
+		struct PriorityInfo sp_info_copy;
+		memcpy (&sp_info_copy, sp_info, sizeof (struct PriorityInfo));
+		stop_reason = primeFactor (thread_num, &sp_info_copy, w, 1);
+		if (stop_reason) return (stop_reason);
+	}
+
+/* See if this number needs P-1 factoring.  We treat P-1 factoring that is part of a PRP test as priority work done in pass 1 or as */
+/* regular work done in pass 2 if WellBehavedWork or SequentialWorkTodo is set.  The only way we can get to pass 3 and P-1 still needs */
+/* to be done is if pfactor returned STOP_NOT_ENOUGH_MEM on an earlier pass.  In that case, skip onto doing the PRP test until more */
+/* memory becomes available. */
 
 	if (w->work_type == WORK_PRP && w->tests_saved > 0.0 && pass != 3) {
-		int	pass_to_pfactor;
-
-		pass_to_pfactor = (WELL_BEHAVED_WORK || SEQUENTIAL_WORK) ? 2 : 1;
-		if (pass != pass_to_pfactor) return (0);
-
 		stop_reason = pfactor (thread_num, sp_info, w);
 		if (stop_reason) return (stop_reason);
 	}
 
-/* Done with pass 1 priority work.  Return to do more priority work. */
+/* Do the rest of the trial factoring. */
+
+	if (w->work_type == WORK_PRP && w->k == 1.0 && w->b == 2 && w->c == -1 && ! IniGetInt (INI_FILE, "SkipTrialFactoring", 0)) {
+		struct PriorityInfo sp_info_copy;
+		memcpy (&sp_info_copy, sp_info, sizeof (struct PriorityInfo));
+		stop_reason = primeFactor (thread_num, &sp_info_copy, w, 0);
+		if (stop_reason) return (stop_reason);
+	}
+
+/* Done with pass 1 priority work.  Return to do other priority work. */
 
 	if (pass == 1) return (0);
 
@@ -10600,6 +11566,7 @@ int prp (
 		if (ps.residue_type == PRIMENET_PRP_TYPE_FERMAT_VAR) ps.residue_type = PRIMENET_PRP_TYPE_FERMAT;
 		else if (ps.residue_type == PRIMENET_PRP_TYPE_SPRP_VAR) ps.residue_type = PRIMENET_PRP_TYPE_SPRP;
 	}
+	initial_log2k_iters = (int) floor (_log2 (w->k));
 
 /* If k=1,b=2 and we are doing a traditional Fermat PRP implementation, then interim residues are output based on the bit */
 /* representation of N = 2^n + c - 1.  N looks like this:
@@ -10629,6 +11596,72 @@ int prp (
 	if (echk == 1) ps.error_check_type = ps.two_power_opt ? PRP_ERRCHK_GERBICZ : PRP_ERRCHK_NONE;
 	if (echk == 2) ps.error_check_type = ps.two_power_opt ? PRP_ERRCHK_GERBICZ : PRP_ERRCHK_DBLCHK;
 	if (echk == 3) ps.error_check_type = PRP_ERRCHK_DBLCHK;
+
+/* Set the PRP proof power.  PRP proofs are only possible when b = 2. */
+/* For simplicity we also restrict proofs to the preferred residue types 1 or 5. */
+
+/* When using a 64-bit hash, proof power 8 and proof power 9 do roughly the same number */
+/* squarings when n=11M, power 9 and 10 do the same number at roughly 45M, and 10,11 */
+/* are equal at 170M.  For 32-bit hashes you would halve these numbers. */
+
+/* I think disk space used will be the most important concern for the average user. */
+/* Proof power 9 uses 6.4GB to test a 100Mbit number, whereas proof power 8 uses half that, */
+/* and power 10 doubles that! */
+
+/* Comparing power=8 at 100Mbits to power=9, 170000 more squarings are needed.  That is just 0.17% of a full PRP test. */
+/* Thus, we've decided to default to power=8 by defaulting the maximum disk space a worker can use to 6GB. */
+/* Users rarely change defaults. */
+
+	ps.proof_version = 2;
+	ps.proof_power = 0;
+	ps.proof_power_mult = 1;
+	// We have a way for the PrimeNet server to change (reduce) the default hashlen.  This would reduce server proof
+	// processing load somewhat.  We hope to never use this option.
+	ps.hashlen = IniSectionGetInt (INI_FILE, "PrimeNet", "ProofHashLength", 64);
+	if (ps.hashlen < 32) ps.hashlen = 32;
+	if (ps.hashlen > 64) ps.hashlen = 64;
+	// Turn on storing MD5 hash of interim residues.  Versions 30.1 and 30.2 did not do this.
+	ps.md5_residues = TRUE;
+
+	if (ps.two_power_opt && (ps.residue_type == PRIMENET_PRP_TYPE_FERMAT || ps.residue_type == PRIMENET_PRP_TYPE_COFACTOR)) {
+		double	hashlen_adjust = ps.hashlen / 64.0;
+		int	best_power = (double) w->n > hashlen_adjust * 414.2e6 ? 11 :
+				     (double) w->n > hashlen_adjust * 106.5e6 ? 10 :
+				     (double) w->n > hashlen_adjust * 26.6e6 ? 9 :
+				     (double) w->n > hashlen_adjust * 6.7e6 ? 8 :
+				     (double) w->n > hashlen_adjust * 1.7e6 ? 7 :
+				     (double) w->n > hashlen_adjust * 420e3 ? 6 :
+				     (double) w->n > hashlen_adjust * 105e3 ? 5 : 0;
+		int	power_adjust;
+
+		// Default proof power based on disk space the worker is allowed to consume
+		ps.proof_power = best_power;
+		double	disk_space = (double) (1 << ps.proof_power) * (double) (w->n / 8);
+		while (disk_space / 1.0e9 > CPU_WORKER_DISK_SPACE) ps.proof_power--, disk_space /= 2.0;
+
+		// Provide two more (undocumented) ways for the user to override our default proof power.
+		ps.proof_power = IniGetInt (INI_FILE, "ProofPower", ps.proof_power);
+		power_adjust = IniGetInt (INI_FILE, "ProofPowerAdjust", 0);
+		if (power_adjust > 2) power_adjust = 2;
+		if (power_adjust < -2) power_adjust = -2;
+		ps.proof_power += power_adjust;
+		if (ps.proof_power < 5) ps.proof_power = 0;
+		if (ps.proof_power > best_power) ps.proof_power = best_power;
+
+		// Calculate a default proof power multiplier.  Provide way for the user to override.
+		if (ps.proof_power == 8 && best_power > 10) ps.proof_power_mult = 2;
+		if (ps.proof_power == 7 && best_power > 9) ps.proof_power_mult = 2;
+		if (ps.proof_power == 6 && best_power > 8) ps.proof_power_mult = 2;
+		if (ps.proof_power == 5 && best_power > 7) ps.proof_power_mult = 3;
+		ps.proof_power_mult = IniGetInt (INI_FILE, "ProofPowerMult", ps.proof_power_mult);
+		if (ps.proof_power_mult < 1) ps.proof_power_mult = 1;
+		if (ps.proof_power_mult > 4) ps.proof_power_mult = 4;
+
+		// We have a way for the PrimeNet server to change (reduce) the proof power.  This would reduce server proof
+		// processing load somewhat and reduce the bandwidth required for obtaining proof files.  We hope to never use this option.
+		ps.proof_power = IniSectionGetInt (INI_FILE, "PrimeNet", "ProofPower", ps.proof_power);
+		ps.proof_power_mult = IniSectionGetInt (INI_FILE, "PrimeNet", "ProofPowerMult", ps.proof_power_mult);
+	}
 
 /* Init the write save file state.  This remembers which save files are Gerbicz-checked.  Do this initialization */
 /* before the restart for roundoff errors so that error recovery does not destroy thw write save file state. */
@@ -10835,9 +11868,74 @@ begin:	N = exp = NULL;
 	sprintf (buf+strlen(buf), "PRP test of %s using %s\n", string_rep, fft_desc);
 	OutputStr (thread_num, buf);
 
+// Set proof variables other than proof_power and proof_power_mult that are used even if not doing a proof
+
+	excess_squarings = 0;
+	ps.proof_num_iters = w->n;
+
+// Calculate the maximum number of proof residues we will keep in memory when unable to write
+// interim proof residues because the disk is full or network disk is offline.
+
+	if (ps.proof_power) {
+		int	max_emergency_memory;
+		double	disk_space, proof_file_size;
+
+		max_emergency_memory = IniGetInt (LOCALINI_FILE, "MaxEmergencyMemory", 1024);
+		ps.residue_size = divide_rounding_up ((int) ceil(gwdata.bit_length), 8);
+		ps.max_emergency_allocs = (int) ((double) max_emergency_memory * 1000000.0 / (double) ps.residue_size);
+		if (ps.max_emergency_allocs < 1) ps.max_emergency_allocs = 1;
+		if (ps.max_emergency_allocs > (1 << ps.proof_power)) ps.max_emergency_allocs = (1 << ps.proof_power);
+		ps.emergency_allocs = (char **) malloc (ps.max_emergency_allocs * sizeof (char *));
+
+// Create and optionally prefill the proof interim residues file
+
+		IniGetString (LOCALINI_FILE, "ProofResiduesDir", ps.residues_filename, sizeof (ps.residues_filename), NULL);
+		DirPlusFilename (ps.residues_filename, filename);
+		strcat (ps.residues_filename, ".residues");
+		if (ps.counter == 0)
+			createProofResiduesFile (&gwdata, &ps, IniGetInt (LOCALINI_FILE, "PreallocateDisk", 1));
+
+/* Calculate how many extra squarings are needed because of a version 1 PRP proof */
+
+		if (ps.proof_version == 1)
+			excess_squarings = round_up_to_multiple_of (w->n, ps.proof_power_mult << ps.proof_power) - w->n;
+
+/* Calculate the number of squarings in a full or partial proof and number of squarings that are handled outside of the proof */
+
+		ps.proof_num_iters = (w->n + excess_squarings) / ps.proof_power_mult;
+		initial_nonproof_iters = initial_log2k_iters + (w->n + excess_squarings) % ps.proof_power_mult;
+
+/* Map the current iteration (from the save file) into the next interim residue to output */
+
+		while (ps.counter >= initial_nonproof_iters + ps.proof_num_iters) initial_nonproof_iters += ps.proof_num_iters;
+		for (proof_next_interim_residue = 1; ; proof_next_interim_residue++) {
+			proof_next_interim_residue_iter = proofResidueIteration (&ps, proof_next_interim_residue);
+			if (ps.state == PRP_STATE_GERB_MID_BLOCK_MULT || ps.state == PRP_STATE_GERB_MID_BLOCK_MULT) {
+				if (ps.counter + 1 < initial_nonproof_iters + proof_next_interim_residue_iter) break;
+			} else if (ps.state == PRP_STATE_DCHK_PASS2) {
+				if (ps.end_counter < initial_nonproof_iters + proof_next_interim_residue_iter) break;
+			} else {
+				if (ps.counter < initial_nonproof_iters + proof_next_interim_residue_iter) break;
+			}
+		}
+
+/* Output a message detailing PRP proof resource usage */
+
+		disk_space = (double) (1 << ps.proof_power) * (double) (ps.residue_size + 16);
+		proof_file_size = (double) (ps.proof_power + 1) * (double) ps.residue_size * (double) ps.proof_power_mult;
+		if (ps.proof_power_mult == 1)
+			sprintf (buf, "PRP proof using power=%d and %d-bit hash size.\n", ps.proof_power, ps.hashlen);
+		else
+			sprintf (buf, "PRP proof using power=%dx%d and %d-bit hash size.\n", ps.proof_power, ps.proof_power_mult, ps.hashlen);
+		OutputStr (thread_num, buf);
+		sprintf (buf, "Proof requires %.1fGB of temporary disk space and uploading a %.0fMB proof file.\n",
+			 disk_space / 1.0e9, proof_file_size / 1.0e6);
+		OutputStr (thread_num, buf);
+	}
+
 /* Calculate the exponent we will use to do our left-to-right binary exponentiation */
 
-	exp = allocgiant ((((unsigned long) (w->n * _log2 (w->b))) >> 5) + 5);
+	exp = allocgiant (((unsigned long) (w->n * _log2 (w->b) + excess_squarings) >> 5) + 5);
 	if (exp == NULL) {
 		stop_reason = OutOfMemory (thread_num);
 		goto exit;
@@ -10856,7 +11954,7 @@ begin:	N = exp = NULL;
 		else
 			gerbicz_squarings = w->n - 1;
 		ultog (2, exp);
-		power (exp, gerbicz_squarings);
+		power (exp, gerbicz_squarings + excess_squarings);
 		dblmulg (w->k, exp);
 	}
 
@@ -10881,6 +11979,7 @@ begin:	N = exp = NULL;
 
 	explen = bitlen (exp);
 	final_counter = explen - 1;
+	final_residue_counter = final_counter - excess_squarings;
 
 /* Hyperthreading backoff is an option to pause the program when iterations */
 /* take longer than usual.  This is useful on hyperthreaded machines so */
@@ -10948,10 +12047,13 @@ begin:	N = exp = NULL;
 /* The next easiest case is double-the-work error-checking comparing residues at specified intervals */
 
 		if (ps.error_check_type == PRP_ERRCHK_DBLCHK) {
+			int	compare_interval = IniGetInt (INI_FILE, "PRPDoublecheckCompareInterval", 100000);
+			int	iters_left = final_counter;
+			iters_left = one_based_modulo (iters_left, ps.proof_num_iters);	// End partial proofs on a DCHK verified iter
+			if (compare_interval > iters_left) compare_interval = iters_left;
 			ps.state = PRP_STATE_DCHK_PASS1;
 			ps.start_counter = 0;
-			ps.end_counter = IniGetInt (INI_FILE, "PRPDoublecheckCompareInterval", 100000);
-			if (ps.end_counter > final_counter) ps.end_counter = final_counter;
+			ps.end_counter = compare_interval;
 			if (ps.units_bit == 0) {
 				gwcopy (&gwdata, ps.x, ps.alt_x);
 				ps.alt_units_bit = 0;
@@ -10984,7 +12086,7 @@ begin:	N = exp = NULL;
 			if (w->k != 1.0) {
 				ps.state = PRP_STATE_DCHK_PASS1;
 				ps.start_counter = 0;
-				ps.end_counter = (int) _log2 (w->k);
+				ps.end_counter = initial_log2k_iters;
 			} else {
 				ps.state = PRP_STATE_GERB_START_BLOCK;
 			}
@@ -11021,11 +12123,14 @@ rotateg (t1, w->n, ps.units_bit, &gwdata.gdata);
 
 		if (ps.state == PRP_STATE_GERB_START_BLOCK) {
 			int	iters_left = final_counter - ps.counter;
+			iters_left = one_based_modulo (iters_left, ps.proof_num_iters);	// End partial proofs on a Gerbicz verified iter
 			if (iters_left < 49) {
 				ps.state = PRP_STATE_DCHK_PASS1;
 				ps.start_counter = ps.counter;
-				ps.end_counter = final_counter;
-				if (ps.alt_units_bit) {		// Only Mersennes support shift counts
+				ps.end_counter = ps.counter + iters_left;
+				// Only Mersennes support shift counts.  Alt_x cannot have a different shift count when
+				// DCHK ends and GERBICZ resumes.
+				if (ps.alt_units_bit && ps.end_counter == final_counter) {
 					gwadd3 (&gwdata, ps.alt_x, ps.alt_x, ps.alt_x);
 					ps.alt_units_bit = ps.alt_units_bit + 1;
 					if (ps.alt_units_bit >= w->n) ps.alt_units_bit -= w->n;
@@ -11068,11 +12173,19 @@ rotateg (t1, w->n, ps.units_bit, &gwdata.gdata);
 		       (ps.error_check_type == PRP_ERRCHK_NONE && (near_fft_limit || ((ps.counter & 127) == 0)));
 		gw_clear_maxerr (&gwdata);
 
+/* Generate a residue for the PRP proof every approximately (n+excess_squarings)/(proof_power_mult*2^proof_power) iterations */
+
+		proof_residue = ps.proof_power &&
+				(ps.state == PRP_STATE_NORMAL || ps.state == PRP_STATE_DCHK_PASS1 || ps.state == PRP_STATE_GERB_MID_BLOCK) &&
+				ps.counter > initial_nonproof_iters &&
+				ps.counter - initial_nonproof_iters + 1 == proof_next_interim_residue_iter;
+
 /* Check if we should send residue to server, output residue to screen, or create an interediate save file */
 /* Beware that if we are PRPing a Mersenne number our iteration numbers are off by one compared to other */
 /* PRP programs, we adjust accordingly. */
 
-		sending_residue = (ps.state == PRP_STATE_NORMAL || ps.state == PRP_STATE_DCHK_PASS1 || ps.state == PRP_STATE_GERB_MID_BLOCK) &&
+		sending_residue = ps.proof_power == 0 &&
+				  (ps.state == PRP_STATE_NORMAL || ps.state == PRP_STATE_DCHK_PASS1 || ps.state == PRP_STATE_GERB_MID_BLOCK) &&
 				  ps.counter > 0 &&
 				  ((ps.counter+1-interim_counter_off_one) == 500000 ||
 				   ((ps.counter+1-interim_counter_off_one) % 5000000 == 0 && IniGetInt (INI_FILE, "SendInterimResidues", 1)));
@@ -11122,12 +12235,13 @@ rotateg (t1, w->n, ps.units_bit, &gwdata.gdata);
 				units_bit = &ps.alt_units_bit;
 			}
 
-/* Decide if we can start the next forward FFT.  This is faster, but leaves the result in an "unsavable-to-disk" state. */
+/* Decide if we can start the next forward FFT.  This is faster but leaves the result in an "unsavable-to-disk" state. */
 
 			gwstartnextfft (&gwdata,
-					!saving && !maxerr_recovery_mode && ps.counter != ps.end_counter-1 &&
-					ps.counter > 35 && ps.counter < explen-35 &&
-					!sending_residue && !interim_residue && !interim_file);
+					!saving && !maxerr_recovery_mode && ps.counter != ps.next_mul_counter-1 &&
+					ps.counter != ps.end_counter-1 && ps.counter != final_residue_counter-1 &&
+					((ps.counter > 35 && ps.counter < explen-35) || (ps.counter > explen+35 && ps.counter < final_counter)) &&
+					!proof_residue && !sending_residue && !interim_residue && !interim_file);
 
 /* Process this bit.  Use square carefully the first and last 30 iterations. */
 /* This should avoid any pathological non-random bit pattterns.  Also square */
@@ -11152,7 +12266,7 @@ echk=1;
 				maxerr_recovery_mode = 0;
 				last_counter = 0xFFFFFFFF;
 				echk = 0;
-			} else if (ps.counter < 30 || ps.counter >= final_counter-30)
+			} else if (ps.counter < 30 || (ps.counter >= explen - 30 && ps.counter <= explen + 30))
 				gwsquare_carefully (&gwdata, x);
 			else
 				gwsquare (&gwdata, x);
@@ -11176,7 +12290,7 @@ OutputStr (thread_num, "Iteration failed.\n");
 		if ((rand () & 0x7FFF) == 134)  // one out of 32768
 			*x += 5.0;
 #endif
-		
+
 /* End iteration timing and increase count of iterations completed */
 
 		end_timer (timers, 1);
@@ -11356,6 +12470,91 @@ OutputStr (thread_num, "Iteration failed.\n");
 			writeResults (buf);
 		}
 
+/* Output a PRP proof residue every approximately (n+excess_squarings)/(proof_power_mult*2^proof_power) iterations. */
+
+		if (proof_residue) {
+			tmp = popg (&gwdata.gdata, ((unsigned long) gwdata.bit_length >> 5) + 5);
+			if (gwtogiant (&gwdata, x, tmp) || tmp->sign <= 0) {
+				pushg (&gwdata.gdata, 1);
+				OutputBoth (thread_num, ERRMSG8);
+				inc_error_count (2, &ps.error_count);
+				last_counter = ps.counter;		/* create save files before and after this iteration */
+				restart_counter = -1;			/* rollback to any save file */
+				sleep5 = TRUE;
+				goto restart;
+			}
+			rotateg (tmp, w->n, *units_bit, &gwdata.gdata);
+			outputProofResidue (&gwdata, &ps, proof_next_interim_residue, tmp);
+			proof_next_interim_residue++;
+			proof_next_interim_residue_iter = proofResidueIteration (&ps, proof_next_interim_residue);
+			pushg (&gwdata.gdata, 1);
+		}
+
+/* See if we found a probable prime, generate final residue for composites */
+
+		if (ps.counter == final_residue_counter) {
+			if (ps.state == PRP_STATE_NORMAL || ps.state == PRP_STATE_GERB_MID_BLOCK || ps.state == PRP_STATE_DCHK_PASS1) {
+				tmp = popg (&gwdata.gdata, ((unsigned long) gwdata.bit_length >> 5) + 5);
+				if (gwtogiant (&gwdata, ps.x, tmp)) {
+					pushg (&gwdata.gdata, 1);
+					OutputBoth (thread_num, ERRMSG8);
+					inc_error_count (2, &ps.error_count);
+					restart_counter = -1;			/* rollback to any save file */
+					sleep5 = TRUE;
+					goto restart;
+				}
+				rotateg (tmp, w->n, ps.units_bit, &gwdata.gdata);
+				if (mul_final) basemulg (tmp, w, ps.prp_base, mul_final);
+				if (w->known_factors && ps.residue_type != PRIMENET_PRP_TYPE_COFACTOR) modg (N, tmp);
+				ps.isProbablePrime = isPRPg (tmp, N, w, ps.prp_base, ps.residue_type);
+				if (!ps.isProbablePrime) {
+					sprintf (ps.res64, "%08lX%08lX", (unsigned long) (tmp->sign > 1 ? tmp->n[1] : 0), (unsigned long) tmp->n[0]);
+					ps.have_res2048 = (tmp->sign > 64);
+					if (ps.have_res2048) {
+						int i;
+						for (i = 63; i >= 0; i--) sprintf (ps.res2048+504-i*8, "%08lX", (unsigned long) tmp->n[i]);
+					}
+				}
+				pushg (&gwdata.gdata, 1);
+			}
+
+/* If we are doing highly reliable error checking, make sure the calculation of the final residue was error free! */
+/* This is especially important if no PRP proof is being generated. */
+/* Perform the same calculations as above but use alt_x. */
+
+			if (ps.state == PRP_STATE_DCHK_PASS2) {
+				int	alt_match, alt_isProbablePrime;
+				tmp = popg (&gwdata.gdata, ((unsigned long) gwdata.bit_length >> 5) + 5);
+				if (gwtogiant (&gwdata, ps.alt_x, tmp)) {
+					pushg (&gwdata.gdata, 1);
+					OutputBoth (thread_num, ERRMSG8);
+					inc_error_count (2, &ps.error_count);
+					restart_counter = -1;			/* rollback to any save file */
+					sleep5 = TRUE;
+					goto restart;
+				}
+				rotateg (tmp, w->n, ps.alt_units_bit, &gwdata.gdata);
+				if (mul_final) basemulg (tmp, w, ps.prp_base, mul_final);
+				if (w->known_factors && ps.residue_type != PRIMENET_PRP_TYPE_COFACTOR) modg (N, tmp);
+				alt_isProbablePrime = isPRPg (tmp, N, w, ps.prp_base, ps.residue_type);
+				alt_match = (ps.isProbablePrime == alt_isProbablePrime);
+				if (alt_match && !alt_isProbablePrime) {
+					char	alt_res64[17];
+					sprintf (alt_res64, "%08lX%08lX", (unsigned long) (tmp->sign > 1 ? tmp->n[1] : 0), (unsigned long) tmp->n[0]);
+					alt_match = !strcmp (ps.res64, alt_res64);
+				}
+				if (!alt_match) {
+					pushg (&gwdata.gdata, 1);
+					OutputBoth (thread_num, ERRMSG8);
+					inc_error_count (2, &ps.error_count);
+					restart_counter = -1;			/* rollback to any save file */
+					sleep5 = TRUE;
+					goto restart;
+				}
+				pushg (&gwdata.gdata, 1);
+			}
+		}
+
 /* If double-checking, at end of pass 1 rollback counter and start computing alt_x. */
 /* If double-checking, at end of pass 2 compare values and move onto next block. */
 
@@ -11374,7 +12573,7 @@ OutputStr (thread_num, "Iteration failed.\n");
 		}
 		if (ps.state == PRP_STATE_DCHK_PASS2) {
 			if (ps.counter < ps.end_counter);		// Do next iteration
-			else if (ps.counter == ps.end_counter) {	// Switch to alt_x computations
+			else if (ps.counter == ps.end_counter) {	// Switch back to x computations
 				if (!areTwoPRPValsEqual (&gwdata, w->n, ps.x, ps.units_bit, ps.alt_x, ps.alt_units_bit)) {
 					sprintf (buf, ERRMSG6, ps.start_counter);
 					OutputBoth (thread_num, buf);
@@ -11385,13 +12584,16 @@ OutputStr (thread_num, "Iteration failed.\n");
 				}
 				/* If doing a full double-check, start next block of iterations */
 				if (ps.error_check_type == PRP_ERRCHK_DBLCHK) {
+					int	compare_interval = IniGetInt (INI_FILE, "PRPDoublecheckCompareInterval", 100000);
+					int	iters_left = final_counter - ps.counter;
+					iters_left = one_based_modulo (iters_left, ps.proof_num_iters);	// End partial proofs on a DCHK verified iter
+					if (compare_interval > iters_left) compare_interval = iters_left;
 					ps.state = PRP_STATE_DCHK_PASS1;
 					ps.start_counter = ps.counter;
-					ps.end_counter = ps.start_counter + IniGetInt (INI_FILE, "PRPDoublecheckCompareInterval", 100000);
-					if (ps.end_counter > final_counter) ps.end_counter = final_counter;
+					ps.end_counter = ps.start_counter + compare_interval;
 				}
-				/* Otherwise, we're doing the first or last few iterations of a Gerbicz error-check. */
-				/* Set state to start next Gerbicz block (in case we just computed prp_base^k). */
+				/* Otherwise, we're doing the first or last few iterations of a Gerbicz error-check.  Set state to */
+				/* start next Gerbicz block (in case we just computed prp_base^k or ended a partial proof iteration). */
 				else {
 					ps.state = PRP_STATE_GERB_START_BLOCK;
 				}
@@ -11519,17 +12721,27 @@ OutputStr (thread_num, "Iteration failed.\n");
 			}
 		}
 
+/* If we just verified the last iteration in a partial proof, then output the partial proof */
+
+		if ((ps.state == PRP_STATE_NORMAL || ps.state == PRP_STATE_DCHK_PASS1 || ps.state == PRP_STATE_GERB_START_BLOCK) &&
+		    ps.proof_power && ps.counter != final_counter && ps.counter == initial_nonproof_iters + ps.proof_num_iters) {
+			int proof_number = (ps.counter - initial_log2k_iters) / ps.proof_num_iters;
+			stop_reason = generateProofFile (&gwdata, &ps, w, proof_number, proof_hash);
+			if (stop_reason) goto exit;
+			initial_nonproof_iters += ps.proof_num_iters;
+			proof_next_interim_residue = 1;
+			proof_next_interim_residue_iter = proofResidueIteration (&ps, proof_next_interim_residue);
+		}
+
 /* Write results to a file every DISK_WRITE_TIME minutes */
 
 		if (saving) {
-			if (! writePRPSaveFile (&gwdata, &write_save_file_state, w, &ps)) {
-				sprintf (buf, WRITEFILEERR, filename);
-				OutputBoth (thread_num, buf);
+			if (writePRPSaveFile (&gwdata, &write_save_file_state, w, &ps)) {
+				// Mark save files that contain verified computations.  This will keep the save file
+				// for a longer period of time (i.e. will not be replaced by a save file that does
+				// not also contain verified computations).
+				if (saving_highly_reliable) setWriteSaveFileSpecial (&write_save_file_state);
 			}
-			// Mark save files that contain verified computations.  This will keep the save file
-			// for a longer period of time (i.e. will not be replaced by a save file that does
-			// not also contain verified computations).
-			if (saving_highly_reliable) setWriteSaveFileSpecial (&write_save_file_state);
 		}
 
 /* If an escape key was hit, write out the results and return */
@@ -11634,11 +12846,6 @@ OutputStr (thread_num, "Iteration failed.\n");
 pushg(&gwdata.gdata, 2);}
 #endif
 
-/* Free up some memory */
-
-	gwfree (&gwdata, ps.u0);
-	gwfree (&gwdata, ps.d);
-
 /* Make sure PRP state is valid.  We cannot be in the middle of a double-check or in the middle of a Gerbicz block */
 
 	if (ps.state != PRP_STATE_NORMAL && ps.state != PRP_STATE_DCHK_PASS1 && ps.state != PRP_STATE_GERB_START_BLOCK) {
@@ -11649,69 +12856,23 @@ pushg(&gwdata.gdata, 2);}
 		goto restart;
 	}
 
-/* See if we've found a probable prime.  If not, format a 64-bit residue. */
+// Free memory in case proof generation needs it
 
-	tmp = popg (&gwdata.gdata, ((unsigned long) gwdata.bit_length >> 5) + 5);
-	if (gwtogiant (&gwdata, ps.x, tmp)) {
-		pushg (&gwdata.gdata, 1);
-		OutputBoth (thread_num, ERRMSG8);
-		inc_error_count (2, &ps.error_count);
-		restart_counter = -1;			/* rollback to any save file */
-		sleep5 = TRUE;
-		goto restart;
-	}
-	rotateg (tmp, w->n, ps.units_bit, &gwdata.gdata);
-	if (mul_final) basemulg (tmp, w, ps.prp_base, mul_final);
-	if (w->known_factors && ps.residue_type != PRIMENET_PRP_TYPE_COFACTOR) modg (N, tmp);
-	isProbablePrime = isPRPg (tmp, N, w, ps.prp_base, ps.residue_type);
-	if (!isProbablePrime) {
-		sprintf (res64, "%08lX%08lX", (unsigned long) (tmp->sign > 1 ? tmp->n[1] : 0), (unsigned long) tmp->n[0]);
-		have_res2048 = (tmp->sign > 64);
-		if (have_res2048) {
-			int i;
-			for (i = 63; i >= 0; i--) sprintf (res2048+504-i*8, "%08lX", (unsigned long) tmp->n[i]);
-		}
-	}
+	gwfree (&gwdata, ps.u0);
+	gwfree (&gwdata, ps.d);
+	gwfree (&gwdata, ps.alt_x);
 	gwfree (&gwdata, ps.x);
 
-/* If we are doing highly reliable error checking, then make sure the calculation of the final residue was error free! */
-/* Perform the same calculations above but use alt_x. */
+/* Generate the proof file */
 
-	if (ps.state == PRP_STATE_DCHK_PASS1 || ps.state == PRP_STATE_GERB_START_BLOCK) {
-		int	alt_match, alt_isProbablePrime;
-		if (gwtogiant (&gwdata, ps.alt_x, tmp)) {
-			pushg (&gwdata.gdata, 1);
-			OutputBoth (thread_num, ERRMSG8);
-			inc_error_count (2, &ps.error_count);
-			restart_counter = -1;			/* rollback to any save file */
-			sleep5 = TRUE;
-			goto restart;
-		}
-		rotateg (tmp, w->n, ps.alt_units_bit, &gwdata.gdata);
-		if (mul_final) basemulg (tmp, w, ps.prp_base, mul_final);
-		if (w->known_factors && ps.residue_type != PRIMENET_PRP_TYPE_COFACTOR) modg (N, tmp);
-		alt_isProbablePrime = isPRPg (tmp, N, w, ps.prp_base, ps.residue_type);
-		alt_match = (isProbablePrime == alt_isProbablePrime);
-		if (alt_match && !alt_isProbablePrime) {
-			char	alt_res64[17];
-			sprintf (alt_res64, "%08lX%08lX", (unsigned long) (tmp->sign > 1 ? tmp->n[1] : 0), (unsigned long) tmp->n[0]);
-			alt_match = !strcmp (res64, alt_res64);
-		}
-		if (!alt_match) {
-			pushg (&gwdata.gdata, 1);
-			OutputBoth (thread_num, ERRMSG8);
-			inc_error_count (2, &ps.error_count);
-			restart_counter = -1;			/* rollback to any save file */
-			sleep5 = TRUE;
-			goto restart;
-		}
-		gwfree (&gwdata, ps.alt_x);
+	if (ps.proof_power) {
+		stop_reason = generateProofFile (&gwdata, &ps, w, ps.proof_power_mult, proof_hash);
+		if (stop_reason) goto exit;
 	}
-	pushg (&gwdata.gdata, 1);
 
 /* Print results */
 
-	if (isProbablePrime) {
+	if (ps.isProbablePrime) {
 		sprintf (buf, "%s is a probable prime", string_rep);
 		if (ps.prp_base != 3) sprintf (buf+strlen(buf), " (%u-PRP)", ps.prp_base);
 		strcat (buf, "!");
@@ -11719,7 +12880,7 @@ pushg(&gwdata.gdata, 2);}
 		sprintf (buf, "%s is not prime.  ", string_rep);
 		if (ps.prp_base != 3) sprintf (buf+strlen(buf), "Base-%u ", ps.prp_base);
 		if (ps.residue_type != PRIMENET_PRP_TYPE_FERMAT) sprintf (buf+strlen(buf), "Type-%d ", ps.residue_type);
-		sprintf (buf+strlen(buf), "RES64: %s.", res64);
+		sprintf (buf+strlen(buf), "RES64: %s.", ps.res64);
 	}
 	sprintf (buf+strlen(buf), " Wh%d: %08lX,", PORT, SEC1 (w->n));
 	if (ps.units_bit) sprintf (buf+strlen(buf), "%ld,", ps.units_bit);
@@ -11729,8 +12890,8 @@ pushg(&gwdata.gdata, 2);}
 
 /* Update the output file */
 
-	if ((isProbablePrime && IniGetInt (INI_FILE, "OutputPrimes", 0)) ||
-	    (!isProbablePrime && IniGetInt (INI_FILE, "OutputComposites", 0)))
+	if ((ps.isProbablePrime && IniGetInt (INI_FILE, "OutputPrimes", 0)) ||
+	    (!ps.isProbablePrime && IniGetInt (INI_FILE, "OutputComposites", 0)))
 		writeResults (buf);
 
 /* Print known factors */
@@ -11741,8 +12902,8 @@ pushg(&gwdata.gdata, 2);}
 		if (bigbuf != NULL) {
 			sprintf (bigbuf, "Known factors used for PRP test were: %s\n", w->known_factors);
 			OutputStr (thread_num, bigbuf);
-			if ((isProbablePrime && IniGetInt (INI_FILE, "OutputPrimes", 0)) ||
-			    (!isProbablePrime && IniGetInt (INI_FILE, "OutputComposites", 0)))
+			if ((ps.isProbablePrime && IniGetInt (INI_FILE, "OutputPrimes", 0)) ||
+			    (!ps.isProbablePrime && IniGetInt (INI_FILE, "OutputComposites", 0)))
 				writeResults (bigbuf);
 			free (bigbuf);
 		}
@@ -11752,9 +12913,10 @@ pushg(&gwdata.gdata, 2);}
 /* {"status":"C", "exponent":25000000, "known-factors":["12345","67890"], "worktype":"PRP-3", "res64":"0123456789ABCDEF", */
 /* "residue-type":1, "res2048":"BigLongString", "fft-length":4096000, "shift-count":1234567, "error-code":"00010000", */
 /* "security-code":"C6B0B26C", "program":{"name":"prime95", "version":"29.5", "build":"8"}, "timestamp":"2019-01-15 23:28:16", */
+/* "proof":{"version":1, "power":8, "power-multiplier":2, "hashsize":64, "md5":"0123456789abcdef0123456789abcdef"}, */
 /* "errors":{"gerbicz":0}, "user":"gw_2", "cpu":"basement", "aid":"FF00AA00FF00AA00FF00AA00FF00AA00"} */
 
-	sprintf (JSONbuf, "{\"status\":\"%s\"", isProbablePrime ? "P" : "C");
+	sprintf (JSONbuf, "{\"status\":\"%s\"", ps.isProbablePrime ? "P" : "C");
 	JSONaddExponent (JSONbuf, w);
 	if (w->known_factors != NULL) {
 		char	fac_string[1210];
@@ -11775,11 +12937,11 @@ pushg(&gwdata.gdata, 2);}
 		sprintf (JSONbuf+strlen(JSONbuf), ", \"known-factors\":[\"%s\"]", fac_string);
 	}
 	sprintf (JSONbuf+strlen(JSONbuf), ", \"worktype\":\"PRP-%u\"", ps.prp_base);
-	if (!isProbablePrime) {
-		sprintf (JSONbuf+strlen(JSONbuf), ", \"res64\":\"%s\"", res64);
+	if (!ps.isProbablePrime) {
+		sprintf (JSONbuf+strlen(JSONbuf), ", \"res64\":\"%s\"", ps.res64);
 		sprintf (JSONbuf+strlen(JSONbuf), ", \"residue-type\":%d", ps.residue_type);
-		if (have_res2048 && IniGetInt (INI_FILE, "OutputRes2048", 1))
-			sprintf (JSONbuf+strlen(JSONbuf), ", \"res2048\":\"%s\"", res2048);
+		if (ps.have_res2048 && IniGetInt (INI_FILE, "OutputRes2048", 1))
+			sprintf (JSONbuf+strlen(JSONbuf), ", \"res2048\":\"%s\"", ps.res2048);
 	}
 	sprintf (JSONbuf+strlen(JSONbuf), ", \"fft-length\":%lu", gwdata.FFTLEN);
 	if (ps.units_bit) sprintf (JSONbuf+strlen(JSONbuf), ", \"shift-count\":%ld", ps.units_bit);
@@ -11790,6 +12952,11 @@ pushg(&gwdata.gdata, 2);}
 		sprintf (JSONbuf+strlen(JSONbuf), ", \"errors\":{\"dblchk\":%lu}", (ps.error_count >> 20) & 0xF);
 	if (ps.error_check_type == PRP_ERRCHK_GERBICZ)
 		sprintf (JSONbuf+strlen(JSONbuf), ", \"errors\":{\"gerbicz\":%lu}", (ps.error_count >> 20) & 0xF);
+	if (ps.proof_power) {
+		sprintf (JSONbuf+strlen(JSONbuf), ", \"proof\":{\"version\":%d, \"power\":%d", ps.proof_version, ps.proof_power);
+		if (ps.proof_power_mult > 1) sprintf (JSONbuf+strlen(JSONbuf), ", \"power-multiplier\":%d", ps.proof_power_mult);
+		sprintf (JSONbuf+strlen(JSONbuf), ", \"hashsize\":%d, \"md5\":\"%s\"}", ps.hashlen, proof_hash);
+	}
 	JSONaddUserComputerAID (JSONbuf, w);
 	strcat (JSONbuf, "}\n");
 	if (IniGetInt (INI_FILE, "OutputJSON", 1)) writeResultsJSON (JSONbuf);
@@ -11802,12 +12969,12 @@ pushg(&gwdata.gdata, 2);}
 		strcpy (pkt.computer_guid, COMPUTER_GUID);
 		strcpy (pkt.assignment_uid, w->assignment_uid);
 		strcpy (pkt.message, buf);
-		pkt.result_type = isProbablePrime ? PRIMENET_AR_PRP_PRIME : PRIMENET_AR_PRP_RESULT;
+		pkt.result_type = ps.isProbablePrime ? PRIMENET_AR_PRP_PRIME : PRIMENET_AR_PRP_RESULT;
 		pkt.k = w->k;
 		pkt.b = w->b;
 		pkt.n = w->n;
 		pkt.c = w->c;
-		strcpy (pkt.residue, res64);
+		strcpy (pkt.residue, ps.res64);
 		sprintf (pkt.error_count, "%08lX", ps.error_count);
 		pkt.prp_base = ps.prp_base;
 		pkt.prp_residue_type = ps.residue_type;
@@ -11815,6 +12982,10 @@ pushg(&gwdata.gdata, 2);}
 		pkt.num_known_factors = (w->known_factors == NULL) ? 0 : countCommas (w->known_factors) + 1;
 		pkt.gerbicz = (ps.error_check_type != PRP_ERRCHK_NONE);
 		pkt.fftlen = gwfftlen (&gwdata);
+		if (ps.proof_power) {
+			pkt.proof_power = ps.proof_power;
+			strcpy (pkt.proof_hash, proof_hash);
+		}
 		pkt.done = TRUE;
 		strcpy (pkt.JSONmessage, JSONbuf);
 		spoolMessage (PRIMENET_ASSIGNMENT_RESULT, &pkt);
@@ -11826,7 +12997,7 @@ pushg(&gwdata.gdata, 2);}
 
 /* Output good news to the screen in an infinite loop */
 
-	if (isProbablePrime &&
+	if (ps.isProbablePrime &&
 	    ((!SILENT_VICTORY && w->k == 1.0 && w->b == 2 && w->c == -1 && !isKnownMersennePrime (w->n)) ||
 	     (!SILENT_VICTORY_PRP && (w->k != 1.0 || w->b != 2 || w->c != -1)))) {
 		gwthread thread_handle;
@@ -11845,6 +13016,8 @@ pushg(&gwdata.gdata, 2);}
 exit:	gwdone (&gwdata);
 	free (N);
 	free (exp);
+	for (i = 0; i < ps.num_emergency_allocs; i++) free (ps.emergency_allocs[i]);
+	free (ps.emergency_allocs);
 	return (stop_reason);
 
 /* An error occured, output a message saying we are restarting, sleep, */
@@ -11869,5 +13042,11 @@ restart:if (sleep5) OutputBoth (thread_num, ERRMSG2);
 	gwdone (&gwdata);
 	free (N);
 	free (exp);
+	for (i = 0; i < ps.num_emergency_allocs; i++) free (ps.emergency_allocs[i]);
+	free (ps.emergency_allocs);
+	ps.emergency_allocs = NULL;
+	ps.num_emergency_allocs = 0;
 	goto begin;
 }
+
+#include "cert.c"

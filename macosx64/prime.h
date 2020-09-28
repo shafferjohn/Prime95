@@ -1,4 +1,4 @@
-/* Copyright 1995-2019 Mersenne Research, Inc. */
+/* Copyright 1995-2020 Mersenne Research, Inc. */
 /* Author:  George Woltman */
 /* Email: woltman@alum.mit.edu */
 
@@ -51,6 +51,9 @@
 #define _read		read
 #define _write		write
 #define _lseek		lseek
+#define _lseeki64	lseek
+#define _fseeki64	fseek
+#define _chsize_s	ftruncate
 #define _unlink		unlink
 #define _creat		creat
 #define _chdir		chdir

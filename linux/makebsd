@@ -3,7 +3,7 @@
 # Install the curl package.  This will be installed to $(LOCALBASE) by default.
 #
 # Hwloc can be downloaded from https://www.open-mpi.org/projects/hwloc/
-# Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl
+# Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl --disable-opencl
 #
 
 CC ?= cc

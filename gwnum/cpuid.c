@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2019 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
 | Author:  George Woltman
 | Email: woltman@alum.mit.edu
 |
@@ -499,7 +499,7 @@ static	char *	BRAND_NAMES[] = {	/* From Intel Ap-485 */
 		if (family_code == 15 && model_number <= 2)
 			CPU_FLAGS |= CPU_TLB_PRIMING;
 
-/* Try to determine the CPU architecture */
+/* Try to determine the CPU architecture.  See https://en.wikichip.org/wiki/intel/cpuid#Family_15 */
 
 		if (! (CPU_FLAGS & CPU_SSE2))
 			CPU_ARCHITECTURE = CPU_ARCHITECTURE_PRE_SSE2;
@@ -540,7 +540,14 @@ static	char *	BRAND_NAMES[] = {	/* From Intel Ap-485 */
 			 (family == 6 && model == 142) ||		// Core i7, (based on Kaby Lake technology)
 			 (family == 6 && model == 158) ||		// Core i7, mobile (based on Coffee Lake technology)
 			 (family == 6 && model == 168) ||		// Core i7, (based on Coffee Lake technology)
-			 (family == 6 && model == 78))			// Core i3/i5/i7, mobile (based on Skylake technology)
+			 (family == 6 && model == 78) ||		// Core i3/i5/i7, mobile (based on Skylake technology)
+			 (family == 6 && model == 102) ||		// Core i3/i5/i7, Cannon Lake
+			 (family == 6 && model == 165) ||		// Core i3/i5/i7, Comet Lake
+			 (family == 6 && model == 106) ||		// Core i3/i5/i7, Ice Lake
+			 (family == 6 && model == 108) ||		// Core i3/i5/i7, Ice Lake
+			 (family == 6 && model == 125) ||		// Core i3/i5/i7, Ice Lake
+			 (family == 6 && model == 126) ||		// Core i3/i5/i7, Ice Lake
+			 (family == 6 && model == 140))			// Core i3/i5/i7, Tiger Lake
 			CPU_ARCHITECTURE = CPU_ARCHITECTURE_CORE_I7;
 		else if ((family == 6 && model == 28) ||
 			 (family == 6 && model == 38) ||
@@ -548,13 +555,18 @@ static	char *	BRAND_NAMES[] = {	/* From Intel Ap-485 */
 			 (family == 6 && model == 53) ||
 			 (family == 6 && model == 54) ||
 			 (family == 6 && model == 55) ||
-			 (family == 6 && model == 76) ||
+			 (family == 6 && model == 74) ||		// Silvermont
 			 (family == 6 && model == 77) ||
 			 (family == 6 && model == 90) ||
 			 (family == 6 && model == 93) ||
-			 (family == 6 && model == 92))			// Apollo Lake, mobile/laptop
+			 (family == 6 && model == 76) ||		// Airmont
+			 (family == 6 && model == 92) ||		// Goldmont
+			 (family == 6 && model == 95) ||
+			 (family == 6 && model == 122) ||		// Goldmont+
+			 (family == 6 && model == 134))			// Tremont
 			CPU_ARCHITECTURE = CPU_ARCHITECTURE_ATOM;
-		else if ((family == 6 && model == 87))			// Knight's Landing
+		else if ((family == 6 && model == 87) ||		// Knight's Landing
+			 (family == 6 && model == 133))			// Knight's Mill
 			CPU_ARCHITECTURE = CPU_ARCHITECTURE_PHI;
 		else
 			CPU_ARCHITECTURE = CPU_ARCHITECTURE_INTEL_OTHER;

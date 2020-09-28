@@ -23,9 +23,13 @@ WIN64OBJS = amd64/xmult1ax.obj amd64/xmult2.obj amd64/xmult2a_core.obj amd64/xmu
 		 amd64/r4dwpn_core.obj amd64/r4dwpn_p4.obj amd64/r4dwpn_k8.obj amd64/r4dwpn_k10.obj \
 		 amd64/r4dwpn3_core.obj amd64/r4dwpn3_p4.obj amd64/r4dwpn3_k8.obj amd64/r4dwpn3_k10.obj \
 		 amd64/r4dwpn5_core.obj amd64/r4dwpn5_p4.obj amd64/r4dwpn5_k8.obj amd64/r4dwpn5_k10.obj \
-		 amd64/ymult1ax.obj amd64/yr4_blend.obj \
-		 amd64/ymult3.obj amd64/ymult3a_core.obj amd64/ymult3ax.obj \
-		 amd64/yr4dwpn_core.obj amd64/yr4dwpn3_core.obj amd64/yr4dwpn5_core.obj \
+		 amd64/ymult1ax_core.obj amd64/ymult1ax_fma3.obj \
+		 amd64/ymult3.obj amd64/ymult3a_core.obj amd64/ymult3a_fma3.obj amd64/ymult3ax.obj \
+		 amd64/yr4_core.obj amd64/yr4_fma3.obj \
+		 amd64/yr4dwpn_core.obj amd64/yr4dwpn_fma3.obj amd64/yr4dwpn3_core.obj amd64/yr4dwpn3_fma3.obj
+		 amd64/yr4dwpn4_core.obj amd64/yr4dwpn4_fma3.obj amd64/yr4dwpn5_core.obj amd64/yr4dwpn5_fma3.obj \
+		 amd64/zmult3.obj amd64/zmult3a_skx.obj amd64/zmult3ax.obj \
+		 amd64/zr4dwpn_skx.obj amd64/zr4dwpn2_skx.obj \
 		 amd64/cpuidhlp.obj amd64/mult.obj amd64/gianthlp.obj amd64/timeit.obj
 
 LIB = gwnum.a

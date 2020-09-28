@@ -1,4 +1,5 @@
 // MainFrm.cpp : implementation of the CMainFrame class
+// Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
 //
 
 #include "stdafx.h"
@@ -9,7 +10,6 @@
 #include "Prime95View.h"
 
 #include <winreg.h>
-#include <pbt.h>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -41,7 +41,6 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWnd)
 	ON_COMMAND(IDM_STOP_CONTINUE, OnStopContinue)
 	ON_COMMAND(ID_WINDOW_TILE_HORZ, OnTile)
 	ON_COMMAND(ID_WINDOW_POSITION, OnPosition)
-	ON_MESSAGE(USR_SERVICE_STOP, OnServiceStop)
 	ON_MESSAGE(WM_POWERBROADCAST, OnPower)
 	ON_MESSAGE(MYWM_TRAYMESSAGE, OnTrayMessage)
 	ON_REGISTERED_MESSAGE(WM_TASKBARCREATED, OnTaskBarCreated)
@@ -92,8 +91,6 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 		TRACE0("Failed to create status bar\n");
 		return -1;      // fail to create
 	}
-
-	MAINFRAME_HWND = m_hWnd;
 
 	return 0;
 }
@@ -205,14 +202,6 @@ void CMainFrame::OnStopContinue()
 		PostMessage (WM_COMMAND, IDM_CONTINUE, 0);
 }
 
-LRESULT CMainFrame::OnServiceStop (WPARAM wParam, LPARAM lParam)
-{
-	if (TRAY_ICON) ((CPrime95App *)AfxGetApp())->TrayMessage (NIM_DELETE, NULL, 0);
-	ShowWindow (FALSE);
-	CloseHandle (g_hMutexInst);
-	return (0);
-}
-
 BOOL CMainFrame::DestroyWindow() 
 {
 	if (TRAY_ICON) ((CPrime95App *)AfxGetApp())->TrayMessage (NIM_DELETE, NULL, 0);
@@ -268,356 +257,7 @@ BOOL CALLBACK EnumProc (HWND hWnd, LPARAM lParam)
 
 void CMainFrame::OnEndSession (BOOL bEnding)
 {
-
-// If we are running as a service, then do not end the program at logoff
-// Instead, just remove the icon from the system tray.
-
-	if (NTSERVICENAME[0] ||
-	    (WINDOWS95_SERVICE && WM_ENDSESSION_LPARAM && isWindows95 ())) {
-		if (TRAY_ICON) {
-			((CPrime95App *)AfxGetApp())->TrayMessage (NIM_DELETE, NULL, 0);
-			WINDOWS95_TRAY_ADD = 1;
-		}
-
-// In addition a Windows NT service must take special actions.  MFC was
-// not designed to be used in a NT service as it uses Global Atoms which are
-// cleared at logoff.  This fix from knowledge base article Q164166 seems
-// to fix the problem.
-
-		if (NTSERVICENAME[0]) {
-			DWORD	dwProcessId, dwThreadId;
-			dwThreadId = GetWindowThreadProcessId (m_hWnd, &dwProcessId);
-			EnumThreadWindows (dwThreadId, EnumProc, (LPARAM) dwThreadId);
-		}
-	}
-
-// If we aren't running as a service, just do normal processing
-
-	else
-		CMDIFrameWnd::OnEndSession (bEnding);
-}
-
-/* Return true if user has permission to create and delete services */
-
-#include <winsvc.h>
-int canModifyServices ()
-{
-	SC_HANDLE schSCManager;
-
-/* All Windows 9x users have permission */
-
-	if (isWindows95 ()) return (TRUE);
-
-/* Vista won't let services interact with the desktop */
-
-	if (isWindowsVista ()) return (FALSE);
-
-/* See if Windows NT user can open service control manager */
-
-	schSCManager = OpenSCManager (
-		NULL,		// machine (NULL == local)
-		NULL,		// database (NULL == default)
-		SC_MANAGER_ALL_ACCESS);	// access required
-	if (! schSCManager) return (FALSE);
-	CloseServiceHandle (schSCManager);
-	return (TRUE);
-}
-
-/* Handle all the details for running prime95 as a service */
-
-#define RSP_SIMPLE_SERVICE	1
-#define RSP_UNREGISTER_SERVICE	0
-void Service95 ()
-{
-	char	pathname[256];
-	char	regkey[20];		/* Win9x registry name */
-	SC_HANDLE schSCManager = 0;
-	SC_HANDLE schService = 0;
-	HKEY	hkey = 0;
-	DWORD	rc, disposition;
-
-/* In Windows 95/98/Me, call RegisterServiceProcess in the Kernel */
-/* This will prevent prime95 from terminating on logoff. */
-
-	if (isWindows95 ()) {
-		HMODULE	hlib;
-		DWORD (__stdcall *proc)(DWORD, DWORD);
-
-		hlib = LoadLibrary ("KERNEL32.DLL");
-		if (!hlib) {
-			OutputStr (MAIN_THREAD_NUM, "Unable to load KERNEL32.DLL\n");
-			goto done;
-		}
-		proc = (DWORD (__stdcall *)(DWORD, DWORD))
-			GetProcAddress (hlib, "RegisterServiceProcess");
-		if (proc == NULL)
-			OutputStr (MAIN_THREAD_NUM, "Unable to find RegisterServiceProcess\n");
-		else {
-			if (WINDOWS95_SERVICE)
-				rc = (*proc) (NULL, RSP_SIMPLE_SERVICE);
-			else
-				rc = (*proc) (NULL, RSP_UNREGISTER_SERVICE);
-			if (!rc)
-				OutputStr (MAIN_THREAD_NUM, "RegisterServiceProcess failed\n");
-		}
-		FreeLibrary (hlib);
-	}
-
-/* Now we deal with making the registry entries correct for proper starting */
-/* or not starting of the service. */
-
-/* Get pathname of executable */
-
-	GetModuleFileName (NULL, pathname, sizeof (pathname));
-
-/* In Win95/98/Me, we create a registry entry for each -A command line value */
-/* We used to do this in WinNT/2000/XP, but now we just delete these old */
-/* registry entries. */
-
-	if (WINDOWS95_A_SWITCH < 0)
-		strcpy (regkey, "Prime95");
-	else
-		sprintf (regkey, "Prime95-%d", WINDOWS95_A_SWITCH);
-
-// For Windows 95/98/Me create a RunServices entry
-
-	if (isWindows95 ()) {
-		if (RegCreateKeyEx (
-				HKEY_LOCAL_MACHINE,
-				"Software\\Microsoft\\Windows\\CurrentVersion\\RunServices",
-				0,
-				NULL,
-				REG_OPTION_NON_VOLATILE,
-				KEY_ALL_ACCESS,
-				NULL,
-				&hkey,
-				&disposition) != ERROR_SUCCESS) {
-			OutputStr (MAIN_THREAD_NUM, "Can't create registry key.\n");
-			goto done;
-		}
-
-/* Now create or delete an entry for prime95 */
-
-		if (WINDOWS95_SERVICE) {
-			if (WINDOWS95_A_SWITCH >= 0) {
-				char	append[20];
-				sprintf (append, " -A%d", WINDOWS95_A_SWITCH);
-				strcat (pathname, append);
-			}
-			rc = RegSetValueEx (hkey, regkey, 0, REG_SZ,
-				(BYTE *) pathname, (DWORD) strlen (pathname) + 1);
-			if (rc != ERROR_SUCCESS) {
-				OutputStr (MAIN_THREAD_NUM, "Can't write registry value.\n");
-				goto done;
-			}
-		} else {
-			rc = RegDeleteValue (hkey, regkey);
-			if (rc != ERROR_SUCCESS && rc != ERROR_FILE_NOT_FOUND){
-				OutputStr (MAIN_THREAD_NUM, "Can't delete registry entry.\n");
-				goto done;
-			}
-		}
-		RegCloseKey (hkey);
-		hkey = 0;
-	}
-
-// For Windows NT/2000/XP we call the service control manager to maintain the
-// services database.  If we don't have administrator privileges (can't open
-// the service control manager) then simply create a registry entry to start
-// the program at logon.  So, attempt to open the service control manager on
-// NULL = local machine, NULL = default database, all access required.
-// Also Vista won't let services interact with the desktop, so we can't run
-// as a service.
-
-	else if (isWindowsVista () ||
-		 ! (schSCManager = OpenSCManager (NULL, NULL,
-						  SC_MANAGER_ALL_ACCESS))) {
-		if (RegCreateKeyEx (
-				HKEY_CURRENT_USER,
-				"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-				0,
-				NULL,
-				REG_OPTION_NON_VOLATILE,
-				KEY_ALL_ACCESS,
-				NULL,
-				&hkey,
-				&disposition) != ERROR_SUCCESS) {
-			OutputStr (MAIN_THREAD_NUM, "Can't create registry key.\n");
-			goto done;
-		}
-
-/* Now create or delete an entry for prime95 */
-
-		if (WINDOWS95_SERVICE) {
-			if (WINDOWS95_A_SWITCH >= 0) {
-				char	append[20];
-				sprintf (append, " -A%d", WINDOWS95_A_SWITCH);
-				strcat (pathname, append);
-			}
-			rc = RegSetValueEx (hkey, regkey, 0, REG_SZ,
-				(BYTE *) pathname, (DWORD) strlen (pathname) + 1);
-			if (rc != ERROR_SUCCESS) {
-				OutputStr (MAIN_THREAD_NUM, "Can't write registry value.\n");
-				goto done;
-			}
-		} else {
-			rc = RegDeleteValue (hkey, regkey);
-			if (rc != ERROR_SUCCESS && rc != ERROR_FILE_NOT_FOUND){
-				OutputStr (MAIN_THREAD_NUM, "Can't delete registry entry.\n");
-				goto done;
-			}
-		}
-		RegCloseKey (hkey);
-		hkey = 0;
-	}
-
-// Make the necessary NT/2000/XP service control changes
-
-	else {
-		char	servicename[80];
-		char	displayname[80];
-
-// Create the Windows NT service name and display name
-
-		IniGetString (LOCALINI_FILE, "ServiceName", servicename,
-			      sizeof (servicename), NULL);
-		if (servicename[0] == 0) {
-			if (WINDOWS95_A_SWITCH < 0)
-				strcpy (servicename, "Prime95 Service");
-			else
-				sprintf (servicename, "Prime95 Service-%d",
-					 WINDOWS95_A_SWITCH);
-		}
-
-		IniGetString (LOCALINI_FILE, "DisplayName", displayname,
-			      sizeof (displayname), servicename);
-
-// Create the service entry
-
-		if (WINDOWS95_SERVICE) {
-			schService = CreateService (
-				schSCManager,		// SCManager database
-				servicename,		// name of service
-				displayname,		// display name
-				SERVICE_ALL_ACCESS,	// desired access
-				SERVICE_INTERACTIVE_PROCESS |
-				SERVICE_WIN32_OWN_PROCESS,  // service type
-				SERVICE_AUTO_START,	// start type
-				SERVICE_ERROR_NORMAL,	// error control type
-				pathname,		// service's binary
-				NULL,			// no load ordering
-				NULL,			// no tag identifier
-				NULL,			// no dependencies
-				NULL,			// LocalSystem account
-				NULL);			// no password
-			if (!schService) {
-				if (GetLastError () != ERROR_SERVICE_EXISTS)
-					OutputStr (MAIN_THREAD_NUM, "Error creating service.\n");
-				goto done;
-			}
-
-// Set description for Win2K and later
-
-			if (isWindows2000 ()) {
-				SERVICE_DESCRIPTION svc_desc;
-				svc_desc.lpDescription =
-					"GIMPS client to find large prime numbers";
-				ChangeServiceConfig2 (
-					schService,
-					SERVICE_CONFIG_DESCRIPTION,
-					&svc_desc);
-			}
-		}
-
-// Remove the service entry
-
-		else {
-			schService = OpenService (
-					schSCManager,
-					servicename,
-					SERVICE_ALL_ACCESS);
-			if (!schService) {
-				if (GetLastError () != ERROR_SERVICE_DOES_NOT_EXIST)
-					OutputStr (MAIN_THREAD_NUM, "Error opening service.\n");
-				goto done;
-			}
-			if (! DeleteService (schService)) {
-				OutputStr (MAIN_THREAD_NUM, "Error deleting service.\n");
-				goto done;
-			}
-		}
-
-/* Delete the old-style (version 21) Run entry for the current user */
-
-		if (RegCreateKeyEx (
-				HKEY_CURRENT_USER,
-				"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-				0,
-				NULL,
-				REG_OPTION_NON_VOLATILE,
-				KEY_ALL_ACCESS,
-				NULL,
-				&hkey,
-				&disposition) == ERROR_SUCCESS) {
-			RegDeleteValue (hkey, regkey);
-			RegCloseKey (hkey);
-			hkey = 0;
-		}
-	}
-
-/* For Windows NT/2000/XP delete the old-style (version 21) Run entry for */
-/* the local machine */
-
-	if (! isWindows95 ()) {
-		if (RegCreateKeyEx (
-				HKEY_LOCAL_MACHINE,
-				"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-				0,
-				NULL,
-				REG_OPTION_NON_VOLATILE,
-				KEY_ALL_ACCESS,
-				NULL,
-				&hkey,
-				&disposition) == ERROR_SUCCESS) {
-			RegDeleteValue (hkey, regkey);
-			RegCloseKey (hkey);
-			hkey = 0;
-		}
-	}
-
-/* Now delete any shortcuts to the program.  We do this so that as users */
-/* upgrade from version 20 and try this menu choice they do not end up with */
-/* both a registry entry and a StartUp menu shortcut. */
-
-	if (WINDOWS95_SERVICE) {
-		char	buf[256];
-		DWORD	type;
-		DWORD	bufsize = sizeof (buf);
-
-		if (RegCreateKeyEx (
-				HKEY_CURRENT_USER,
-				"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders",
-				0,
-				NULL,
-				REG_OPTION_NON_VOLATILE,
-				KEY_ALL_ACCESS,
-				NULL,
-				&hkey,
-				&disposition) != ERROR_SUCCESS)
-			goto done;
-		if (RegQueryValueEx (hkey, "Startup", NULL, &type,
-				(BYTE *) buf, &bufsize) == ERROR_SUCCESS &&
-		    type == REG_SZ) {
-			strcat (buf, "\\prime95.lnk");
-			_unlink (buf);
-		}
-	}
-
-// Cleanup and return
-
-done:	if (schService) CloseServiceHandle (schService);
-	if (schSCManager) CloseServiceHandle (schSCManager);
-	if (hkey) RegCloseKey (hkey);
+	CMDIFrameWnd::OnEndSession (bEnding);
 }
 
 void CMainFrame::OnActivateApp(BOOL bActive, DWORD hTask) 

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="14313.18" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="14490.70" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
     <dependencies>
         <deployment identifier="macosx"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="14313.18"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="14490.70"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <objects>
@@ -133,7 +133,7 @@ DQ
                                     <rect key="frame" x="0.0" y="0.0" width="575" height="228"/>
                                     <autoresizingMask key="autoresizingMask"/>
                                     <size key="intercellSpacing" width="3" height="2"/>
-                                    <color key="backgroundColor" white="1" alpha="1" colorSpace="calibratedWhite"/>
+                                    <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
                                     <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
                                     <tableColumns>
                                         <tableColumn editable="NO" width="85" minWidth="40" maxWidth="1000" id="64">
@@ -164,16 +164,13 @@ DQ
                                                 <menu key="menu" title="OtherViews" id="110">
                                                     <items>
                                                         <menuItem title="Whatever makes the most sense" id="127"/>
-                                                        <menuItem title="First time LL tests" id="128"/>
-                                                        <menuItem title="World record sized numbers to LL test" id="111"/>
-                                                        <menuItem title="Double-check LL tests" id="129"/>
                                                         <menuItem title="First time PRP tests" id="Guu-eN-7Zg"/>
                                                         <menuItem title="World record sized numbers to PRP test" id="rGY-8y-gWt"/>
+                                                        <menuItem title="Double-check LL tests" id="129"/>
                                                         <menuItem title="Double-check PRP tests" id="hWS-vi-GlN"/>
                                                         <menuItem title="Trial factoring" id="130"/>
                                                         <menuItem title="P-1 factoring" id="131"/>
                                                         <menuItem title="100,000,000 digit numbers to PRP test" id="157"/>
-                                                        <menuItem title="100,000,000 digit numbers to LL test (not recommended)" id="8nx-Et-95H"/>
                                                         <menuItem title="First time PRP on Mersenne cofactors" id="7Ya-9P-hpZ"/>
                                                         <menuItem title="Double check PRP on Mersenne cofactors" id="h9n-d3-0HY"/>
                                                         <menuItem title="ECM for first factors of Mersenne numbers" id="155"/>
@@ -223,11 +220,11 @@ DQ
                                 </tableView>
                             </subviews>
                         </clipView>
-                        <scroller key="horizontalScroller" hidden="YES" verticalHuggingPriority="750" horizontal="YES" id="61">
+                        <scroller key="horizontalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="YES" id="61">
                             <rect key="frame" x="1" y="229" width="575" height="16"/>
                             <autoresizingMask key="autoresizingMask"/>
                         </scroller>
-                        <scroller key="verticalScroller" hidden="YES" verticalHuggingPriority="750" horizontal="NO" id="60">
+                        <scroller key="verticalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="NO" id="60">
                             <rect key="frame" x="561" y="17" width="15" height="285"/>
                             <autoresizingMask key="autoresizingMask"/>
                         </scroller>

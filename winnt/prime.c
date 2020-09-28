@@ -19,14 +19,21 @@
 #define PORT	5
 #include "gwnum.h"
 #include "gwutil.h"
+#include "cJSON.h"
+#include "cJSON.c"
+#include "pm1prob.h"
+#include "pm1prob.c"
+#include "md5.c"
 #include "commona.c"
 #include "commonb.c"
 #include "commonc.c"
 #include "ecm.c"
 #include "comm95b.c"
-#define _WIN32_WINNT 0x0502	// (Windows 2003 Server - same as afx_v32.h for sddl.h)
+//#define _WIN32_WINNT 0x0502	// (Windows 2003 Server - same as afx_v32.h for sddl.h)
 #include "comm95c.c"
 #include "primenet.c"
+#include "proof_upload.c"
+#include "proof_getdata.c"
 #include "gwtest.c"
 
 void create_window (

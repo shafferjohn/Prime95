@@ -9,7 +9,7 @@
 // THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 // PARTICULAR PURPOSE.
 //
-// Copyright (c) 1997-2019 Mersenne Research, Inc. All Rights Reserved.
+// Copyright (c) 1997-2020 Mersenne Research, Inc. All Rights Reserved.
 //
 //  MODULE:   primenet.c
 //
@@ -23,6 +23,7 @@
 //	      Woltman 10/2005, Version 5 API support, CURL library
 //	      Woltman 9/2017, Added interim residues to AP msg, added PRP support
 //	      Woltman 9/2019, Added PRP dblchk support
+//	      Woltman 6/2020, Added PRP Proof support, removed sockets support
 //
 //  ASSUMPTIONS: 1. less than 4k of data is sent or received per call
 //               2. HTTP/1.1
@@ -46,26 +47,13 @@
 
 #ifdef _WINDOWS_
 #include <curl.h>
-#include <winsock.h>
 #else
 #include <curl/curl.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
 #include <errno.h>
-#include <arpa/inet.h>
 #ifndef __IBMC__
 #include <unistd.h>
 #endif
 typedef int SOCKET;
-#endif
-
-#if defined (__EMX__) && ! defined (AOUT)
-#define htonl(x) (lswap(x))
-#define ntohl(x) (lswap(x))
-#define htons(x) (bswap(x))
-#define ntohs(x) (bswap(x))
-unsigned short bswap(unsigned short);
 #endif
 
 static const char iniSection[] = "PrimeNet";
@@ -77,31 +65,6 @@ static const char szFILE[] = "/v5server/?";		/* HTTP GET string */
 #define PROXY_HOST_BUFSIZE	120
 #define PROXY_USER_BUFSIZE	50
 #define PROXY_PASSWORD_BUFSIZE	50
-
-/* implement the missing inet_aton call */
-
-#if defined (_WINDOWS_) || defined (__EMX__)
-int inet_aton (char *cp, struct in_addr *inp)
-{
-	u_long temp;
- 
-	temp = inet_addr(cp);
-	if (temp == -1) return (0);
-	inp->s_addr = temp;
-	return (1);
-}
-#endif
-
-/* Routine to get the error number after a failed sockets call */
-
-int getLastSocketError (void)
-{
-#ifdef _WINDOWS_
-	return (WSAGetLastError ());
-#else
-	return (errno);
-#endif
-}
 
 /* simple password de/scrambler */
 
@@ -136,70 +99,6 @@ void unscramble (char *s)
 	*z = 0;
 	strcpy (s, out);
 }
-
-/* base64 encode for basic proxy passwords */
-
-static const char encode[] = {
-  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
-  'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
-  'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X',
-  'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
-  'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n',
-  'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
-  'w', 'x', 'y', 'z', '0', '1', '2', '3',
-  '4', '5', '6', '7', '8', '9', '+', '/'
-};
-
-/* Base64-encode a null-terminated string. */
-
-void encode64 (
-	char	*data)
-{
-	char	*s, *end, *buf;
-	unsigned int x;
-	size_t	length;
-	int	i, j;
-	char	temp[400];
-
-	length = strlen (data);
-	if (length == 0) return;
-
-	end = data + length - 3;
-
-	buf = temp;
-	for (s = data; s < end; ) {
-		x = *s++ << 24;
-		x |= *s++ << 16;
-		x |= *s++ << 8;
-
-		*buf++ = encode[x >> 26];
-		x <<= 6;
-		*buf++ = encode[x >> 26];
-		x <<= 6;
-		*buf++ = encode[x >> 26];
-		x <<= 6;
-		*buf++ = encode[x >> 26];
-	}
-	end += 3;
-
-	x = 0;
-	for (i = 0; s < end; i++)
-		x |= *s++ << (24 - 8 * i);
-
-	for (j = 0; j < 4; j++) {
-		if (8 * i >= 6 * j) {
-			*buf++ = encode [x >> 26];
-			x <<= 6;
-		} else {
-			*buf++ = '=';
-		}
-	}
-
-	*buf = 0;
-
-	strcpy (data, temp);
-}
-
 
 /* Get proxy information from INI file */
 
@@ -256,308 +155,6 @@ void getProxyInfo (
 
 /*///////////////////////////////////////////////////////////////////////////
 //
-// HTTP GET procedure (Sockets Implementation)
-//
-///////////////////////////////////////////////////////////////////////////*/
-
-/*
-// pnHttpServer: Uses GET to send a formatted HTTP argument string
-//               and downloads the server result page
-*/
-
-int pnHttpServer (char *pbuf, unsigned cbuf, char* postargs)
-{
-	char	szBuffer[1000];
-	char	szURL[4096];			/* URL assembly buffer */
-	char	buf[4096];
-	struct in_addr defaddr;
-	struct hostent *hp, def;
-	struct sockaddr_in sn;
-	SOCKET	s;
-	int	res, debug, url_format;
-	int	timeout;
-	char	*alist[1];
-	unsigned int count;
-	char	szProxyHost[PROXY_HOST_BUFSIZE];
-	char	szProxyUser[PROXY_USER_BUFSIZE];
-	char	szProxyPassword[PROXY_PASSWORD_BUFSIZE];
-	char	szSITE[80];
-	char	*con_host;
-	char	szOtherGetInfo[256];
-	unsigned short nProxyPort, con_port;
-
-/* Get debug logging and URL format flags */
-
-	debug = IniSectionGetInt (INI_FILE, iniSection, "Debug", 0);
-	url_format = IniSectionGetInt (INI_FILE, iniSection, "UseFullURL", 2);
- 
-/* Use MersenneIP setting so that SeventeenOrBust can use the */
-/* UseCurl=0 option. */
-
-	IniSectionGetString (INI_FILE, iniSection, "MersenneIP", szSITE, sizeof (szSITE), szSITEstr);
-
-/* Get information about the optional proxy server */
-
-	getProxyInfo (szProxyHost, &nProxyPort, szProxyUser, szProxyPassword);
-	if (szProxyHost[0]) {
-		con_host = szProxyHost;
-		con_port = nProxyPort;
-	}
-
-/* No proxy server - use default site (mersenne.org) */
-
-	else {
-		con_host = szSITE;
-		con_port = nHostPort;
-	}
-
-/* Output debug info */
-
-redirect:
-	if (debug) {
-		sprintf (buf, "host = %s, port = %d\n", con_host, con_port);
-		LogMsg (buf);
-	}
-
-/* Convert host name into an IP address */
-
-	hp = gethostbyname (con_host);
-	if (!hp) {
-		if (!inet_aton (con_host, &defaddr)) {
-			sprintf (buf, "Unknown host: %s\n", con_host);
-			if (debug) LogMsg (buf);
-			else OutputStr (COMM_THREAD_NUM, buf);
-			return (PRIMENET_ERROR_CONNECT_FAILED);
-		}
-		alist[0] = (char *) &defaddr;
-		def.h_name = szSITE;
-		def.h_addr_list = alist;
-		def.h_length = sizeof (struct in_addr);
-		def.h_addrtype = AF_INET;
-		def.h_aliases = 0;
-		hp = &def;
-	}
-
-	if (debug) {
-		sprintf (buf, "IP-addr = %s\n", inet_ntoa (*(struct in_addr *)hp->h_addr));
-		LogMsg (buf);
-	}
-
-	memset (&sn, 0, sizeof (sn));
-	sn.sin_family = hp->h_addrtype;
-	if (hp->h_length > (int) sizeof (sn.sin_addr)) {
-		hp->h_length = sizeof (sn.sin_addr);
-	}
-	memcpy (&sn.sin_addr, hp->h_addr, hp->h_length);
-	sn.sin_port = htons (con_port);
-
-/* Create a socket and connect to server */
-
-rel_url:
-	if ((s = socket (hp->h_addrtype, SOCK_STREAM, 0)) < 0) {
-		sprintf (buf, "Error in socket call: %d\n", getLastSocketError ());
-		if (debug) LogMsg (buf);
-		else OutputStr (COMM_THREAD_NUM, buf);
-		return (PRIMENET_ERROR_CONNECT_FAILED);
-	}
-
-	if (connect (s, (struct sockaddr *) &sn, sizeof (sn)) < 0) {
-		sprintf (buf, "Error in connect call: %d\n", getLastSocketError ());
-		if (debug) LogMsg (buf);
-		else OutputStr (COMM_THREAD_NUM, buf);
-		closesocket (s);
-		return (PRIMENET_ERROR_CONNECT_FAILED);
-	}
-
-/* Prevent SIGPIPE signals in OS X, BSD and other environments */
-
-#ifdef SO_NOSIGPIPE
-	{
-		int	i = 1;
-		res = setsockopt (s, SOL_SOCKET, SO_NOSIGPIPE, &i, sizeof(i));
-		if (res < 0) {
-			if (debug) {
-				sprintf (buf, "Error in NOSIGPIPE call: %d\n", getLastSocketError ());
-				LogMsg (buf);
-			}
-		}
-	}
-#endif
-
-/* GET method, data follows ? in URL */
-
-	strcpy (szURL, "GET ");
-	if (*szProxyHost || url_format == 1) {
-		strcat (szURL, "http://");
-		strcat (szURL, szSITE);
-		if (IniSectionGetInt (INI_FILE, iniSection, "SendPortNumber", 1))
-			sprintf (szURL + strlen (szURL), ":%d", nHostPort);
-	}
-	strcat (szURL, szFILE);
-	strcat (szURL, postargs);
-	strcat (szURL, " HTTP/1.1\r\n");
-
-/* Append host: header */
-
-	if (!*szProxyHost)
-		sprintf (szURL+strlen(szURL), "Host: %s\r\n", szSITE);
-
-/* Persistent connections are not supported */
-
-	strcat (szURL, "Connection: close\r\n");
-
-/* Append other GET info */
-
-	IniSectionGetString (INI_FILE, iniSection, "OtherGetInfo", szOtherGetInfo,
-		sizeof (szOtherGetInfo), NULL);
-	if (*szOtherGetInfo) {
-		strcat (szURL, szOtherGetInfo);
-		strcat (szURL, "\r\n");
-	}
-
-/* Append proxy authorization here */
-
-	if (*szProxyHost && *szProxyUser) {
-		char	buf[200];
-		strcat (szURL, "Proxy-Authorization: Basic ");
-		sprintf (buf, "%s:%s", szProxyUser, szProxyPassword);
-		encode64 (buf);
-		strcat (szURL, buf);
-		strcat (szURL, "\r\n");
-	}
-
-	strcat (szURL, "\r\n");
-	if (debug) LogMsg (szURL);
-
-/* Send the URL request */
-
-	timeout = 90000;		/* 90 seconds */
-	res = setsockopt (s, SOL_SOCKET, SO_SNDTIMEO, (char *) &timeout, sizeof (timeout));
-	if (res < 0) {
-		if (debug) {
-			sprintf (buf, "Error in send timeout call: %d\n", getLastSocketError ());
-			LogMsg (buf);
-		}
-	}
-	res = send (s, szURL, (int) strlen (szURL), 0
-#ifdef MSG_NOSIGNAL /* Prevent SIGPIPE in Linux (and others) */
-		    | MSG_NOSIGNAL
-#endif
-		    );
-	if (res < 0) {
-		sprintf (buf, "Error in send call: %d\n", getLastSocketError ());
-		if (debug) LogMsg (buf);
-		else OutputStr (COMM_THREAD_NUM, buf);
-		closesocket (s);
-		if (url_format == 2 && *szProxyHost == 0) {
-			if (debug) LogMsg ("Trying full URL\n");
-			url_format = 1;
-			goto rel_url;
-		}
-		return (PRIMENET_ERROR_SEND_FAILED);
-	}
-
-/* Now accumulate the response */
-
-	timeout = 90000;		/* 90 seconds */
-	res = setsockopt (s, SOL_SOCKET, SO_RCVTIMEO, (char *) &timeout, sizeof (timeout));
-	if (res < 0) {
-		if (debug) {
-			sprintf (buf, "Error in receive timeout call: %d\n", getLastSocketError ());
-			LogMsg (buf);
-		}
-	}
-	*pbuf = 0; count = 1;
-	while (count < cbuf) {
-		res = recv (s, szBuffer, 999, 0);
-		if (res < 0) {
-			sprintf (buf, "Error in recv call: %d\n", getLastSocketError ());
-			if (debug) LogMsg (buf);
-			else OutputStr (COMM_THREAD_NUM, buf);
-			closesocket (s);
-			if (url_format == 2 && *szProxyHost == 0) {
-				if (debug) LogMsg ("Trying full URL\n");
-				url_format = 1;
-				goto rel_url;
-			}
-			return (PRIMENET_ERROR_RECV_FAILED);
-		}
-		if (res == 0) break;
-		szBuffer[res] = 0;
-		if (debug) {
-			sprintf (buf, "RECV: %s\n", szBuffer);
-			LogMsg (buf);
-		}
-		if ((count + strlen(szBuffer)) >= cbuf)
-			szBuffer[cbuf - count] = 0;
-		strcat (pbuf, szBuffer);
-		count += (unsigned int) strlen (szBuffer);
-	}
-
-	closesocket (s);
-
-/* pbuf + 9 is where the message code following HTTP/1.1 starts */
-
-	if (count <= 10) res = -1;
-	else res = atoi (pbuf + 9);
-
-/* Some proxy servers can redirect us to another host.  These are */
-/* the 300 series of error codes.  This code probably isn't right. */
-/* We can improve it as people find problems. */
-
-	if (res >= 300 && res <= 399) {
-		char	*location, *colon;
-		location = strstr (pbuf, "Location:");
-		if (location != NULL) {
-			if (debug) LogMsg ("Attempting a redirect.\n");
-			location += 9;
-			while (isspace (*location)) location++;
-			strcpy (szProxyHost, location);
-
-/* Parse the redirection address */
-
-			if ((location[0] == 'H' || location[0] == 'h') &&
-			    (location[1] == 'T' || location[1] == 't') &&
-			    (location[2] == 'T' || location[2] == 't') &&
-			    (location[3] == 'P' || location[3] == 'p') &&
-			    location[4] == ':' && location[5] == '/' &&
-			    location[6] == '/')
-				safe_strcpy (location, location + 7);
-			con_host = location;
-
-/* Get optional port number */
-
-			if ((colon = strchr (location, ':')) != NULL) {
-				con_port = (unsigned short) atoi (colon + 1);
-				*colon = 0;
-			} else
-				con_port = 80;
-			goto redirect;
-		}
-	}
-
-/* Any return code other than 200 is an error.  We've had problems using */
-/* both full URLs and relative URLs.  Thus, our default behavior is to try */
-/* both before giving up. */
-
-	if (res != 200) {
-		if (url_format == 2 && *szProxyHost == 0) {
-			if (debug) LogMsg ("Trying full URL\n");
-			url_format = 1;
-			goto rel_url;
-		}
-		strcpy (buf, "HTTP return code is not 200\n");
-		if (debug) LogMsg (buf);
-		else OutputStr (COMM_THREAD_NUM, buf);
-		return (PRIMENET_ERROR_SERVER_UNSPEC);
-	}
-
-	return (PRIMENET_NO_ERROR);
-}
-
-
-/*///////////////////////////////////////////////////////////////////////////
-//
 // HTTP GET procedure (cURL Implementation)
 //
 ///////////////////////////////////////////////////////////////////////////*/
@@ -597,7 +194,7 @@ int curl_trace (
 {
 	char	*text;
 	char	buf[4096];
-	int	len;
+	int	len, i, binary_data;
 
 	switch (type) {
 	case CURLINFO_TEXT:
@@ -625,17 +222,35 @@ int curl_trace (
 		return 0;
 	}
 
-/* Output the data. */
+/* Output the data */
 
 	strcpy (buf, text);
 	strcat (buf, ": ");
 	len = (int) strlen (buf);
-	memcpy (buf + len, data, size);
-	if (data[size-1] != '\n') {
-		buf[len + size] = '\n';
-		buf[len + size + 1] = 0;
-	} else
-		buf[len + size] = 0;
+	size = _intmin (size, sizeof (buf) - len - 2);
+
+	// Is data all printable ascii?
+	binary_data = FALSE;
+	for (i = 0; i < (int) size; i++) {
+		if ((data[i] <= 0x1F && data[i] != '\t' && data[i] != '\r' && data[i] != '\n') || data[i] == (char) 0xFF)  {
+			binary_data = TRUE;
+			break;
+		}
+	}
+
+	// Copy "<binary>" or the data to the message buffer
+	if (binary_data) {
+		strcpy (buf + len, "<binary>\n");
+	} else {
+		memcpy (buf + len, data, size);
+		if (data[size-1] != '\n') {
+			buf[len + size] = '\n';
+			buf[len + size + 1] = 0;
+		} else
+			buf[len + size] = 0;
+	}
+
+	// Log the message
 	LogMsg (buf);
 
 	return 0;
@@ -643,6 +258,7 @@ int curl_trace (
 
 /*
 // pnHttpServerCURL: Uses GET to send a formatted HTTP argument string
+
 //               and downloads the server result page
 */
 
@@ -963,6 +579,10 @@ int format_args (char* args, short operation, void* pkt)
 		p = armor (p + strlen (p), z->computer_guid);
 		sprintf (p, "&c=%d", z->cpu_num);
 		p += strlen (p);
+		if (z->get_cert_work) sprintf (p, "&cert=%d", z->get_cert_work), p += strlen (p);
+		if (z->temp_disk_space != 0.0) sprintf (p, "&disk=%f", z->temp_disk_space), p += strlen (p);
+		if (z->min_exp) sprintf (p, "&min=%d", z->min_exp), p += strlen (p);
+		if (z->max_exp) sprintf (p, "&max=%d", z->max_exp), p += strlen (p);
 		break;
 		}
 	case PRIMENET_ASSIGNMENT_PROGRESS:
@@ -1101,6 +721,7 @@ int format_args (char* args, short operation, void* pkt)
 			if (z->prp_residue_type) sprintf (p, "&rt=%d", z->prp_residue_type), p += strlen (p);
 			if (z->shift_count) sprintf (p, "&sc=%d", z->shift_count), p += strlen (p);
 			if (z->gerbicz) strcpy (p, "&gbz=1"), p += strlen (p);
+			if (z->proof_power) sprintf (p, "&pp=%d&ph=%s", z->proof_power, z->proof_hash), p += strlen (p);
 		}
 		if (z->result_type == PRIMENET_AR_PRP_PRIME) {
 			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d", z->k, z->b, z->n, z->c);
@@ -1111,6 +732,16 @@ int format_args (char* args, short operation, void* pkt)
 			if (z->prp_base) sprintf (p, "&base=%d", z->prp_base), p += strlen (p);
 			if (z->shift_count) sprintf (p, "&sc=%d", z->shift_count), p += strlen (p);
 			if (z->gerbicz) strcpy (p, "&gbz=1"), p += strlen (p);
+			if (z->proof_power) sprintf (p, "&pp=%d&ph=%s", z->proof_power, z->proof_hash), p += strlen (p);
+		}
+		if (z->result_type == PRIMENET_AR_CERT) {
+			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d", z->k, z->b, z->n, z->c);
+			p += strlen (p);
+			strcpy (p, "&s3=");
+			p = armor (p + strlen (p), z->cert_hash);
+			strcpy (p, "&ec=");
+			p = armor (p + strlen (p), z->error_count);
+			if (z->shift_count) sprintf (p, "&sc=%d", z->shift_count), p += strlen (p);
 		}
 		if (z->fftlen) {
 			sprintf (p, "&fftlen=%d", z->fftlen);
@@ -1218,7 +849,7 @@ char *find_id (
 	return (NULL);
 }
 
-int parse_string (
+int primenet_parse_string (
 	char	*buf,
 	char	*id,
 	char	*result_buf,
@@ -1234,7 +865,7 @@ int parse_string (
 	return (TRUE);
 }
 
-int parse_multiline_string (
+int primenet_parse_multiline_string (
 	char	*buf,
 	char	*id,
 	char	*result_buf,
@@ -1260,7 +891,7 @@ int parse_multiline_string (
 	return (TRUE);
 }
 
-int parse_int (
+int primenet_parse_int (
 	char	*buf,
 	char	*id,
 	int32_t	*result)
@@ -1273,7 +904,7 @@ int parse_int (
 	return (TRUE);
 }
 
-int parse_uint (
+int primenet_parse_uint (
 	char	*buf,
 	char	*id,
 	uint32_t *result)
@@ -1286,7 +917,7 @@ int parse_uint (
 	return (TRUE);
 }
 
-void parse_double (
+void primenet_parse_double (
 	char	*buf,
 	char	*id,
 	double	*result)
@@ -1300,11 +931,11 @@ void parse_double (
 
 
 /*
-// parse_page: reads the server response page tokens and values
+// primenet_parse_page: reads the server response page tokens and values
 //             and converts these back into a C structure
 */
 
-int parse_page (char *response_buf, short operation, void *pkt)
+int primenet_parse_page (char *response_buf, short operation, void *pkt)
 
 {
 	char	*s;
@@ -1314,7 +945,7 @@ int parse_page (char *response_buf, short operation, void *pkt)
 /* Get result code, which is always first */
 
 	s = response_buf;
-	if (!parse_int (s, "pnErrorResult", &res)) {
+	if (!primenet_parse_int (s, "pnErrorResult", &res)) {
 		LogMsg ("PnErrorResult value missing.  Full response was:\n");
 		LogMsg (response_buf);
 
@@ -1327,14 +958,17 @@ int parse_page (char *response_buf, short operation, void *pkt)
 			
 		return (PRIMENET_ERROR_PNERRORRESULT);
 	}
-	if (!parse_multiline_string (s, "pnErrorDetail", errtxt, sizeof (errtxt))) {
+	if (!primenet_parse_multiline_string (s, "pnErrorDetail", errtxt, sizeof (errtxt))) {
 		LogMsg ("PnErrorDetail string missing\n");
 		return (PRIMENET_ERROR_PNERRORDETAIL);
 	}
 
-/* If result is non-zero print out an error message */
+/* If result is non-zero print out an error message (unless this is a get cert assignment request) */
 
-	if (res) {
+	if (res && operation == PRIMENET_GET_ASSIGNMENT && ((struct primenetGetAssignment *) pkt)->get_cert_work) {
+		;  // Fail get cert work silently
+	}
+	else if (res) {
 		char	buf[2000];
 		char	*resmsg;
 
@@ -1398,7 +1032,7 @@ int parse_page (char *response_buf, short operation, void *pkt)
 		}
 
 /* Print out the error code, text, and details */
-		
+
 		sprintf (buf, "PrimeNet error %d: %s\n", res, resmsg);
 		LogMsg (buf);
 		sprintf (buf, "%s\n", errtxt);
@@ -1422,11 +1056,11 @@ int parse_page (char *response_buf, short operation, void *pkt)
 		struct primenetUpdateComputerInfo *z;
 
 		z = (struct primenetUpdateComputerInfo *) pkt;
-		parse_string (s, "g", z->computer_guid, sizeof (z->computer_guid));
-		parse_string (s, "u", z->user_id, sizeof (z->user_id));
-		parse_string (s, "un", z->user_name, sizeof (z->user_name));
-		parse_string (s, "cn", z->computer_name, sizeof (z->computer_name));
-		parse_uint (s, "od", &z->options_counter);
+		primenet_parse_string (s, "g", z->computer_guid, sizeof (z->computer_guid));
+		primenet_parse_string (s, "u", z->user_id, sizeof (z->user_id));
+		primenet_parse_string (s, "un", z->user_name, sizeof (z->user_name));
+		primenet_parse_string (s, "cn", z->computer_name, sizeof (z->computer_name));
+		primenet_parse_uint (s, "od", &z->options_counter);
 
 		if (!strcmp (z->user_id, "admin_user_anon"))
 			strcpy (z->user_id, "ANONYMOUS");
@@ -1439,24 +1073,24 @@ int parse_page (char *response_buf, short operation, void *pkt)
 
 		z = (struct primenetProgramOptions *) pkt;
 		z->num_workers = -1;
-		parse_int (s, "nw", &z->num_workers);
+		primenet_parse_int (s, "nw", &z->num_workers);
 		z->work_preference = -1;
-		parse_int (s, "w", &z->work_preference);
+		primenet_parse_int (s, "w", &z->work_preference);
 		z->priority = -1;
-		parse_int (s, "Priority", &z->priority);
+		primenet_parse_int (s, "Priority", &z->priority);
 		z->daysOfWork = -1;
-		parse_int (s, "DaysOfWork", &z->daysOfWork);
+		primenet_parse_int (s, "DaysOfWork", &z->daysOfWork);
 		z->dayMemory = -1;
-		parse_int (s, "DayMemory", &z->dayMemory);
+		primenet_parse_int (s, "DayMemory", &z->dayMemory);
 		z->nightMemory = -1;
-		parse_int (s, "NightMemory", &z->nightMemory);
+		primenet_parse_int (s, "NightMemory", &z->nightMemory);
 		z->dayStartTime = -1;
-		parse_int (s, "DayStartTime", &z->dayStartTime);
+		primenet_parse_int (s, "DayStartTime", &z->dayStartTime);
 		z->nightStartTime = -1;
-		parse_int (s, "NightStartTime", &z->nightStartTime);
+		primenet_parse_int (s, "NightStartTime", &z->nightStartTime);
 		z->runOnBattery = -1;
-		parse_int (s, "RunOnBattery", &z->runOnBattery);
-		parse_uint (s, "od", &z->options_counter);
+		primenet_parse_int (s, "RunOnBattery", &z->runOnBattery);
+		primenet_parse_uint (s, "od", &z->options_counter);
 		break;
 		}
 	case PRIMENET_GET_ASSIGNMENT:
@@ -1464,23 +1098,45 @@ int parse_page (char *response_buf, short operation, void *pkt)
 		struct primenetGetAssignment *z;
 
 		z = (struct primenetGetAssignment *) pkt;
-		parse_string (s, "k", z->assignment_uid, sizeof (z->assignment_uid));
-		parse_uint (s, "w", &z->work_type);
-		parse_double (s, "A", &z->k);
-		parse_uint (s, "b", &z->b);
-		parse_uint (s, "n", &z->n);
-		parse_int (s, "c", &z->c);
-		parse_uint (s, "p1", &z->has_been_pminus1ed);
-		parse_double (s, "sf", &z->how_far_factored);
-		parse_double (s, "ef", &z->factor_to);
-		parse_double (s, "B1", &z->B1);
-		parse_double (s, "B2", &z->B2);
-		parse_uint (s, "CR", &z->curves);
-		parse_double (s, "saved", &z->tests_saved);
-		parse_uint (s, "base", &z->prp_base);
-		parse_uint (s, "rt", &z->prp_residue_type);
-		parse_uint (s, "dc", &z->prp_dblchk);
-		parse_string (s, "kf", z->known_factors, sizeof (z->known_factors));
+		primenet_parse_string (s, "k", z->assignment_uid, sizeof (z->assignment_uid));
+		primenet_parse_uint (s, "w", &z->work_type);
+		primenet_parse_double (s, "A", &z->k);
+		primenet_parse_uint (s, "b", &z->b);
+		primenet_parse_uint (s, "n", &z->n);
+		primenet_parse_int (s, "c", &z->c);
+		primenet_parse_uint (s, "p1", &z->has_been_pminus1ed);
+		primenet_parse_double (s, "sf", &z->how_far_factored);
+		primenet_parse_double (s, "ef", &z->factor_to);
+		primenet_parse_double (s, "B1", &z->B1);
+		primenet_parse_double (s, "B2", &z->B2);
+		primenet_parse_uint (s, "CR", &z->curves);
+		primenet_parse_double (s, "saved", &z->tests_saved);
+		primenet_parse_uint (s, "base", &z->prp_base);
+		primenet_parse_uint (s, "rt", &z->prp_residue_type);
+		primenet_parse_uint (s, "dc", &z->prp_dblchk);
+		primenet_parse_string (s, "kf", z->known_factors, sizeof (z->known_factors));
+		primenet_parse_uint (s, "ns", &z->num_squarings);
+		// Parse emergency PRP proof params that we hope to never use
+		if (z->work_type == PRIMENET_WORK_TYPE_PRP) {
+			uint32_t proof_power = 0;
+			uint32_t proof_power_mult = 0;
+			uint32_t proof_hashlen = 0;
+			primenet_parse_uint (s, "pp", &proof_power);
+			primenet_parse_uint (s, "ppm", &proof_power_mult);
+			primenet_parse_uint (s, "ph", &proof_hashlen);
+			if (proof_power == 0)
+				IniSectionWriteString (INI_FILE, iniSection, "ProofPower", NULL);
+			else
+				IniSectionWriteInt (INI_FILE, iniSection, "ProofPower", proof_power);
+			if (proof_power_mult == 0)
+				IniSectionWriteString (INI_FILE, iniSection, "ProofPowerMult", NULL);
+			else
+				IniSectionWriteInt (INI_FILE, iniSection, "ProofPowerMult", proof_power_mult);
+			if (proof_hashlen == 0)
+				IniSectionWriteString (INI_FILE, iniSection, "ProofHashLength", NULL);
+			else
+				IniSectionWriteInt (INI_FILE, iniSection, "ProofHashLength", proof_hashlen);
+		}
 		break;
 		}
 	case PRIMENET_REGISTER_ASSIGNMENT:
@@ -1488,7 +1144,7 @@ int parse_page (char *response_buf, short operation, void *pkt)
 		struct primenetRegisterAssignment *z;
 
 		z = (struct primenetRegisterAssignment *) pkt;
-		parse_string (s, "k", z->assignment_uid, sizeof (z->assignment_uid));
+		primenet_parse_string (s, "k", z->assignment_uid, sizeof (z->assignment_uid));
 		break;
 		}
 	case PRIMENET_ASSIGNMENT_PROGRESS:
@@ -1504,7 +1160,7 @@ int parse_page (char *response_buf, short operation, void *pkt)
 		struct primenetPingServer *z;
 
 		z = (struct primenetPingServer *) pkt;
-		parse_string (s, "r", z->ping_response, sizeof (z->ping_response));
+		primenet_parse_string (s, "r", z->ping_response, sizeof (z->ping_response));
 		break;
 		}
 	}
@@ -1522,8 +1178,7 @@ void LoadPrimenet ()
 /* from the main thread rather than letting curl_easy_init do the */
 /* initialization when other threads are running. */
 
-	if (IniSectionGetInt (INI_FILE, iniSection, "UseCURL", 1))
-		curl_global_init (CURL_GLOBAL_ALL);
+	curl_global_init (CURL_GLOBAL_ALL);
 }
 
 
@@ -1544,14 +1199,10 @@ int PRIMENET (short operation, void *pkt)
 
 /* Send arguments, read back resulting page */
 
-	if (IniSectionGetInt (INI_FILE, iniSection, "UseCURL", 1))
-		status = pnHttpServerCURL (pbuf, sizeof (pbuf), args);
-	else
-		status = pnHttpServer (pbuf, sizeof (pbuf), args);
+	status = pnHttpServerCURL (pbuf, sizeof (pbuf), args);
 	if (status) return (status);
 
 /* Extract results from returned page into packet */
 
-	return (parse_page (pbuf, operation, pkt));
+	return (primenet_parse_page (pbuf, operation, pkt));
 }
-

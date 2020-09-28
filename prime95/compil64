@@ -1,16 +1,16 @@
 # Assembler command lines
 #
-# HJWasm is a MASM-compatible assembler that is supported much better than MASM.
+# Uasm is a MASM-compatible assembler that is supported much better than MASM.
 # It can be downloaded at http://www.terraspace.co.uk/hjwasm.html
 #
 # objconv comes courtesy of Agner Fog.  Download available at
 # http://www.agner.org/optimize/#objconv
 
-masm64=uasm32 /c /DX86_64 /DWINDOWS64 /DARCH=FMA3 /I..\gwnum -win64
-#masm64=uasm32 /c /DX86_64 /DWINDOWS64 /DARCH=FMA3 /I..\gwnum /Fl /Sf /Sa /Sg -win64
+masm64=uasm64 /c /DX86_64 /DWINDOWS64 /DARCH=FMA3 /I..\gwnum -win64
+#masm64=uasm64 /c /DX86_64 /DWINDOWS64 /DARCH=FMA3 /I..\gwnum /Fl /Sf /Sa /Sg -win64
 #masm64=ml64 /c /DX86_64 /DWINDOWS64 /DARCH=FMA3 /I..\gwnum
 #masm64=ml64 /c /DX86_64 /DWINDOWS64 /DARCH=FMA3 /I..\gwnum /Fl /Sf /Sa
-masm64lx=uasm32 /c /DX86_64 /DLINUX64 /DARCH=FMA3 /I..\gwnum -win64
+masm64lx=uasm64 /c /DX86_64 /DLINUX64 /DARCH=FMA3 /I..\gwnum -win64
 #masm64lx=ml64 /c /DX86_64 /DLINUX64 /DARCH=FMA3 /I..\gwnum
 
 # Use the 64-bit C compiler - optimization not necessary
@@ -21,7 +21,7 @@ objconv=c:\objconv\objconv
 
 # List of all buildables in this makefile
 
-all:	amd64\factor64.obj linux64\factor64.o amd64\service.obj
+all:	amd64\factor64.obj linux64\factor64.o
 
 # Create 64-bit object files
 
@@ -39,8 +39,4 @@ linux64\factor64.o: factor64.asm factor64.mac
     attrib -r macosx64\factor64.o
     del linux64\factor64.obj
 
-# Compile special services code
-
-amd64\service.obj: service.c
-    $(cl64) /Foamd64\service.obj service.c
 

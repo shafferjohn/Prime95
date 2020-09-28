@@ -8,7 +8,7 @@
 | Commonb contains information used only during execution
 | Commonc contains information used during setup and execution
 |
-| Copyright 1995-2019 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
 +---------------------------------------------------------------------*/
 
 /* Routine to eliminate odd puctuation characters from user ID */
@@ -40,7 +40,7 @@ void rangeStatusMessage (
 {
 	unsigned int tnum, ll_and_prp_cnt, lines_per_worker;
 	int	mersennes;		/* TRUE if only testing Mersenne numbers */
-	double	prob, est;
+	double	prob, est, cert_est;
 	char	*orig_buf;
 
 /* Just in case the user hand added work to the worktodo file, reread it */
@@ -83,6 +83,7 @@ void rangeStatusMessage (
 
 	    w = NULL;
 	    est = 0.0;
+	    cert_est = 0.0;
 	    for ( ; ; ) {
 		time_t	this_time;
 		char	timebuf[80];
@@ -121,7 +122,8 @@ void rangeStatusMessage (
 
 /* Adjust our time estimate */
 
-		est += work_estimate (tnum, w);
+		if (w->work_type == WORK_CERT) cert_est += work_estimate (tnum, w);
+		else est += work_estimate (tnum, w);
 
 /* Stop adding worktodo lines if buffer is full.  We must still loop */
 /* through the worktodo lines to decrement the in-use counters. */
@@ -148,26 +150,24 @@ void rangeStatusMessage (
 		buf += strlen (buf);
 
 		if (w->work_type == WORK_ECM)
-			sprintf (buf, "ECM %d curve%s B1=%.0f",
-				 w->curves_to_do,
-				 w->curves_to_do == 1 ? "" : "s",
-				 w->B1);
+			sprintf (buf, "ECM %d curve%s B1=%.0f", w->curves_to_do, w->curves_to_do == 1 ? "" : "s", w->B1);
 		else if (w->work_type == WORK_PMINUS1)
 			sprintf (buf, "P-1 B1=%.0f", w->B1);
 		else if (w->work_type == WORK_FACTOR)
-			sprintf (buf, "factor from 2^%d to 2^%d",
-				 (int) w->sieve_depth, (int) w->factor_to);
+			sprintf (buf, "factor from 2^%d to 2^%d", (int) w->sieve_depth, (int) w->factor_to);
 		else
 			strcpy (buf, w->work_type == WORK_PFACTOR ? "P-1" :
 				     w->work_type == WORK_TEST ||
 				     w->work_type == WORK_ADVANCEDTEST ? "Lucas-Lehmer test" :
 				     w->work_type == WORK_DBLCHK ? "Double-check" :
-				     /* w->work_type == WORK_PRP */ "PRP");
+				     w->work_type == WORK_CERT ? "Certify" :
+				     w->prp_dblchk ? "PRPDC" : "PRP");
 		buf += strlen (buf);
 
 		time (&this_time);
-		if (est + (double) this_time < 2147483640.0) {
-			this_time += (long) est;
+		if (w->work_type == WORK_CERT) this_time += (long) cert_est;
+		else this_time += (long) (cert_est + est);
+		if (this_time < 2147483640.0) {
 			strcpy (timebuf, ctime (&this_time));
 			safe_strcpy (timebuf+16, timebuf+19);
 		} else

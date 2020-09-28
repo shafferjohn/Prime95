@@ -1,6 +1,6 @@
 // Prime95.h : main header file for the PRIME95 application
 // 
-//  Copyright 1995-2017 Mersenne Research, Inc.  All rights reserved.
+//  Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved.
 //
 
 #ifdef _WIN64
@@ -50,7 +50,7 @@ public:
 
 // Implementation
 
-	//{{AFX_MSG(CPrime95App)
+	//{{AFX_MSG(CPrime95App
 	afx_msg void OnAppAbout();
 		// NOTE - the ClassWizard will add and remove member functions here.
 		//    DO NOT EDIT what you see in these blocks of generated code !
@@ -72,19 +72,12 @@ extern HICON ICON_WORKING;		// Green = threads working
 
 extern int EXIT_IN_PROGRESS;		// True if we are exiting
 
-extern int WINDOWS95_SERVICE;		// True if we're running as a Win95 service
-extern int WINDOWS95_A_SWITCH;		// Value of the -A command line switch
 extern LONG WM_ENDSESSION_LPARAM;	// LPARAM of WM_ENDSESSION message
 extern int WINDOWS95_TRAY_ADD;		// True if we need to add the icon
 					// to the shell once the user logs in
 
 extern gwmutex VIEW_MUTEX;		/* Lock for accessing Views Array */
 extern gwmutex VIEW_LINES_MUTEX;	/* Lock for accessing Lines array */
-
-// Variables used to communicate with the NT service code
-
-extern "C" char NTSERVICENAME[32];	// name of the NT service
-extern "C" HWND MAINFRAME_HWND;		// Handle of main frame window
 
 // Internal routines
 

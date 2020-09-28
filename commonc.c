@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2019 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
 |
 | This file contains routines and global variables that are common for
 | all operating systems the program has been ported to.  It is included
@@ -11,7 +11,7 @@
 | Commonc contains information used during setup and execution
 +---------------------------------------------------------------------*/
 
-static const char JUNK[]="Copyright 1996-2019 Mersenne Research, Inc. All rights reserved";
+static const char JUNK[]="Copyright 1996-2020 Mersenne Research, Inc. All rights reserved";
 
 char	INI_FILE[80] = {0};
 char	LOCALINI_FILE[80] = {0};
@@ -41,6 +41,7 @@ unsigned int CORES_PER_TEST[MAX_NUM_WORKER_THREADS] = {1}; /* Number of threads 
 int	HYPERTHREAD_TF = 1;		/* TRUE if trial factoring should use hyperthreads */
 int	HYPERTHREAD_LL = 0;		/* TRUE if FFTs (LL, P-1, ECM, PRP) should use hyperthreads */
 int	MANUAL_COMM = 0;
+float volatile CPU_WORKER_DISK_SPACE = 6.0;
 unsigned int volatile CPU_HOURS = 0;
 int	CLASSIC_OUTPUT = 0;
 int	OUTPUT_ROUNDOFF = 0;
@@ -69,7 +70,7 @@ int	RDTSC_TIMING = 1;
 int	TIMESTAMPING = 1;
 int	CUMULATIVE_TIMING = 0;
 int	CUMULATIVE_ROUNDOFF = 1;
-int	SEQUENTIAL_WORK = 1;
+int	SEQUENTIAL_WORK = -1;
 int	WELL_BEHAVED_WORK = 0;
 unsigned long INTERIM_FILES = 0;
 unsigned long INTERIM_RESIDUES = 0;
@@ -114,8 +115,6 @@ int	OS_CAN_SET_AFFINITY = 1;	/* hwloc supports setting CPU affinity (known excep
 
 gwevent AUTOBENCH_EVENT;	/* Event to wake up workers after an auto-benchmark */
 
-#include "md5.c"
-
 /* Generate the application string.  This is sent to the server in a */
 /* UC (Update Computer info) call.  It is also displayed in the */
 /* Help/About dialog box. */
@@ -154,7 +153,7 @@ void calc_hardware_guid (void)
 	char	buf[500];
 
 	sprintf (buf, "%s%d", CPU_BRAND, CPU_SIGNATURE);
-	md5 (HARDWARE_GUID, buf);
+	md5_hexdigest_string (HARDWARE_GUID, buf);
 
 /* Sometimes a user might want to run the program on several machines. */
 /* Typically this is done by carrying the program and files around on a */
@@ -190,7 +189,7 @@ void calc_windows_guid (void)
 		getWindowsSerialNumber_2 (buf);
 		getWindowsSID_2 (buf + strlen (buf));
 	}
-	md5 (WINDOWS_GUID, buf);
+	md5_hexdigest_string (WINDOWS_GUID, buf);
 #else
 	WINDOWS_GUID[0] = 0;
 #endif
@@ -247,7 +246,7 @@ void generate_computer_guid (void)
 
 	time (&current_time);
 	sprintf (buf, "%s%d%f%d", CPU_BRAND, CPU_SIGNATURE, CPU_SPEED, (int) current_time);
-	md5 (COMPUTER_GUID, buf);
+	md5_hexdigest_string (COMPUTER_GUID, buf);
 	IniWriteString (LOCALINI_FILE, "ComputerGUID", COMPUTER_GUID);
 
 /* Clear out local copies of what we think the server knows about this computer */
@@ -923,7 +922,17 @@ void strupper (
 	for ( ; *p; p++) if (*p >= 'a' && *p <= 'z') *p = *p - 'a' + 'A';
 }
 
+/* Return true if string contains all hex characters */
+
+int isHex (
+	const char *p)
+{
+	for ( ; *p; p++) if (!(*p >= '0' && *p <= '9') && !(*p >= 'a' && *p <= 'f') && !(*p >= 'A' && *p <= 'F')) return (FALSE);
+	return (TRUE);
+}
+
 /* Convert a string (e.g "11:30 AM") to minutes since midnight */
+/* The result is from 0 to 1440 inclusive.  This allow specifying 00:00 - 24:00 to mean "all day" */
 
 unsigned int strToMinutes (
 	const char *buf)
@@ -938,7 +947,7 @@ unsigned int strToMinutes (
 	if (hours == 12) hours -= 12;
 	if (pm) hours += 12;
 	minutes = hours * 60 + minutes;
-	minutes %= 1440;  // In case user entered 24:00 or 11:60 PM
+	if (minutes > 1440) minutes %= 1440;
 	return (minutes);
 }
 
@@ -997,12 +1006,12 @@ int read_memory_settings (
 
 /* Set up some default values */
 
-	*day_memory = 8;
-	*night_memory = 8;
+	*day_memory = 256;
+	*night_memory = 256;
 	*day_start_time = 450;
 	*day_end_time = 1410;
 
-/* Get the memory settings.  If not found, return some defaults */
+/* Get the memory settings.  If not found, return the defaults */
 
 	p = IniSectionGetStringRaw (LOCALINI_FILE, NULL, "Memory");
 	if (p == NULL) return (TRUE);
@@ -1229,6 +1238,11 @@ void nameAndReadIniFiles (
 			seconds = (29 - x->tm_hour) * 60 * 60;	// Start benchmark around 5AM tomorrow
 		add_timed_event (TE_BENCH, seconds);
 	}
+
+/* Start the proof uploading thread */
+
+	if (IniSectionGetInt (INI_FILE, "PrimeNet", "ProofUploads", 1))
+		gwthread_create (&UPLOAD_THREAD, &proofUploader, NULL);
 }
 
 /* Init the communications code.  We used to do this at the end of */
@@ -1417,6 +1431,10 @@ int readIniFiles (void)
 	DAYS_OF_WORK = (unsigned int) IniGetInt (INI_FILE, "DaysOfWork", 3);
 	if (DAYS_OF_WORK > 180) DAYS_OF_WORK = 180;
 
+	CPU_WORKER_DISK_SPACE = IniGetFloat (LOCALINI_FILE, "WorkerDiskSpace", 6.0);
+	if (CPU_WORKER_DISK_SPACE < 0.0) CPU_WORKER_DISK_SPACE = 0.0;
+	if (CPU_WORKER_DISK_SPACE > 1000.0) CPU_WORKER_DISK_SPACE = 1000.0;
+
 	CPU_HOURS = (unsigned int) IniGetInt (LOCALINI_FILE, "CPUHours", 24);
 	if (CPU_HOURS < 1) CPU_HOURS = 1;
 	if (CPU_HOURS > 24) CPU_HOURS = 24;
@@ -1476,6 +1494,25 @@ int readIniFiles (void)
 	if (PRIORITY < 1) PRIORITY = 1;
 	if (PRIORITY > 10) PRIORITY = 10;
 	PTOGetAll (INI_FILE, "WorkPreference", WORK_PREFERENCE, 0);
+	// Upgrade pre-v30 users from LL to PRP, combine LL-DC and PRP-DC into one work preference
+	if (!IniGetInt (INI_FILE, "V30OptionsConverted", 0)) {
+		int	i, all_the_same = TRUE;
+		for (i = 0; i < MAX_NUM_WORKER_THREADS; i++) {
+			if (WORK_PREFERENCE[i] == PRIMENET_WP_LL_FIRST) WORK_PREFERENCE[i] = PRIMENET_WP_PRP_FIRST;
+			if (WORK_PREFERENCE[i] == PRIMENET_WP_LL_10M) WORK_PREFERENCE[i] = PRIMENET_WP_PRP_FIRST;
+			if (WORK_PREFERENCE[i] == PRIMENET_WP_LL_FIRST_NOFAC) WORK_PREFERENCE[i] = PRIMENET_WP_PRP_FIRST;
+			if (WORK_PREFERENCE[i] == PRIMENET_WP_LL_WORLD_RECORD) WORK_PREFERENCE[i] = PRIMENET_WP_PRP_WORLD_RECORD;
+			if (WORK_PREFERENCE[i] == PRIMENET_WP_LL_100M) WORK_PREFERENCE[i] = PRIMENET_WP_PRP_100M;
+			if (WORK_PREFERENCE[i] == PRIMENET_WP_LL_DBLCHK) WORK_PREFERENCE[i] = PRIMENET_WP_PRP_DBLCHK;
+			if (i && WORK_PREFERENCE[i] != WORK_PREFERENCE[i-1]) all_the_same = FALSE;
+		}
+		if (all_the_same)
+			PTOSetAll (INI_FILE, "WorkPreference", NULL, WORK_PREFERENCE, WORK_PREFERENCE[0]);
+		else for (i = 0; i < (int) NUM_WORKER_THREADS; i++)
+			PTOSetOne (INI_FILE, "WorkPreference", NULL, WORK_PREFERENCE, i, WORK_PREFERENCE[i]);
+		spoolMessage (PRIMENET_PROGRAM_OPTIONS, NULL);
+		IniWriteInt (INI_FILE, "V30OptionsConverted", 1);
+	}
 	read_cores_per_test ();		// Get CORES_PER_TEST array, may require upgrading old INI settings
 	HYPERTHREAD_TF = IniGetInt (LOCALINI_FILE, "HyperthreadTF", OS_CAN_SET_AFFINITY);
 	HYPERTHREAD_LL = IniGetInt (LOCALINI_FILE, "HyperthreadLL", 0);
@@ -1523,7 +1560,7 @@ int readIniFiles (void)
 	TIMESTAMPING = IniGetInt (INI_FILE, "TimeStamp", 1);
 	CUMULATIVE_TIMING = IniGetInt (INI_FILE, "CumulativeTiming", 0);
 	CUMULATIVE_ROUNDOFF = IniGetInt (INI_FILE, "CumulativeRoundoff", 1);
-	SEQUENTIAL_WORK = IniGetInt (INI_FILE, "SequentialWorkToDo", 1);
+	SEQUENTIAL_WORK = IniGetInt (INI_FILE, "SequentialWorkToDo", -1);
 	WELL_BEHAVED_WORK = IniGetInt (INI_FILE, "WellBehavedWork", 0);
 
 	read_pause_info ();
@@ -1747,9 +1784,12 @@ static	int	worktodo_add_disabled = FALSE;
 		worktodo_add_disabled = TRUE;
 	}
 
-/* Now reprocess the combined and freshly written worktodo.txt file */
+/* Reprocess the combined and freshly written worktodo.txt file.  Spool message to check the work queue, */
+/* this will get assignment IDs and send completion dates for the newly added work. */
 
-	return (readWorkToDoFile ());
+	rc = readWorkToDoFile ();
+	spoolMessage (MSG_CHECK_WORK_QUEUE, NULL);
+	return (rc);
 
 /* Handle an error during the reading of the add file */
 
@@ -1931,6 +1971,41 @@ void OutputBothBench (
 	writeResultsBench (buf);
 }
 
+/* Output errno and useful description to both the screen and results file */
+
+#include "errno.h"
+
+void OutputBothErrno (
+	int	thread_num)
+{
+	char	buf[1024];
+#ifdef WIN32
+	int	errnum;
+	unsigned long dos_errnum;
+	char	errtxt[512];
+
+	_get_errno (&errnum);
+	if (errnum) {
+		strerror_s (errtxt, sizeof (errtxt), errnum);
+		sprintf (buf, "Errno: %d, %s\n", errnum, errtxt);
+		OutputBoth (thread_num, buf);
+		_set_errno (0);
+	}
+
+	_get_doserrno (&dos_errnum);
+	if (dos_errnum) {
+		sprintf (buf, "DOSerrno: %ld\n", dos_errnum);
+		OutputBoth (thread_num, buf);
+		_set_doserrno (0);
+	}
+#else
+	if (errno) {
+		sprintf (buf, "Errno: %d, %s\n", errno, strerror (errno));
+		OutputBoth (thread_num, buf);
+	}
+#endif
+}
+
 /* Output string to screen.  Prefix it with an optional timestamp. */
 
 void OutputStr (
@@ -2106,10 +2181,7 @@ void auxiliaryWorkUnitInit (
 
 /* Compute factor_to if not set already */
 
-	if ((w->work_type == WORK_FACTOR ||
-	     w->work_type == WORK_TEST ||
-	     w->work_type == WORK_DBLCHK) &&
-	    w->factor_to == 0.0)
+	if ((w->work_type == WORK_FACTOR || w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK || w->work_type == WORK_PRP) && w->factor_to == 0.0)
 		w->factor_to = factorLimit (w);
 
 /* Initialize the number of LL tests saved */
@@ -2533,22 +2605,23 @@ illegal_line:	sprintf (buf, "Illegal line in worktodo.txt file: %s\n", line);
 /* Handle Test= and DoubleCheck= lines.					*/
 /*	Test=exponent,how_far_factored,has_been_pminus1ed		*/
 /*	DoubleCheck=exponent,how_far_factored,has_been_pminus1ed	*/
+/* New in 30.4, for consistency with PRP worktodo lines assume no TF or P-1 needed if those fields are left out */
 
 	    if (_stricmp (keyword, "Test") == 0) {
 		float	sieve_depth;
 		w->work_type = WORK_TEST;
-		sieve_depth = 0.0;
-		sscanf (value, "%lu,%f,%d",
-				&w->n, &sieve_depth, &w->pminus1ed);
+		sieve_depth = 99.0;
+		w->pminus1ed = 1;
+		sscanf (value, "%lu,%f,%d", &w->n, &sieve_depth, &w->pminus1ed);
 		w->sieve_depth = sieve_depth;
 		w->tests_saved = 2.0;
 	    }
 	    else if (_stricmp (keyword, "DoubleCheck") == 0) {
 		float	sieve_depth;
 		w->work_type = WORK_DBLCHK;
-		sieve_depth = 0.0;
-		sscanf (value, "%lu,%f,%d",
-				&w->n, &sieve_depth, &w->pminus1ed);
+		sieve_depth = 99.0;
+		w->pminus1ed = 1;
+		sscanf (value, "%lu,%f,%d", &w->n, &sieve_depth, &w->pminus1ed);
 		w->sieve_depth = sieve_depth;
 		w->tests_saved = 1.0;
 	    }
@@ -2571,8 +2644,7 @@ illegal_line:	sprintf (buf, "Illegal line in worktodo.txt file: %s\n", line);
 		w->work_type = WORK_FACTOR;
 		sieve_depth = 0.0;
 		factor_to = 0.0;
-		sscanf (value, "%lu,%f,%f",
-				&w->n, &sieve_depth, &factor_to);
+		sscanf (value, "%lu,%f,%f", &w->n, &sieve_depth, &factor_to);
 		w->sieve_depth = sieve_depth;
 		w->factor_to = factor_to;
 	    }
@@ -2750,8 +2822,8 @@ illegal_line:	sprintf (buf, "Illegal line in worktodo.txt file: %s\n", line);
 			if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
 		q = strchr (q+1, ',');
 
-		w->sieve_depth = 0.0;
-		w->tests_saved = 0.0;
+		w->sieve_depth = 99.0;		// Default to "no TF needed"
+		w->tests_saved = 0.0;		// Default to "no P-1 needed"
 		w->prp_base = 0;
 		w->prp_residue_type = 0;
 		if (q != NULL && q[1] != '"') {
@@ -2771,6 +2843,20 @@ illegal_line:	sprintf (buf, "Illegal line in worktodo.txt file: %s\n", line);
 			if (w->known_factors == NULL) goto nomem;
 			strcpy (w->known_factors, q+2);
 		}
+	    }
+
+/* Handle Cert= lines.  Certifying a PRP proof.		*/
+/*	Cert=k,b,n,c,num_squarings			*/
+
+	    else if (_stricmp (keyword, "Cert") == 0) {
+		char	*q;
+
+		w->work_type = WORK_CERT;
+		w->k = atof (value);
+		if ((q = strchr (value, ',')) == NULL) goto illegal_line;
+		sscanf (q+1, "%lu,%lu,%ld,%d", &w->b, &w->n, &w->c, &w->cert_squarings);
+		for (i = 1; i <= 3; i++)
+			if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
 	    }
 
 /* Uh oh.  We have a worktodo.txt line we cannot process. */
@@ -3077,13 +3163,17 @@ int writeWorkToDoFile (
 			break;
 
 		case WORK_TEST:
-			sprintf (buf, "Test=%s%lu,%.0f,%d",
-				 idbuf, w->n, w->sieve_depth, w->pminus1ed);
+			if (w->sieve_depth != 99.0 || w->pminus1ed != 1)
+				sprintf (buf, "Test=%s%lu,%.0f,%d", idbuf, w->n, w->sieve_depth, w->pminus1ed);
+			else
+				sprintf (buf, "Test=%s%lu", idbuf, w->n);
 			break;
 
 		case WORK_DBLCHK:
-			sprintf (buf, "DoubleCheck=%s%lu,%.0f,%d",
-				 idbuf, w->n, w->sieve_depth, w->pminus1ed);
+			if (w->sieve_depth != 99.0 || w->pminus1ed != 1)
+				sprintf (buf, "DoubleCheck=%s%lu,%.0f,%d", idbuf, w->n, w->sieve_depth, w->pminus1ed);
+			else
+				sprintf (buf, "DoubleCheck=%s%lu", idbuf, w->n);
 			break;
 
 		case WORK_ADVANCEDTEST:
@@ -3091,38 +3181,25 @@ int writeWorkToDoFile (
 			break;
 
 		case WORK_FACTOR:
-			sprintf (buf, "Factor=%s%ld,%.0f,%.0f",
-				 idbuf, w->n, w->sieve_depth, w->factor_to);
+			sprintf (buf, "Factor=%s%ld,%.0f,%.0f", idbuf, w->n, w->sieve_depth, w->factor_to);
 			break;
 
 		case WORK_PFACTOR:
-			sprintf (buf, "Pfactor=%s%.0f,%lu,%lu,%ld,%g,%g",
-				 idbuf, w->k, w->b, w->n, w->c, w->sieve_depth,
-				 w->tests_saved);
+			sprintf (buf, "Pfactor=%s%.0f,%lu,%lu,%ld,%g,%g", idbuf, w->k, w->b, w->n, w->c, w->sieve_depth, w->tests_saved);
 			break;
 
 		case WORK_ECM:
-			sprintf (buf,
-				 "ECM2=%s%.0f,%lu,%lu,%ld,%.0f,%.0f,%u",
-				 idbuf, w->k, w->b, w->n, w->c, w->B1, w->B2,
-				 w->curves_to_do);
+			sprintf (buf, "ECM2=%s%.0f,%lu,%lu,%ld,%.0f,%.0f,%u", idbuf, w->k, w->b, w->n, w->c, w->B1, w->B2, w->curves_to_do);
 			if (w->B2_start > w->B1)
-				sprintf (buf + strlen (buf),
-					 ",%.0f,%.0f",
-					 w->curve, w->B2_start);
+				sprintf (buf + strlen (buf), ",%.0f,%.0f", w->curve, w->B2_start);
 			else if (w->curve)
-				sprintf (buf + strlen (buf),
-					 ",%.0f",
-					 w->curve);
+				sprintf (buf + strlen (buf), ",%.0f", w->curve);
 			if (w->known_factors != NULL)
-				sprintf (buf + strlen (buf),
-					 ",\"%s\"",
-					 w->known_factors);
+				sprintf (buf + strlen (buf), ",\"%s\"", w->known_factors);
 			break;
 
 		case WORK_PMINUS1:
-			sprintf (buf, "Pminus1=%s%.0f,%lu,%lu,%ld,%.0f,%.0f",
-				 idbuf, w->k, w->b, w->n, w->c, w->B1, w->B2);
+			sprintf (buf, "Pminus1=%s%.0f,%lu,%lu,%ld,%.0f,%.0f", idbuf, w->k, w->b, w->n, w->c, w->B1, w->B2);
 			if (w->sieve_depth > 0.0)
 				sprintf (buf + strlen (buf), ",%.0f", w->sieve_depth);
 			if (w->B2_start > w->B1)
@@ -3133,13 +3210,17 @@ int writeWorkToDoFile (
 
 		case WORK_PRP:
 			sprintf (buf, "PRP%s=%s%.0f,%lu,%lu,%ld", w->prp_dblchk ? "DC" : "", idbuf, w->k, w->b, w->n, w->c);
-			if (w->sieve_depth || w->tests_saved > 0.0 || w->prp_base || w->prp_residue_type) {
+			if (w->sieve_depth != 99.0 || w->tests_saved > 0.0 || w->prp_base || w->prp_residue_type) {
 				sprintf (buf + strlen (buf), ",%g,%g", w->sieve_depth, w->tests_saved);
 				if (w->prp_base || w->prp_residue_type)
 					sprintf (buf + strlen (buf), ",%u,%d", w->prp_base, w->prp_residue_type);
 			}
 			if (w->known_factors != NULL)
 				sprintf (buf + strlen (buf), ",\"%s\"", w->known_factors);
+			break;
+
+		case WORK_CERT:
+			sprintf (buf, "Cert=%s%.0f,%lu,%lu,%ld,%d", idbuf, w->k, w->b, w->n, w->c, w->cert_squarings);
 			break;
 		}
 
@@ -3587,6 +3668,13 @@ double work_estimate (
 		if (w->stage[0] == 'P') est *= (1.0 - pct_complete);
 	}
 
+/* If PRPing add in the PRP testing time */
+
+	if (w->work_type == WORK_CERT) {
+		est = w->cert_squarings * gwmap_to_timing (w->k, w->b, w->n, w->c);
+		if (w->stage[0] == 'C') est *= (1.0 - pct_complete);
+	}
+
 /* Factor in the hours per day the computer is running and the */
 /* rolling average */
 
@@ -3695,7 +3783,7 @@ unsigned long string_to_hash (
 
 /* Use md5 to generate a number to hash */
 
-	md5 (md5val, str);
+	md5_hexdigest_string (md5val, str);
 	for (i = 0, p = md5val, hash = 0; i < 4; i++) {
 		for (j = 0, val = 0; j < 8; j++, p++) {
 			val = (val << 4) +
@@ -3928,6 +4016,7 @@ void tempFileName (
 	if (w->work_type == WORK_FACTOR) buf[0] = 'f';
 	if (w->work_type == WORK_ECM) buf[0] = 'e';
 	if (w->work_type == WORK_PMINUS1 || w->work_type == WORK_PFACTOR) buf[0] = 'm';
+	if (w->work_type == WORK_CERT) buf[0] = 'c';
 
 /* Prior to version 25.9 build 5, the pfactor work type used p as the */
 /* first letter, we now use m.  To reduce upgrading problems, old save */
@@ -3994,6 +4083,26 @@ int fileExists (
 	if (fd < 0) return (0);
 	_close (fd);
 	return (1);
+}
+
+/* Create a file name from an optional directory name and a file name.  The directory name */
+/* may or may not end in a slash. */
+
+void DirPlusFilename (
+	char	*dir,				// Full pathname returned here
+	const char *filename)
+{
+	if (dir[0]) {
+		char	slash = getDirectorySeparator ();
+		int	len = (int) strlen (dir);
+
+		// Append slash if not already there
+		if (dir[len-1] != slash) {
+			dir[len] = slash;
+			dir[len+1] = 0;
+		}
+	}
+	strcat (dir, filename);
 }
 
 /* Routines to read and write a byte array from and to a save file */
@@ -4077,16 +4186,37 @@ int write_gwnum (
 	unsigned long *sum)
 {
 	giant	tmp;
+	int	retcode;
 	unsigned long i, len, bytes;
 
 	tmp = popg (&gwdata->gdata, ((int) gwdata->bit_length >> 5) + 10);
-	if (tmp == NULL) return (FALSE);
-	if (gwtogiant (gwdata, g, tmp)) goto err;
+	if (tmp == NULL) {
+		OutputBoth (MAIN_THREAD_NUM, "In write_gwnum, unexpected popg failure\n");
+		return (FALSE);
+	}
+	retcode = gwtogiant (gwdata, g, tmp);
+	if (retcode) {
+		char	buf[200];
+		sprintf (buf, "In write_gwnum, unexpected gwtogiant failure, retcode %d\n", retcode);
+		OutputBoth (MAIN_THREAD_NUM, buf);
+		goto err;
+	}
 	len = tmp->sign;
-	if (len == 0) goto err;
-	if (!write_long (fd, len, sum)) goto err;
+	if (len == 0) {
+		OutputBoth (MAIN_THREAD_NUM, "In write_gwnum, unexpected len == 0 failure\n");
+		goto err;
+	}
+	if (!write_long (fd, len, sum)) {
+		OutputBoth (MAIN_THREAD_NUM, "In write_gwnum, unexpected write_long failure\n");
+		goto err;
+	}
 	bytes = len * sizeof (uint32_t);
-	if (_write (fd, tmp->n, bytes) != bytes) goto err;
+	if (_write (fd, tmp->n, bytes) != bytes) {
+		char	buf[200];
+		sprintf (buf, "In write_gwnum, unexpected write failure len = %lu\n", len);
+		OutputBoth (MAIN_THREAD_NUM, buf);
+		goto err;
+	}
 	*sum = (uint32_t) (*sum + len);
 	for (i = 0; i < len; i++) *sum = (uint32_t) (*sum + tmp->n[i]);
 	pushg (&gwdata->gdata, 1);
@@ -4462,6 +4592,7 @@ int writeResultsJSON (
 #define SPOOL_FILE_MSG_OFFSET (4 * sizeof (uint32_t))
 
 gwthread COMMUNICATION_THREAD = 0;	/* Handle for comm thread */
+gwthread UPLOAD_THREAD = 0;		/* Handle for proof file upload thread */
 gwmutex	SPOOL_FILE_MUTEX;		/* Lock governing spool file access */
 int	GET_PING_INFO = 0;		/* Flag to get ping info */
 int	GLOBAL_SEND_MSG_COUNT = 0;	/* Used to detect hung comm threads */
@@ -4539,9 +4670,8 @@ void set_comm_timers (void)
 					DAYS_BETWEEN_CHECKINS * 86400.0 -
 					current_time));
 
-/* Add the event that checks if the work queue has enough work every 6 */
-/* hours.  As a side effect, this will also start the comm thread in case */
-/* there is an old spool file hanging around. */
+/* Add the event that checks for CERT work and if the work queue has enough work.  As a side effect, this will */
+/* also start the comm thread in case there is an old spool file hanging around. */
 
 	add_timed_event (TE_WORK_QUEUE_CHECK, 5);  /* Start in 5 seconds */
 }
@@ -4920,6 +5050,7 @@ static	time_t	last_time = 0;
 void kbnc_to_text (
 	char	*buf,
 	int	primenet_work_type,
+	int	prp_dblchk,
 	double	k,
 	unsigned long b,
 	unsigned long n,
@@ -4951,7 +5082,10 @@ void kbnc_to_text (
 		work_type_str = "P-1";
 		break;
 	case PRIMENET_WORK_TYPE_PRP:
-		work_type_str = "PRP";
+		work_type_str = prp_dblchk ? "PRPDC" : "PRP";
+		break;
+	case PRIMENET_WORK_TYPE_CERT:
+		work_type_str = "CERT";
 		break;
 	default:
 		work_type_str = "Unknown work type";
@@ -4960,6 +5094,8 @@ void kbnc_to_text (
 	gw_as_string (num, k, b, n, c);
 	sprintf (buf, "%s %s", work_type_str, num);
 }
+
+/* Turn assignment ID into something prettier */
 
 void aid_to_text (
 	char	*buf,
@@ -4984,7 +5120,6 @@ void aid_to_text (
 	}
 	sprintf (buf, "assignment %s", aid);
 }
-
 
 /* Read a spooled message */
 
@@ -5066,11 +5201,11 @@ int sendMessage (
 		OutputStr (COMM_THREAD_NUM, "Contacting PrimeNet Server.\n");
 		break;
 	case PRIMENET_GET_ASSIGNMENT:
-		LogMsg ("Getting assignment from server\n");
+		if (!((struct primenetGetAssignment *)pkt)->get_cert_work) LogMsg ("Getting assignment from server\n");
 		break;
 	case PRIMENET_REGISTER_ASSIGNMENT:
 		kbnc_to_text (info,
-			      ((struct primenetRegisterAssignment *)pkt)->work_type,
+			      ((struct primenetRegisterAssignment *)pkt)->work_type, 0,
 			      ((struct primenetRegisterAssignment *)pkt)->k,
 			      ((struct primenetRegisterAssignment *)pkt)->b,
 			      ((struct primenetRegisterAssignment *)pkt)->n,
@@ -5100,8 +5235,7 @@ int sendMessage (
 		LogMsg (buf);
 		break;
 	case PRIMENET_ASSIGNMENT_RESULT:
-		sprintf (buf, "Sending result to server: %s\n",
-			 ((struct primenetAssignmentResult *)pkt)->message);
+		sprintf (buf, "Sending result to server: %s\n", ((struct primenetAssignmentResult *)pkt)->message);
 		LogMsg (buf);
 		break;
 	case PRIMENET_BENCHMARK_DATA:
@@ -5135,6 +5269,7 @@ int sendMessage (
 	case PRIMENET_GET_ASSIGNMENT:
 		kbnc_to_text (info,
 			      ((struct primenetGetAssignment *)pkt)->work_type,
+			      ((struct primenetGetAssignment *)pkt)->prp_dblchk,
 			      ((struct primenetGetAssignment *)pkt)->k,
 			      ((struct primenetGetAssignment *)pkt)->b,
 			      ((struct primenetGetAssignment *)pkt)->n,
@@ -5411,7 +5546,7 @@ int sendProgramOptions (
 				PTOSetAll (INI_FILE, "WorkPreference", "SrvrPO1", WORK_PREFERENCE, WORK_PREFERENCE[0]);
 			else
 				PTOSetOne (INI_FILE, "WorkPreference", "SrvrPO1", WORK_PREFERENCE, tnum, WORK_PREFERENCE[tnum]);
-        }
+		}
 		if (tnum == -1) {
 			IniWriteInt (LOCALINI_FILE, "SrvrPO2", PRIORITY);
 			IniWriteInt (LOCALINI_FILE, "SrvrPO3", DAYS_OF_WORK);
@@ -5466,6 +5601,7 @@ static	int	send_message_retry_count = 0;
 	double	est, work_to_get, unreserve_threshold;
 	int	rc, stop_reason;
 	int	talked_to_server = FALSE;
+	int	can_get_cert_work, can_get_small_cert_work;
 	int	server_options_counter, retry_count;
 	char	buf[1000];
 
@@ -5553,7 +5689,7 @@ retry:
 
 	_close (fd);
 	gwmutex_unlock (&SPOOL_FILE_MUTEX);
-	
+
 /* Make sure we don't pummel the server with data.  Suppose user uses */
 /* Advanced/Factor to find tiny factors again.  At least, make sure */
 /* he only sends the data once every 5 minutes. */
@@ -5752,6 +5888,67 @@ retry:
 		msg_offset = new_offset;
 	}
 
+/* See if we can request certification work.  Certification work must be done ASAP to reduce disk space used by PrimeNet server. */
+/* Thus, it is priority work.  Some options turn off priority work which precludes getting certification work.  Part-time computers */
+/* are spared certifications.  We are only allowed one certification assignment at a time (part of our spread the load amongst many */
+/* users philosophy).  Also, by default do not get PRP cofactor certs (it annoys some people to interrupt there first time or */
+/* double-checks to process quick work that they believe is not part of GIMPS main purpose).  If the user is doing cofactor work, */
+/* then by all means default to getting cert work on PRP cofactor proofs. */
+
+	can_get_cert_work = (header_words[1] & HEADER_FLAG_WORK_QUEUE) && IniGetInt (LOCALINI_FILE, "CertWork", 1);
+	if (WELL_BEHAVED_WORK || SEQUENTIAL_WORK == 1) can_get_cert_work = FALSE;
+	if (CPU_HOURS <= 12) can_get_cert_work = FALSE;
+	if (can_get_cert_work) {
+		int	max_cert_assignments;
+		can_get_small_cert_work = FALSE;
+		max_cert_assignments = (IniGetInt (LOCALINI_FILE, "CertDailyCPULimit", 10) >= 50 ? 3 : 1);
+		for (tnum = 0; tnum < NUM_WORKER_THREADS; tnum++) {
+			struct work_unit *w;
+			for (w = NULL; ; ) {
+				w = getNextWorkToDoLine (tnum, w, SHORT_TERM_USE);
+				if (w == NULL) break;
+				if (w->work_type == WORK_CERT && --max_cert_assignments == 0) can_get_cert_work = FALSE;
+				if (w->n < 50000000) can_get_small_cert_work = TRUE;
+			}
+		}
+	}
+
+/* Certification work is rate limited two ways.  By MB downloaded and by CPU time consumed */
+/* Update these rate limits and disable getting certification work if either limit has been reached. */
+
+	if (can_get_cert_work) {
+		float	max_daily_MB_limit, max_daily_CPU_limit;
+		float	daily_MB_limit_remaining, daily_CPU_limit_remaining;
+		time_t	current_time, last_update_time;
+		float	days_since_last_update;
+
+		max_daily_MB_limit = (float) IniSectionGetInt (INI_FILE, "PrimeNet", "DownloadDailyLimit", 40); // Daily download limit in MB
+		max_daily_CPU_limit = (float) IniGetInt (LOCALINI_FILE, "CertDailyCPULimit", 10); // Cert Daily cpu limit (1.0 = 1% of 2015 quadcore)
+
+		daily_MB_limit_remaining = IniGetFloat (LOCALINI_FILE, "CertDailyMBRemaining", max_daily_MB_limit);
+		daily_CPU_limit_remaining = IniGetFloat (LOCALINI_FILE, "CertDailyCPURemaining", max_daily_CPU_limit);
+
+		// Calc how many days have elapsed since unused quotas (daily_MB_limit_remaining, daily_CPU_limit_remaining) were updated
+		time (&current_time);
+		last_update_time = IniGetInt (LOCALINI_FILE, "CertDailyRemainingLastUpdate", 0);
+		days_since_last_update = (float) (current_time - last_update_time) / (float) 86400.0;
+		if (days_since_last_update < 0.0) days_since_last_update = 0.0;
+		IniWriteInt (LOCALINI_FILE, "CertDailyRemainingLastUpdate", (unsigned long) current_time);
+
+		// Increase remaining unused quotas based upon time elapsed since last update
+		daily_MB_limit_remaining += days_since_last_update * max_daily_MB_limit;
+		if (daily_MB_limit_remaining > max_daily_MB_limit) daily_MB_limit_remaining = max_daily_MB_limit;
+		daily_CPU_limit_remaining += days_since_last_update * max_daily_CPU_limit;
+		if (daily_CPU_limit_remaining > max_daily_CPU_limit) daily_CPU_limit_remaining = max_daily_CPU_limit;
+
+		// Save the updated quotas
+		IniWriteFloat (LOCALINI_FILE, "CertDailyMBRemaining", daily_MB_limit_remaining);
+		IniWriteFloat (LOCALINI_FILE, "CertDailyCPURemaining", daily_CPU_limit_remaining);
+
+		// Disable getting cert work if either quota exceeded
+		if (daily_MB_limit_remaining <= 0.0 || daily_CPU_limit_remaining <= 0.0) can_get_cert_work = FALSE;
+	}
+
 /* Loop over all worker threads to get enough work for each thread */
 
 	unreserve_threshold = IniGetInt (INI_FILE, "UnreserveDays", 30) * 86400.0;
@@ -5759,6 +5956,7 @@ retry:
 	for (tnum = 0; tnum < NUM_WORKER_THREADS; tnum++) {
 	    struct work_unit *w;
 	    int	num_work_units;
+	    int	first_work_unit_interruptable = TRUE;
 
 /* Get work to do until we've accumulated enough to keep us busy for */
 /* a while.  If we have too much work to do, lets give some back. */
@@ -5800,6 +5998,15 @@ retry:
 			if (stop_reason) goto error_exit;
 			continue;
 		}
+
+/* If this is the first work unit for this worker, clear flag if it might be costly to interrupt it with priority work */
+/* This would be P-1 (especially) or ECM where stage 2 setup can be expensive.  Also PRP tests that are near done should */
+/* be completed ASAP to free up the temp disk space they are using.  Actually, any work that is near done, the user might */
+/* be watching with anticipation for its completion. */
+
+		if (est == 0.0 && IniGetInt (LOCALINI_FILE, "CertDailyCPULimit", 10) < 50 &&
+		    (w->work_type == WORK_PMINUS1 || w->work_type == WORK_PFACTOR || w->work_type == WORK_ECM || w->pct_complete > 0.85))
+			first_work_unit_interruptable = FALSE;
 
 /* Adjust our time estimate */
 
@@ -5863,8 +6070,7 @@ retry:
 /* If we get an invalid assignment key, then the user probably unreserved */
 /* the exponent using the web forms - delete it from our work to do file. */
 
-		if ((header_words[1] & HEADER_FLAG_END_DATES || registered_assignment) &&
-		    w->assignment_uid[0]) {
+		if ((header_words[1] & HEADER_FLAG_END_DATES || registered_assignment) && w->assignment_uid[0]) {
 			struct primenetAssignmentProgress pkt2;
 			memset (&pkt2, 0, sizeof (pkt2));
 			strcpy (pkt2.computer_guid, COMPUTER_GUID);
@@ -5872,13 +6078,13 @@ retry:
 			strcpy (pkt2.assignment_uid, w->assignment_uid);
 			strcpy (pkt2.stage, w->stage);
 			pkt2.pct_complete = w->pct_complete * 100.0;
-			pkt2.end_date = (unsigned long) est;
+			// Cert work is priority work that should complete within a half a day
+			pkt2.end_date = (unsigned long) ((w->work_type == WORK_CERT) ? 43200.0 : est);
 			pkt2.next_update = (uint32_t) (DAYS_BETWEEN_CHECKINS * 86400.0);
 			pkt2.fftlen = w->fftlen;
 			LOCKED_WORK_UNIT = w;
 			rc = sendMessage (PRIMENET_ASSIGNMENT_PROGRESS, &pkt2);
-			if (rc == PRIMENET_ERROR_INVALID_ASSIGNMENT_KEY ||
-			    rc == PRIMENET_ERROR_WORK_NO_LONGER_NEEDED) {
+			if (rc == PRIMENET_ERROR_INVALID_ASSIGNMENT_KEY || rc == PRIMENET_ERROR_WORK_NO_LONGER_NEEDED) {
 				est -= work_estimate (tnum, w);
 				rc = deleteWorkToDoLine (tnum, w, TRUE);
 			} else if (rc) {
@@ -5893,16 +6099,98 @@ retry:
 /* race condition when quitting gimps that makes it possible to get here */
 /* with a request to get exponents and USE_PRIMENET not set. */
 
-	    if (header_words[1] & HEADER_FLAG_QUIT_GIMPS ||
-		IniGetInt (INI_FILE, "NoMoreWork", 0) ||
-		!USE_PRIMENET)
-		    continue;
+	    if (header_words[1] & HEADER_FLAG_QUIT_GIMPS || IniGetInt (INI_FILE, "NoMoreWork", 0) || !USE_PRIMENET) continue;
+
+/* Occasionally get certification work from the server.  P-1 and ECM stage 2 may have significant costs with an interruption */
+/* to do priority work.  Also, lots of work_units is not a typical setup -- may indicate a large worktodo.txt file with high */
+/* costs reading and writing it.  Also, provide a method of limiting CERT work to one specific worker. */
+
+	    if (can_get_cert_work && first_work_unit_interruptable && num_work_units < 20 && IniGetInt (LOCALINI_FILE, "CertWorker", tnum+1) == tnum+1) {
+		int	num_certs = 0;
+
+		can_get_cert_work = FALSE;	// Only one worker can get certification work
+
+/* Get up to 5 certifications (but usually just one).  The limit of 5 is rather arbitrary. */
+
+		while (num_certs < 5) {
+			struct primenetGetAssignment pkt1;
+			struct work_unit w;
+
+/* Get a certification work unit to process */
+
+			memset (&pkt1, 0, sizeof (pkt1));
+			strcpy (pkt1.computer_guid, COMPUTER_GUID);
+			pkt1.cpu_num = tnum;
+			pkt1.get_cert_work = IniGetInt (LOCALINI_FILE, "CertDailyCPULimit", 10); // Helps server decide cert exponent size
+			if (pkt1.get_cert_work <= 0) pkt1.get_cert_work = 1;
+			pkt1.min_exp = IniGetInt (LOCALINI_FILE, "CertMinExponent", can_get_small_cert_work ? 0 : 50000000);
+			pkt1.max_exp = IniGetInt (LOCALINI_FILE, "CertMaxExponent", NUM_CPUS / NUM_WORKER_THREADS < 4 ? 200000000 : 0);
+			LOCKED_WORK_UNIT = NULL;
+			rc = sendMessage (PRIMENET_GET_ASSIGNMENT, &pkt1);
+			// Ignore errors, we expect this work to only be available sometimes
+			if (rc) break;
+			talked_to_server = TRUE;
+
+/* Format the work_unit structure based on the work_type */
+
+			if (pkt1.work_type != PRIMENET_WORK_TYPE_CERT) {
+				sprintf (buf, "Received unknown work type (expected 200): %lu.\n", (unsigned long) pkt1.work_type);
+				LogMsg (buf);
+				goto error_exit;
+			}
+			memset (&w, 0, sizeof (w));
+			w.work_type = WORK_CERT;
+			strcpy (w.assignment_uid, pkt1.assignment_uid);
+			w.k = 1.0;
+			w.b = 2;
+			w.n = pkt1.n;
+			w.c = -1;
+			w.cert_squarings = pkt1.num_squarings;
+			num_certs++;
+
+/* Write the exponent to our worktodo file */
+
+			stop_reason = addWorkToDoLine (tnum, &w);
+			if (stop_reason) goto error_exit;
+
+/* Update the daily cert quotas */
+
+			float	daily_MB_limit_remaining, daily_CPU_limit_remaining, daily_CPU_quota_used;
+			daily_MB_limit_remaining = IniGetFloat (LOCALINI_FILE, "CertDailyMBRemaining", 40.0);
+			daily_CPU_limit_remaining = IniGetFloat (LOCALINI_FILE, "CertDailyCPURemaining", 10.0);
+
+			// Decrease remaining unused quotas based expected work required for this cert
+			// A daily CPU limit of 1.0 is equals 1% of the work a 2015 quad-core CPU can do in a day.
+			// My dream machine CPUs from that era can do 110,000 squarings of 97.3M in 1/100th of a day.
+			daily_MB_limit_remaining -= (float) w.n / (float) 8388608.0;	// Expected MB to download
+			daily_CPU_quota_used = (float) w.cert_squarings / (float) 110000.0;	// Adjust for num_squarings 
+			daily_CPU_quota_used *= (float) pow (2.1, _log2 ((float) w.n / (float) 97300000.0));	// Adjust (roughly) for FFT timing difference
+			daily_CPU_limit_remaining -= daily_CPU_quota_used;
+
+			// Save the updated quotas
+			IniWriteFloat (LOCALINI_FILE, "CertDailyMBRemaining", daily_MB_limit_remaining);
+			IniWriteFloat (LOCALINI_FILE, "CertDailyCPURemaining", daily_CPU_limit_remaining);
+
+			// If quotas exceeded, get no more cert assignments
+			if (daily_MB_limit_remaining <= 0.0 || daily_CPU_limit_remaining <= 0.0) break;
+
+			// If the certification exponent is small the certification will be fast.  To avoid lots of priority work interrupts
+			// to do fast work, get several small certifications at one time (or several small and one big).
+			if (pkt1.n < 50000000) continue;
+
+			// Usually get one big cert at a time.  For users that want to lump their CERTs together (perhaps to reduce the number
+			// priority work interruptions), allow getting several certifications at a time.
+			if (num_certs < IniGetInt (LOCALINI_FILE, "CertQuantity", 1)) continue;
+
+			// Usually get one big cert at a time.  For the rare user that wants to do lots of certifications (they set cert CPU
+			// percentage above 50%) let them get several.
+			if (IniGetInt (LOCALINI_FILE, "CertDailyCPULimit", 10) < 50) break;
+		}
+	    }
 
 /* If we don't have enough work to do, get more work from the server. */
 
-	    while (est < work_to_get &&
-		   ! IniGetInt (INI_FILE, "NoMoreWork", 0) &&
-		   num_work_units < IniGetInt (INI_FILE, "MaxExponents", 15)) {
+	    while (est < work_to_get && num_work_units < IniGetInt (INI_FILE, "MaxExponents", 15)) {
 		struct primenetGetAssignment pkt1;
 		struct primenetAssignmentProgress pkt2;
 		struct work_unit w;
@@ -5912,6 +6200,9 @@ retry:
 		memset (&pkt1, 0, sizeof (pkt1));
 		strcpy (pkt1.computer_guid, COMPUTER_GUID);
 		pkt1.cpu_num = tnum;
+		pkt1.temp_disk_space = CPU_WORKER_DISK_SPACE;
+		pkt1.min_exp = IniGetInt (LOCALINI_FILE, "GetMinExponent", 0);
+		pkt1.max_exp = IniGetInt (LOCALINI_FILE, "GetMaxExponent", 0);
 		LOCKED_WORK_UNIT = NULL;
 		rc = sendMessage (PRIMENET_GET_ASSIGNMENT, &pkt1);
 		if (rc) goto error_exit;
@@ -6039,27 +6330,26 @@ retry:
 	    }
 	}
 
-/* Set some ini flags after we've successfully quit gimps */
+/* Set some ini flags after we've successfully quit gimps.  It may take a while to get all the proof files sent. */
 
+	char	proof_files[50][255];		// We can send up to 50 proof files
 	if ((header_words[1] & HEADER_FLAG_QUIT_GIMPS && USE_PRIMENET) ||
-	    (IniGetInt (INI_FILE, "NoMoreWork", 0) && WORKTODO_COUNT == 0)) {
+	    (IniGetInt (INI_FILE, "NoMoreWork", 0) && WORKTODO_COUNT == 0 && ProofFileNames (proof_files) == 0)) {
 		USE_PRIMENET = 0;
 		IniWriteInt (INI_FILE, "UsePrimenet", 0);
 		IniWriteInt (INI_FILE, "NoMoreWork", 0);
 		OutputSomewhere (COMM_THREAD_NUM, "Successfully quit GIMPS.\n");
 	}
 
-/* After sending new completion dates remember the current time */
-/* so that we can send new completion dates in a month.  Set a timer */
-/* to send them again. */
+/* After sending new completion dates remember the current time so that we can send new completion dates in a day. */
+/* Set a timer to send them again. */
 
 	else if (header_words[1] & HEADER_FLAG_END_DATES) {
 		time_t current_time;
 		time (&current_time);
 		IniWriteInt (LOCALINI_FILE, "LastEndDatesSent", (long) current_time);
 		if (!MANUAL_COMM)
-			add_timed_event (TE_COMPLETION_DATES,
-					 (int) (DAYS_BETWEEN_CHECKINS * 86400.0));
+			add_timed_event (TE_COMPLETION_DATES, (int) (DAYS_BETWEEN_CHECKINS * 86400.0));
 	}
 
 /* Delete the spool file. However, we don't delete the file if any writes */
@@ -6407,6 +6697,7 @@ void timed_events_scheduler (void *arg)
 		time (&this_time);
 		for (i = 0; i < MAX_TIMED_EVENTS; i++) {
 			int	fire;
+			float	cert_freq;
 			gwmutex_lock (&TIMED_EVENTS_MUTEX);
 			fire = (timed_events[i].active && this_time >= timed_events[i].time_to_fire);
 			gwmutex_unlock (&TIMED_EVENTS_MUTEX);
@@ -6420,8 +6711,22 @@ void timed_events_scheduler (void *arg)
 				timed_events[i].active = FALSE;
 				checkPauseWhileRunning ();
 				break;
-			case TE_WORK_QUEUE_CHECK:	/* Check work queue event */
-				timed_events[i].time_to_fire = this_time + TE_WORK_QUEUE_CHECK_FREQ;
+			case TE_WORK_QUEUE_CHECK:	/* Check for CERT work (and regular work) event */
+				// Make more powerful computers check for CERT work more frequently (their fair share)
+				cert_freq = (float) (NUM_CPUS >= 20 ? 3.0 :		/* 20+ cores = 3 hours */
+						     NUM_CPUS >= 12 ? 4.0 :		/* 12-19 cores = 4 hours */
+						     NUM_CPUS >= 7 ? 6.0 :		/* 7-11 cores = 6 hours */
+						     NUM_CPUS >= 3 ? 8.0 :		/* 3-6 cores = 8 hours */
+						     NUM_CPUS >= 2 ? 12.0 : 24.0);	/* 2 cores = 12 hours, 1 core = 24 hours */
+				// Serious CERT volunteers check every half hour
+				if (IniGetInt (LOCALINI_FILE, "CertDailyCPULimit", 10) >= 50) cert_freq = 0.5;
+				// Let user pick their own CERT frequency (in hours).  Minimum is 15 minutes.
+				cert_freq = IniGetFloat (LOCALINI_FILE, "CertGetFrequency", cert_freq);
+				if (cert_freq < 0.25) cert_freq = 0.25;
+				// If CERT work is disabled, check regular work queue every 8 hours
+				if (!IniGetInt (LOCALINI_FILE, "CertWork", 1)) cert_freq = 8.0;
+				// Set timer (convert frequency from hours to seconds)
+				timed_events[i].time_to_fire = this_time + (int) (cert_freq * 3600.0);
 				spoolMessage (MSG_CHECK_WORK_QUEUE, NULL);
 				break;
 			case TE_COMM_SERVER:	/* Retry communication with server event */
@@ -6487,3 +6792,93 @@ void timed_events_scheduler (void *arg)
 
 	}
 }
+
+/* Are we in the proof upload time window */
+
+int inUploadWindow (int *minutes_to_start)
+{
+	char	timebuf[80];
+	unsigned int start_time, end_time, current_time;	// In minutes since midnight
+	time_t	current_t;
+	struct tm *x;
+
+/* Get upload times from INI file */
+
+	IniSectionGetString (INI_FILE, "PrimeNet", "UploadStartTime", timebuf, sizeof (timebuf), "00:00");
+	start_time = strToMinutes (timebuf);
+	IniSectionGetString (INI_FILE, "PrimeNet", "UploadEndTime", timebuf, sizeof (timebuf), "24:00");
+	end_time = strToMinutes (timebuf);
+
+// BUG - Enforce a minimum upload window of 2 hours.  (make this user settable?)
+	if ((start_time <= end_time && start_time + 120 > end_time) ||
+	    (start_time > end_time && start_time + 120 > end_time + 1440))
+		end_time = (start_time + 120) % 1440;
+
+/* Get the current time */
+
+	time (&current_t);
+	x = localtime (&current_t);
+	current_time = x->tm_hour * 60 + x->tm_min;
+
+/* Return optional minutes until start time begins */
+
+	if (minutes_to_start != NULL)
+		*minutes_to_start = (1440 + start_time - current_time) % 1440;
+
+/* Return TRUE if the current time is between start time and end time */
+
+	if (start_time <= end_time) return (current_time >= start_time && current_time <= end_time);
+	return (current_time >= start_time || current_time <= end_time);
+}
+
+/* This routine runs in its own thread continuously looking for proof files to upload */
+
+void proofUploader (void *arg)
+{
+	char	proof_files[50][255];		// We can send up to 50 proof files
+	int	i, minutes_to_start, num_proof_files;
+
+/* Loop forever */
+
+	for ( ; ; ) {
+
+/* If we are not using Primenet, wait one hour in case user changes settings from dialog box) */
+
+		if (!USE_PRIMENET) {
+			Sleep (60 * 60 * 1000);
+			continue;
+		}
+
+/* If we are not in the upload time window, pause until we are (or one hour, in case user changes time window from dialog box) */
+
+		if (!inUploadWindow (&minutes_to_start)) {
+			if (minutes_to_start > 60) minutes_to_start = 60;
+			Sleep (minutes_to_start * 60 * 1000);
+			continue;
+		}
+
+/* Start sending all the proof files in the directory */
+
+		// Get the proof files sitting in our directory
+		num_proof_files = ProofFileNames (proof_files);
+		if (num_proof_files < 0) {
+			OutputBoth (COMM_THREAD_NUM, "Unable to get list of proof files in the current directory\n");
+			num_proof_files = 0;
+		}
+
+		// There is a race condition where this proof uploading thread could attempt to send the proof file
+		// before the results reporting thread has submitted the results of the PRP test.  This results in a
+		// harmless "Unauthorized" error message.  Here is a rather low-tech "solution" to make this less likely.
+		if (num_proof_files) Sleep (5 * 60 * 1000);	// Sleep 5 more minutes
+
+		// Send each file
+		for (i = 0; i < num_proof_files && inUploadWindow (NULL); i++) {
+			ProofUpload (proof_files[i]);
+		}
+
+/* Sleep for one hour to look for more proof files */
+
+		Sleep (60 * 60 * 1000);
+	}
+}
+

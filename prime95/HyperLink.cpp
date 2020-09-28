@@ -136,12 +136,12 @@ END_MESSAGE_MAP()
 void CHyperLink::OnClicked()
 {
     m_bOverControl = FALSE;
-    int result = (int)GotoURL(m_strURL, SW_SHOW);
-    m_bVisited = (result > HINSTANCE_ERROR);
+    HINSTANCE result = GotoURL(m_strURL, SW_SHOW);
+    m_bVisited = (result > (HINSTANCE) HINSTANCE_ERROR);
     if (!m_bVisited)
     {
         MessageBeep(MB_ICONEXCLAMATION);     // Unable to follow link
-        ReportError(result);
+        ReportError((LONG64) result);
     }
     else 
         SetVisited();                        // Repaint to show visited colour
@@ -431,7 +431,7 @@ LONG CHyperLink::GetRegKey(HKEY key, LPCTSTR subkey, LPTSTR retdata)
     return retval;
 }
 
-void CHyperLink::ReportError(int nError)
+void CHyperLink::ReportError(LONG64 nError)
 {
     CString str;
     switch (nError) {
@@ -462,7 +462,7 @@ HINSTANCE CHyperLink::GotoURL(LPCTSTR url, int showcmd)
     HINSTANCE result = ShellExecute(NULL, _T("open"), url, NULL,NULL, showcmd);
 
     // If it failed, get the .htm regkey and lookup the program
-    if ((UINT)result <= HINSTANCE_ERROR) {
+    if (result <= (HINSTANCE) HINSTANCE_ERROR) {
 
         if (GetRegKey(HKEY_CLASSES_ROOT, _T(".htm"), key) == ERROR_SUCCESS) {
             lstrcat(key, _T("\\shell\\open\\command"));
@@ -484,7 +484,7 @@ HINSTANCE CHyperLink::GotoURL(LPCTSTR url, int showcmd)
                 lstrcat(pos, url);
 
                 USES_CONVERSION;
-                result = (HINSTANCE) WinExec(T2A(key),showcmd);
+                result = (HINSTANCE) (LONG64) WinExec(T2A(key),showcmd);
             }
         }
     }

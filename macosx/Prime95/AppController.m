@@ -3,7 +3,7 @@
 //  Prime95
 //
 //  Created by George Woltman on 4/17/09.
-//  Copyright 2009-2019 Mersenne Research, Inc. All rights reserved.
+//  Copyright 2009-2020 Mersenne Research, Inc. All rights reserved.
 //
 
 #import "AppController.h"
@@ -53,6 +53,9 @@
 #define _read		read
 #define _write		write
 #define _lseek		lseek
+#define _lseeki64	lseek
+#define _fseeki64	fseek
+#define _chsize_s	ftruncate
 #define _unlink		unlink
 #define _creat		creat
 #define _chdir		chdir

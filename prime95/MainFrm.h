@@ -1,4 +1,5 @@
 // MainFrm.h : interface of the CMainFrame class
+// Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
 //
 /////////////////////////////////////////////////////////////////////////////
 const int MYWM_TRAYMESSAGE = WM_APP + 100;
@@ -54,7 +55,6 @@ protected:
 	afx_msg void OnStopContinue();
 	afx_msg void OnTile();
 	afx_msg void OnPosition();
-	afx_msg LRESULT OnServiceStop(WPARAM wParam, LPARAM lParam);
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 public:

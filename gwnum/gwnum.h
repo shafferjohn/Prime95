@@ -16,7 +16,7 @@
 | threads IF AND ONLY IF each uses a different gwhandle structure
 | initialized by gwinit.
 | 
-|  Copyright 2002-2019 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2002-2020 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 #ifndef _GWNUM_H
@@ -298,6 +298,10 @@ void gwfree (
 void gwfreeall (
 	gwhandle *gwdata);	/* Handle initialized by gwsetup */
 
+/* Free internal memory that can be safely freed.  Call this prior to using a lot of gwnum memory. */
+/* There may be some internal gwnum memory that can be safely freed. */
+#define gwfree_internal_memory(h) (gwfree((h), (h)->GW_RANDOM), (h)->GW_RANDOM = NULL)
+
 /*---------------------------------------------------------------------+
 |                        GWNUM CONVERSION ROUTINES                     |
 +---------------------------------------------------------------------*/
@@ -559,7 +563,7 @@ void gwsquare2_carefully (
 
 void gwmul_carefully (
 	gwhandle *gwdata,	/* Handle initialized by gwsetup */
-	gwnum	s,		/* Source */
+	gwnum	s,		/* Source -- preserved */
 	gwnum	t);		/* Source and destination */
 
 

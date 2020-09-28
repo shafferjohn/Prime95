@@ -6,9 +6,9 @@
 # objconv comes courtesy of Agner Fog.  Download available at
 # http://www.agner.org/optimize/#objconv
 
-masm=uasm32 /c -coff
-#masm=uasm32 /c -Fl -coff
-#masm=uasm32 /c -Fl -Sf -Sa -Sg -coff
+masm=uasm64 /c -coff
+#masm=uasm64 /c -Fl -coff
+#masm=uasm64 /c -Fl -Sf -Sa -Sg -coff
 #masm=ml /c /coff
 #masm=ml /c /coff /Fl /Sf /Sa
 
@@ -179,10 +179,10 @@ debug\giants.obj: giants.c giants.h
     $(cldo) /Fodebug\giants.obj giants.c
 
 release\ecmstag1.obj: ecmstag1.c gwnum.h
-    $(cl)  /Ic:\gmp /Forelease\ecmstag1.obj ecmstag1.c
+    $(cl)  /Ic:\gmp32 /Forelease\ecmstag1.obj ecmstag1.c
 
 debug\ecmstag1.obj: ecmstag1.c gwnum.h
-    $(cld) /Ic:\gmp /Fodebug\ecmstag1.obj ecmstag1.c
+    $(cld) /Ic:\gmp32 /Fodebug\ecmstag1.obj ecmstag1.c
 
 # Create 32-bit object files
 
