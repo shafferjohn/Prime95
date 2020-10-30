@@ -35,7 +35,7 @@ jobs:
     - name: Push Results
       env:
         GITHUB_USER: "bot"
-        GITHUB_EMAIL: "bot@github.com"
+        GITHUB_EMAIL: "actions@github.com"
       run: |
         git config user.name "${GITHUB_USER}"
         git config user.email "${GITHUB_EMAIL}"
