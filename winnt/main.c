@@ -1,4 +1,6 @@
 
+#define bool int
+
 #include <windows.h> 
 #include <winnls.h>
 #include <tchar.h>

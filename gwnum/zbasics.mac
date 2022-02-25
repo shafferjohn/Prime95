@@ -1,9 +1,8 @@
-; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2021 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
-; These macros implement basic AVX-512 building blocks that will be used by
-; all FFT types.
+; These macros implement basic AVX-512 building blocks that will be used by all FFT types.
 ;
 
 ;;
@@ -625,7 +624,7 @@ zs_complex_mult MACRO real1, imag1, real2, imag2, tmp1, tmp2
 ;; This is done for zero-padded FFTs only.
 
 zsquare7 MACRO	src1
-	LOCAL	nozpad
+	LOCAL	nozpad, muladd, mulsub, hard, done
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	nozpad			;; No, skip 7 word multiply
 	vmovsd	xmm1, Q [src1-88]	;; Load copy of input FFT word at halfway - 3
@@ -643,45 +642,138 @@ zsquare7 MACRO	src1
 					;;	   + word2 * word-2
 					;;	   + word3 * word-3
 	zfmaddsd xmm0, xmm4, xmm4, xmm0	;;	   + word0 * word0
-	vmovsd	ZPAD0, xmm0
 
-	vmulsd	xmm0, xmm2, xmm7	;; Result1 = word-2 * word3
-	zfmaddsd xmm0, xmm3, xmm6, xmm0	;;	   + word-1 * word2
-	zfmaddsd xmm0, xmm4, xmm5, xmm0	;;	   + word0 * word1
-	vaddsd	xmm0, xmm0, xmm0	;;	   + word1 * word0
+	vmulsd	xmm1, xmm2, xmm7	;; Result1 = word-2 * word3
+	zfmaddsd xmm1, xmm3, xmm6, xmm1	;;	   + word-1 * word2
+	zfmaddsd xmm1, xmm4, xmm5, xmm1	;;	   + word0 * word1
+	vaddsd	xmm1, xmm1, xmm1	;;	   + word1 * word0
 					;;	   + word2 * word-1
 					;;	   + word3 * word-2
-	vmovsd	ZPAD1, xmm0
 
-	vmulsd	xmm0, xmm3, xmm7	;; Result2 = word-1 * word3
-	zfmaddsd xmm0, xmm4, xmm6, xmm0	;;	   + word0 * word2
-	vaddsd	xmm0, xmm0, xmm0	;;	   + word2 * word0
+	vmulsd	xmm2, xmm3, xmm7	;; Result2 = word-1 * word3
+	zfmaddsd xmm2, xmm4, xmm6, xmm2	;;	   + word0 * word2
+	vaddsd	xmm2, xmm2, xmm2	;;	   + word2 * word0
 					;;	   + word3 * word-1
-	zfmaddsd xmm0, xmm5, xmm5, xmm0	;;	   + word1 * word1
-	vmovsd	ZPAD2, xmm0
+	zfmaddsd xmm2, xmm5, xmm5, xmm2	;;	   + word1 * word1
 
-	vmulsd	xmm0, xmm4, xmm7	;; Result3 = word0 * word3
-	zfmaddsd xmm0, xmm5, xmm6, xmm0	;;	   + word1 * word2
-	vaddsd	xmm0, xmm0, xmm0	;;	   + word2 * word1
+	vmulsd	xmm3, xmm4, xmm7	;; Result3 = word0 * word3
+	zfmaddsd xmm3, xmm5, xmm6, xmm3	;;	   + word1 * word2
+	vaddsd	xmm3, xmm3, xmm3	;;	   + word2 * word1
 					;;	   + word3 * word0
-	vmovsd	ZPAD3, xmm0
 
-	vmulsd	xmm0, xmm5, xmm7	;; Result4 = word1 * word3
-	vaddsd	xmm0, xmm0, xmm0	;;	   + word3 * word1
-	zfmaddsd xmm0, xmm6, xmm6, xmm0	;;	   + word2 * word2
-	vmovsd	ZPAD4, xmm0
+	vmulsd	xmm4, xmm5, xmm7	;; Result4 = word1 * word3
+	vaddsd	xmm4, xmm4, xmm4	;;	   + word3 * word1
+	zfmaddsd xmm4, xmm6, xmm6, xmm4	;;	   + word2 * word2
 
-	vmulsd	xmm0, xmm6, xmm7	;; Result5 = word2 * word3
-	vaddsd	xmm0, xmm0, xmm0	;;	   + word3 * word2
-	vmovsd	ZPAD5, xmm0
+	vmulsd	xmm5, xmm6, xmm7	;; Result5 = word2 * word3
+	vaddsd	xmm5, xmm5, xmm5	;;	   + word3 * word2
 
-	vmulsd	xmm0, xmm7, xmm7	;; Result6 = word3 * word3
-	vmovsd	ZPAD6, xmm0
+	vmulsd	xmm6, xmm7, xmm7	;; Result6 = word3 * word3
+
+	mov	al, mul4_opcode		;; Load gwmul4 opcode
+	and	al, 7fh			;; Mask out the save FFT results flag
+	jz	done			;; Jump if not doing fma
+
+	mov	r9, SRC2ARG		;; Distance to s3 arg from gwmuladd4 and gwmulsub4
+	mov	r10, SRC3ARG		;; Distance to FFT(1)
+	cmp	r10, 1			;; Do we have an FFT(1)
+	jne	short hard		;; Yes, do it the hard way
+
+	vmovsd	xmm7, Q [rsi+r9-88]	;; Load addin0
+	vmovsd	xmm8, Q [rsi+r9-80]	;; Load addin1
+	vmovsd	xmm9, Q [rsi+r9-72]	;; Load addin2
+	vmovsd	xmm10, Q [rsi+r9-64]	;; Load addin3
+	vmovsd	xmm11, Q [rsi+r9-56]	;; Load addin4
+	vmovsd	xmm12, Q [rsi+r9-48]	;; Load addin5
+	vmovsd	xmm13, Q [rsi+r9-40]	;; Load addin6
+	cmp	al, 3			;; Are we doing an muladd or mulsub
+	jg	mulsub			;; 4 = mulsub
+	je	muladd			;; 3 = muladd, fall through
+
+hard:	vmovsd	xmm8, Q [rsi+r9-88]	;; Load copy of add-in FFT word at halfway - 3
+	vmovsd	xmm9, Q [rsi+r9-80]	;; Load copy of add-in FFT word at halfway - 2
+	vmovsd	xmm10, Q [rsi+r9-72]	;; Load copy of add-in FFT word at halfway - 1
+	vmovsd	xmm11, Q [rsi+r9-64]	;; Load copy of add-in FFT word at halfway + 0
+	vmovsd	xmm12, Q [rsi+r9-56]	;; Load copy of add-in FFT word at halfway + 1
+	vmovsd	xmm13, Q [rsi+r9-48]	;; Load copy of add-in FFT word at halfway + 2
+	vmovsd	xmm14, Q [rsi+r9-40]	;; Load copy of add-in FFT word at halfway + 3
+	vmovsd	xmm15, Q [rsi+r10-88]	;; Load copy of FFT(1) word at halfway - 3
+	vmovsd	xmm16, Q [rsi+r10-80]	;; Load copy of FFT(1) word at halfway - 2
+	vmovsd	xmm17, Q [rsi+r10-72]	;; Load copy of FFT(1) word at halfway - 1
+	vmovsd	xmm18, Q [rsi+r10-64]	;; Load copy of FFT(1) word at halfway + 0
+	vmovsd	xmm19, Q [rsi+r10-56]	;; Load copy of FFT(1) word at halfway + 1
+	vmovsd	xmm20, Q [rsi+r10-48]	;; Load copy of FFT(1) word at halfway + 2
+	vmovsd	xmm21, Q [rsi+r10-40]	;; Load copy of FFT(1) word at halfway + 3
+
+	vmulsd	xmm7, xmm8, xmm21		;; Addin0 = word-3 * word3
+	zfmaddsd xmm7, xmm9, xmm20, xmm7	;;	  + word-2 * word2
+	zfmaddsd xmm7, xmm10, xmm19, xmm7	;;	  + word-1 * word1
+	zfmaddsd xmm7, xmm11, xmm18, xmm7	;;	  + word0 * word0
+	zfmaddsd xmm7, xmm12, xmm17, xmm7	;;	  + word1 * word-1
+	zfmaddsd xmm7, xmm13, xmm16, xmm7	;;	  + word2 * word-2
+	zfmaddsd xmm7, xmm14, xmm15, xmm7	;;	  + word3 * word-3
+
+	vmulsd	xmm8, xmm9, xmm21		;; Addin1 = word-2 * word3
+	zfmaddsd xmm8, xmm10, xmm20, xmm8	;;	  + word-1 * word2
+	zfmaddsd xmm8, xmm11, xmm19, xmm8	;;	  + word0 * word1
+	zfmaddsd xmm8, xmm12, xmm18, xmm8	;;	  + word1 * word0
+	zfmaddsd xmm8, xmm13, xmm17, xmm8	;;	  + word2 * word-1
+	zfmaddsd xmm8, xmm14, xmm16, xmm8	;;	  + word3 * word-2
+
+	vmulsd	xmm9, xmm10, xmm21		;; Addin2 = word-1 * word3
+	zfmaddsd xmm9, xmm11, xmm20, xmm9	;;	  + word0 * word2
+	zfmaddsd xmm9, xmm12, xmm19, xmm9	;;	  + word1 * word1
+	zfmaddsd xmm9, xmm13, xmm18, xmm9	;;	  + word2 * word0
+	zfmaddsd xmm9, xmm14, xmm17, xmm9	;;	  + word3 * word-1
+
+	vmulsd	xmm10, xmm11, xmm21		;; Addin3 = word0 * word3
+	zfmaddsd xmm10, xmm12, xmm20, xmm10	;;	  + word1 * word2
+	zfmaddsd xmm10, xmm13, xmm19, xmm10	;;	  + word2 * word1
+	zfmaddsd xmm10, xmm14, xmm18, xmm10	;;	  + word3 * word0
+
+	vmulsd	xmm11, xmm12, xmm21		;; Addin4 = word1 * word3
+	zfmaddsd xmm11, xmm13, xmm20, xmm11	;;	  + word2 * word2
+	zfmaddsd xmm11, xmm14, xmm19, xmm11	;;	  + word3 * word1
+
+	vmulsd	xmm12, xmm13, xmm21		;; Addin5 = word2 * word3
+	zfmaddsd xmm12, xmm14, xmm20, xmm12	;;	  + word3 * word2
+
+	vmulsd	xmm13, xmm14, xmm21		;; Addin6 = word3 * word3
+
+	cmp	al, 3				;; Are we doing muladd or mulsub
+	jg	mulsub				;; 4 = mulsub
+	;je	muladd				;; 3 = muladd, fall through
+
+muladd:	vaddpd	xmm0, xmm0, xmm7		;; Add the addins
+	vaddpd	xmm1, xmm1, xmm8
+	vaddpd	xmm2, xmm2, xmm9
+	vaddpd	xmm3, xmm3, xmm10
+	vaddpd	xmm4, xmm4, xmm11
+	vaddpd	xmm5, xmm5, xmm12
+	vaddpd	xmm6, xmm6, xmm13
+	jmp	done
+
+mulsub:	vsubpd	xmm0, xmm0, xmm7		;; Subtract the addins
+	vsubpd	xmm1, xmm1, xmm8
+	vsubpd	xmm2, xmm2, xmm9
+	vsubpd	xmm3, xmm3, xmm10
+	vsubpd	xmm4, xmm4, xmm11
+	vsubpd	xmm5, xmm5, xmm12
+	vsubpd	xmm6, xmm6, xmm13
+
+done:	vmovsd	ZPAD0, xmm0			;; Save the zero-pad adjustments
+	vmovsd	ZPAD1, xmm1
+	vmovsd	ZPAD2, xmm2
+	vmovsd	ZPAD3, xmm3
+	vmovsd	ZPAD4, xmm4
+	vmovsd	ZPAD5, xmm5
+	vmovsd	ZPAD6, xmm6
+
 nozpad:
 	ENDM
 
 zmult7	MACRO	src1, src2
-	LOCAL	nozpad
+	LOCAL	nozpad, orig, addmul, submul, muladd, mulsub, hard, done
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	nozpad			;; No, skip 7 word multiply
 
@@ -701,48 +793,163 @@ zmult7	MACRO	src1, src2
 	vmovsd	xmm13, Q [src2-48]	;; Load copy of input FFT word at halfway + 2
 	vmovsd	xmm14, Q [src2-40]	;; Load copy of input FFT word at halfway + 3
 
-	vmulsd	xmm0, xmm1, xmm14	;; Result0 = word-3 * word3
+	mov	al, mul4_opcode		;; Load gwmul4 opcode
+	and	al, 7fh			;; Mask out the save FFT results flag
+	jz	orig			;; Jump if not doing addmul or submul of fma
+	mov	r9, SRC2ARG		;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg from gwmuladd4 and gwmulsub4
+	cmp	al, 2			;; Are we doing an addmul or submul or fma
+	ja	orig			;; fma, we'll handle this later
+	je	short submul		;; 2 = submul
+	;jb	short addmul		;; 1 = addmul, fall through
+
+addmul:	vaddsd	xmm8, xmm8, Q [rsi+r9-88]	;; Add copy of input FFT word at halfway - 3
+	vaddsd	xmm9, xmm9, Q [rsi+r9-80]	;; Add copy of input FFT word at halfway - 2
+	vaddsd	xmm10, xmm10, Q [rsi+r9-72]	;; Add copy of input FFT word at halfway - 1
+	vaddsd	xmm11, xmm11, Q [rsi+r9-64]	;; Add copy of input FFT word at halfway + 0
+	vaddsd	xmm12, xmm12, Q [rsi+r9-56]	;; Add copy of input FFT word at halfway + 1
+	vaddsd	xmm13, xmm13, Q [rsi+r9-48]	;; Add copy of input FFT word at halfway + 2
+	vaddsd	xmm14, xmm14, Q [rsi+r9-40]	;; Add copy of input FFT word at halfway + 3
+	jmp	short orig
+
+submul:	vsubsd	xmm8, xmm8, Q [rsi+r9-88]	;; Sub copy of input FFT word at halfway - 3
+	vsubsd	xmm9, xmm9, Q [rsi+r9-80]	;; Sub copy of input FFT word at halfway - 2
+	vsubsd	xmm10, xmm10, Q [rsi+r9-72]	;; Sub copy of input FFT word at halfway - 1
+	vsubsd	xmm11, xmm11, Q [rsi+r9-64]	;; Sub copy of input FFT word at halfway + 0
+	vsubsd	xmm12, xmm12, Q [rsi+r9-56]	;; Sub copy of input FFT word at halfway + 1
+	vsubsd	xmm13, xmm13, Q [rsi+r9-48]	;; Sub copy of input FFT word at halfway + 2
+	vsubsd	xmm14, xmm14, Q [rsi+r9-40]	;; Sub copy of input FFT word at halfway + 3
+
+orig:	vmulsd	xmm0, xmm1, xmm14	;; Result0 = word-3 * word3
 	zfmaddsd xmm0, xmm2, xmm13, xmm0 ;;	   + word-2 * word2
 	zfmaddsd xmm0, xmm3, xmm12, xmm0 ;;	   + word-1 * word1
 	zfmaddsd xmm0, xmm4, xmm11, xmm0 ;;	   + word0 * word0
 	zfmaddsd xmm0, xmm5, xmm10, xmm0 ;;	   + word1 * word-1
 	zfmaddsd xmm0, xmm6, xmm9, xmm0	;;	   + word2 * word-2
 	zfmaddsd xmm0, xmm7, xmm8, xmm0	;;	   + word3 * word-3
-	vmovsd	ZPAD0, xmm0
 
-	vmulsd	xmm0, xmm2, xmm14	;; Result1 = word-2 * word3
-	zfmaddsd xmm0, xmm3, xmm13, xmm0 ;;	   + word-1 * word2
-	zfmaddsd xmm0, xmm4, xmm12, xmm0 ;;	   + word0 * word1
-	zfmaddsd xmm0, xmm5, xmm11, xmm0 ;;	   + word1 * word0
-	zfmaddsd xmm0, xmm6, xmm10, xmm0 ;;	   + word2 * word-1
-	zfmaddsd xmm0, xmm7, xmm9, xmm0	;;	   + word3 * word-2
-	vmovsd	ZPAD1, xmm0
+	vmulsd	xmm1, xmm2, xmm14	;; Result1 = word-2 * word3
+	zfmaddsd xmm1, xmm3, xmm13, xmm1 ;;	   + word-1 * word2
+	zfmaddsd xmm1, xmm4, xmm12, xmm1 ;;	   + word0 * word1
+	zfmaddsd xmm1, xmm5, xmm11, xmm1 ;;	   + word1 * word0
+	zfmaddsd xmm1, xmm6, xmm10, xmm1 ;;	   + word2 * word-1
+	zfmaddsd xmm1, xmm7, xmm9, xmm1	;;	   + word3 * word-2
 
-	vmulsd	xmm0, xmm3, xmm14	;; Result2 = word-1 * word3
-	zfmaddsd xmm0, xmm4, xmm13, xmm0 ;;	   + word0 * word2
-	zfmaddsd xmm0, xmm5, xmm12, xmm0 ;;	   + word1 * word1
-	zfmaddsd xmm0, xmm6, xmm11, xmm0 ;;	   + word2 * word0
-	zfmaddsd xmm0, xmm7, xmm10, xmm0 ;;	   + word3 * word-1
-	vmovsd	ZPAD2, xmm0
+	vmulsd	xmm2, xmm3, xmm14	;; Result2 = word-1 * word3
+	zfmaddsd xmm2, xmm4, xmm13, xmm2 ;;	   + word0 * word2
+	zfmaddsd xmm2, xmm5, xmm12, xmm2 ;;	   + word1 * word1
+	zfmaddsd xmm2, xmm6, xmm11, xmm2 ;;	   + word2 * word0
+	zfmaddsd xmm2, xmm7, xmm10, xmm2 ;;	   + word3 * word-1
 
-	vmulsd	xmm0, xmm4, xmm14	;; Result3 = word0 * word3
-	zfmaddsd xmm0, xmm5, xmm13, xmm0 ;;	   + word1 * word2
-	zfmaddsd xmm0, xmm6, xmm12, xmm0 ;;	   + word2 * word1
-	zfmaddsd xmm0, xmm7, xmm11, xmm0 ;;	   + word3 * word0
-	vmovsd	ZPAD3, xmm0
+	vmulsd	xmm3, xmm4, xmm14	;; Result3 = word0 * word3
+	zfmaddsd xmm3, xmm5, xmm13, xmm3 ;;	   + word1 * word2
+	zfmaddsd xmm3, xmm6, xmm12, xmm3 ;;	   + word2 * word1
+	zfmaddsd xmm3, xmm7, xmm11, xmm3 ;;	   + word3 * word0
 
-	vmulsd	xmm0, xmm5, xmm14	;; Result4 = word1 * word3
-	zfmaddsd xmm0, xmm6, xmm13, xmm0 ;;	   + word2 * word2
-	zfmaddsd xmm0, xmm7, xmm12, xmm0 ;;	   + word3 * word1
-	vmovsd	ZPAD4, xmm0
+	vmulsd	xmm4, xmm5, xmm14	;; Result4 = word1 * word3
+	zfmaddsd xmm4, xmm6, xmm13, xmm4 ;;	   + word2 * word2
+	zfmaddsd xmm4, xmm7, xmm12, xmm4 ;;	   + word3 * word1
 
-	vmulsd	xmm0, xmm6, xmm14	;; Result5 = word2 * word3
-	zfmaddsd xmm0, xmm7, xmm13, xmm0 ;;	   + word3 * word2
-	vmovsd	ZPAD5, xmm0
+	vmulsd	xmm5, xmm6, xmm14	;; Result5 = word2 * word3
+	zfmaddsd xmm5, xmm7, xmm13, xmm5 ;;	   + word3 * word2
 
-	vmulsd	xmm0, xmm7, xmm14	;; Result6 = word3 * word3
-	vmovsd	ZPAD6, xmm0
+	vmulsd	xmm6, xmm7, xmm14	;; Result6 = word3 * word3
+
+	cmp	al, 3			;; Are we doing an muladd or mulsub
+	jl	done			;; No, we're done
+
+	mov	r10, SRC3ARG		;; Distance to FFT(1)
+	cmp	r10, 1			;; Do we have an FFT(1)
+	jne	short hard		;; Yes, do it the hard way
+
+	vmovsd	xmm7, Q [rsi+r9-88]	;; Load addin0
+	vmovsd	xmm8, Q [rsi+r9-80]	;; Load addin1
+	vmovsd	xmm9, Q [rsi+r9-72]	;; Load addin2
+	vmovsd	xmm10, Q [rsi+r9-64]	;; Load addin3
+	vmovsd	xmm11, Q [rsi+r9-56]	;; Load addin4
+	vmovsd	xmm12, Q [rsi+r9-48]	;; Load addin5
+	vmovsd	xmm13, Q [rsi+r9-40]	;; Load addin6
+	cmp	al, 3			;; Are we doing an muladd or mulsub
+	jg	mulsub			;; 4 = mulsub
+	je	muladd			;; 3 = muladd, fall through
+
+hard:	vmovsd	xmm8, Q [rsi+r9-88]	;; Load copy of add-in FFT word at halfway - 3
+	vmovsd	xmm9, Q [rsi+r9-80]	;; Load copy of add-in FFT word at halfway - 2
+	vmovsd	xmm10, Q [rsi+r9-72]	;; Load copy of add-in FFT word at halfway - 1
+	vmovsd	xmm11, Q [rsi+r9-64]	;; Load copy of add-in FFT word at halfway + 0
+	vmovsd	xmm12, Q [rsi+r9-56]	;; Load copy of add-in FFT word at halfway + 1
+	vmovsd	xmm13, Q [rsi+r9-48]	;; Load copy of add-in FFT word at halfway + 2
+	vmovsd	xmm14, Q [rsi+r9-40]	;; Load copy of add-in FFT word at halfway + 3
+	vmovsd	xmm15, Q [rsi+r10-88]	;; Load copy of FFT(1) word at halfway - 3
+	vmovsd	xmm16, Q [rsi+r10-80]	;; Load copy of FFT(1) word at halfway - 2
+	vmovsd	xmm17, Q [rsi+r10-72]	;; Load copy of FFT(1) word at halfway - 1
+	vmovsd	xmm18, Q [rsi+r10-64]	;; Load copy of FFT(1) word at halfway + 0
+	vmovsd	xmm19, Q [rsi+r10-56]	;; Load copy of FFT(1) word at halfway + 1
+	vmovsd	xmm20, Q [rsi+r10-48]	;; Load copy of FFT(1) word at halfway + 2
+	vmovsd	xmm21, Q [rsi+r10-40]	;; Load copy of FFT(1) word at halfway + 3
+
+	vmulsd	xmm7, xmm8, xmm21		;; Addin0 = word-3 * word3
+	zfmaddsd xmm7, xmm9, xmm20, xmm7	;;	  + word-2 * word2
+	zfmaddsd xmm7, xmm10, xmm19, xmm7	;;	  + word-1 * word1
+	zfmaddsd xmm7, xmm11, xmm18, xmm7	;;	  + word0 * word0
+	zfmaddsd xmm7, xmm12, xmm17, xmm7	;;	  + word1 * word-1
+	zfmaddsd xmm7, xmm13, xmm16, xmm7	;;	  + word2 * word-2
+	zfmaddsd xmm7, xmm14, xmm15, xmm7	;;	  + word3 * word-3
+
+	vmulsd	xmm8, xmm9, xmm21		;; Addin1 = word-2 * word3
+	zfmaddsd xmm8, xmm10, xmm20, xmm8	;;	  + word-1 * word2
+	zfmaddsd xmm8, xmm11, xmm19, xmm8	;;	  + word0 * word1
+	zfmaddsd xmm8, xmm12, xmm18, xmm8	;;	  + word1 * word0
+	zfmaddsd xmm8, xmm13, xmm17, xmm8	;;	  + word2 * word-1
+	zfmaddsd xmm8, xmm14, xmm16, xmm8	;;	  + word3 * word-2
+
+	vmulsd	xmm9, xmm10, xmm21		;; Addin2 = word-1 * word3
+	zfmaddsd xmm9, xmm11, xmm20, xmm9	;;	  + word0 * word2
+	zfmaddsd xmm9, xmm12, xmm19, xmm9	;;	  + word1 * word1
+	zfmaddsd xmm9, xmm13, xmm18, xmm9	;;	  + word2 * word0
+	zfmaddsd xmm9, xmm14, xmm17, xmm9	;;	  + word3 * word-1
+
+	vmulsd	xmm10, xmm11, xmm21		;; Addin3 = word0 * word3
+	zfmaddsd xmm10, xmm12, xmm20, xmm10	;;	  + word1 * word2
+	zfmaddsd xmm10, xmm13, xmm19, xmm10	;;	  + word2 * word1
+	zfmaddsd xmm10, xmm14, xmm18, xmm10	;;	  + word3 * word0
+
+	vmulsd	xmm11, xmm12, xmm21		;; Addin4 = word1 * word3
+	zfmaddsd xmm11, xmm13, xmm20, xmm11	;;	  + word2 * word2
+	zfmaddsd xmm11, xmm14, xmm19, xmm11	;;	  + word3 * word1
+
+	vmulsd	xmm12, xmm13, xmm21		;; Addin5 = word2 * word3
+	zfmaddsd xmm12, xmm14, xmm20, xmm12	;;	  + word3 * word2
+
+	vmulsd	xmm13, xmm14, xmm21		;; Addin6 = word3 * word3
+
+	cmp	al, 3				;; Are we doing an muladd or mulsub
+	jg	mulsub				;; 4 = mulsub
+	;je	muladd				;; 3 = muladd, fall through
+
+muladd:	vaddpd	xmm0, xmm0, xmm7		;; Add the addins
+	vaddpd	xmm1, xmm1, xmm8
+	vaddpd	xmm2, xmm2, xmm9
+	vaddpd	xmm3, xmm3, xmm10
+	vaddpd	xmm4, xmm4, xmm11
+	vaddpd	xmm5, xmm5, xmm12
+	vaddpd	xmm6, xmm6, xmm13
+	jmp	done
+
+mulsub:	vsubpd	xmm0, xmm0, xmm7		;; Subtract the addins
+	vsubpd	xmm1, xmm1, xmm8
+	vsubpd	xmm2, xmm2, xmm9
+	vsubpd	xmm3, xmm3, xmm10
+	vsubpd	xmm4, xmm4, xmm11
+	vsubpd	xmm5, xmm5, xmm12
+	vsubpd	xmm6, xmm6, xmm13
+
+done:	vmovsd	ZPAD0, xmm0			;; Save the zero-pad adjustments
+	vmovsd	ZPAD1, xmm1
+	vmovsd	ZPAD2, xmm2
+	vmovsd	ZPAD3, xmm3
+	vmovsd	ZPAD4, xmm4
+	vmovsd	ZPAD5, xmm5
+	vmovsd	ZPAD6, xmm6
 
 nozpad:
 	ENDM
-

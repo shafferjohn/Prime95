@@ -1,6 +1,6 @@
 // Prime95.h : main header file for the PRIME95 application
 // 
-//  Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved.
+//  Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved.
 //
 
 #ifdef _WIN64
@@ -15,7 +15,6 @@
 #include "hwloc.h"		// hwloc library
 #include "gmp.h"		// GMP library
 //#define SERVER_TESTING
-#define NO_GUI		0
 #include "common.h"
 #include "cpuid.h"
 #include "gwnum.h"

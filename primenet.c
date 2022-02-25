@@ -9,7 +9,7 @@
 // THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 // PARTICULAR PURPOSE.
 //
-// Copyright (c) 1997-2020 Mersenne Research, Inc. All Rights Reserved.
+// Copyright (c) 1997-2021 Mersenne Research, Inc. All Rights Reserved.
 //
 //  MODULE:   primenet.c
 //
@@ -551,6 +551,14 @@ int format_args (char* args, short operation, void* pkt)
 				p = p + strlen (p);
 			}
 		}
+		if (z->work_type == PRIMENET_WORK_TYPE_PPLUS1) {
+			sprintf (p, "&A=%.0f&b=%d&n=%d&C=%d&B1=%.0f", z->k, z->b, z->n, z->c, z->B1);
+			p = p + strlen (p);
+			if (z->B2 != 0.0) {
+				sprintf (p, "&B2=%.0f", z->B2);
+				p = p + strlen (p);
+			}
+		}
 		if (z->work_type == PRIMENET_WORK_TYPE_ECM) {
 			sprintf (p, "&A=%.0f&b=%d&n=%d&C=%d&B1=%.0f",
 				 z->k, z->b, z->n, z->c, z->B1);
@@ -674,6 +682,17 @@ int format_args (char* args, short operation, void* pkt)
 			strcpy (p, "&f=");
 			p = armor (p + strlen (p), z->factor);
 		}
+		if (z->result_type == PRIMENET_AR_PP1_FACTOR) {
+			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&pp1n=%d&pp1d=%d&B1=%.0f",
+				 z->k, z->b, z->n, z->c, z->pp1_numerator, z->pp1_denominator, z->B1);
+			p += strlen (p);
+			if (z->B2) {
+				sprintf (p, "&B2=%.0f", z->B2);
+				p += strlen (p);
+			}
+			strcpy (p, "&f=");
+			p = armor (p + strlen (p), z->factor);
+		}
 		if (z->result_type == PRIMENET_AR_ECM_FACTOR) {
 			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&CR=%d&B1=%.0f&stage=%d",
 				 z->k, z->b, z->n, z->c, z->curves, z->B1, z->stage);
@@ -694,6 +713,15 @@ int format_args (char* args, short operation, void* pkt)
 		if (z->result_type == PRIMENET_AR_P1_NOFACTOR) {
 			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&B1=%.0f",
 				 z->k, z->b, z->n, z->c, z->B1);
+			p += strlen (p);
+			if (z->B2) {
+				sprintf (p, "&B2=%.0f", z->B2);
+				p += strlen (p);
+			}
+		}
+		if (z->result_type == PRIMENET_AR_PP1_NOFACTOR) {
+			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&pp1n=%d&pp1d=%d&B1=%.0f",
+				 z->k, z->b, z->n, z->c, z->pp1_numerator, z->pp1_denominator, z->B1);
 			p += strlen (p);
 			if (z->B2) {
 				sprintf (p, "&B2=%.0f", z->B2);
@@ -939,7 +967,7 @@ int primenet_parse_page (char *response_buf, short operation, void *pkt)
 
 {
 	char	*s;
-	char	buf[400], errtxt[200];
+	char	buf[4096], errtxt[4096];
 	int32_t	res;
 
 /* Get result code, which is always first */
@@ -1116,6 +1144,7 @@ int primenet_parse_page (char *response_buf, short operation, void *pkt)
 		primenet_parse_uint (s, "dc", &z->prp_dblchk);
 		primenet_parse_string (s, "kf", z->known_factors, sizeof (z->known_factors));
 		primenet_parse_uint (s, "ns", &z->num_squarings);
+		primenet_parse_uint (s, "nr", &z->nth_run);
 		// Parse emergency PRP proof params that we hope to never use
 		if (z->work_type == PRIMENET_WORK_TYPE_PRP) {
 			uint32_t proof_power = 0;

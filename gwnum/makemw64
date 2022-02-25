@@ -11,7 +11,7 @@ CPPFLAGS = -I.. -I../qd -DX86_64 -DWINDOWS64 -O2
 
 AR = ar
 
-WIN64O = mw64/cpuid.o mw64/gwnum.o mw64/gwtables.o mw64/gwthread.o mw64/gwini.o mw64/gwbench.o mw64/gwutil.o mw64/gwdbldbl.o mw64/giants.o mw64/ecmstag1.o
+WIN64O = mw64/cpuid.o mw64/gwnum.o mw64/gwtables.o mw64/gwthread.o mw64/gwini.o mw64/gwbench.o mw64/gwutil.o mw64/gwdbldbl.o mw64/giants.o mw64/radix.o mw64/ecmstag1.o
 
 WIN64OBJS = amd64/xmult1ax.obj amd64/xmult2.obj amd64/xmult2a_core.obj amd64/xmult2a_k8.obj amd64/xmult2ax.obj \
 		 amd64/xmult3.obj amd64/xmult3a_core.obj amd64/xmult3a_k8.obj amd64/xmult3ax.obj \

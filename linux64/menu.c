@@ -1,4 +1,4 @@
-/* Copyright 1995-2020 Mersenne Research, Inc. */
+/* Copyright 1995-2021 Mersenne Research, Inc. */
 /* Author:  George Woltman */
 /* Email: woltman@alum.mit.edu */
 
@@ -408,7 +408,7 @@ done:	if (askOkCancel ()) {
 		STARTUP_IN_PROGRESS = 0;
 }
 
-/* Test/Worker threads dialog */
+/* Test/Workers dialog */
 
 int AreAllTheSame (
 	unsigned long *array,
@@ -429,13 +429,11 @@ int AreAllTheSame (
 
 unsigned int max_num_workers (void)
 {
-	if (NUM_WORKER_THREADS >= NUM_CPUS)
-		return (NUM_WORKER_THREADS);
-	else
-		return (NUM_CPUS);
+	if (NUM_WORKER_THREADS >= HW_NUM_CORES) return (NUM_WORKER_THREADS);
+	else return (HW_NUM_CORES);
 }
 
-void test_worker_threads (void)
+void test_workers (void)
 {
 	unsigned long m_num_thread;
 	unsigned long m_work_pref[MAX_NUM_WORKER_THREADS];
@@ -466,7 +464,7 @@ again:	if (max_num_workers () > 1)
 		outputLongLine ("\nUse the following values to select a work type:\n  0 - Whatever makes the most sense\n 150 - First time prime tests\n  152 - World record sized numbers to prime test\n  151 - Double-check prime tests\n  2 - Trial factoring\n  4 - P-1 factoring\n  153 - 100 million digit numbers to prime test\n  160 - First time PRP on Mersenne cofactors\n  161 - Double-check PRP on Mersenne cofactors\n  5 - ECM for first factors of Mersenne numbers\n  8 - ECM on Mersenne cofactors\n  6 - ECM on Fermat numbers\n  1 - Trial factoring to low limits\n");
 	}
 
-	if (USE_PRIMENET || NUM_CPUS > 1) {
+	if (USE_PRIMENET || HW_NUM_CORES > 1) {
 	    cores_assigned = 0;
 	    for (i = 0; i < m_num_thread; i++) {
 		if (m_num_thread > 1)
@@ -480,11 +478,11 @@ again:	if (max_num_workers () > 1)
 				m_numcpus[i] = min_cores_for_work_pref (m_work_pref[i]);
 		}
 
-		if (NUM_CPUS > 1) {
+		if (HW_NUM_CORES > 1) {
 			int	min_cores, max_cores;
 			min_cores = min_cores_for_work_pref (m_work_pref[i]);
 			// Max cores = num_cores_unassigned - num_workers_unconfigured + 1
-			max_cores = ((int) NUM_CPUS - cores_assigned) - ((int) m_num_thread - i) + 1;
+			max_cores = ((int) HW_NUM_CORES - cores_assigned) - ((int) m_num_thread - i) + 1;
 			if (max_cores < min_cores) max_cores = min_cores;
 			if (m_numcpus[i] < min_cores) m_numcpus[i] = min_cores;
 			if (m_numcpus[i] > max_cores) m_numcpus[i] = max_cores;
@@ -542,13 +540,12 @@ again:	if (max_num_workers () > 1)
 
 		total_num_cores = 0;
 		for (i = 0; i < m_num_thread; i++) total_num_cores += m_numcpus[i];
-		if (total_num_cores > NUM_CPUS) {
+		if (total_num_cores > HW_NUM_CORES) {
 			outputLongLine (MSG_THREADS);
 			if (askYesNo ('Y')) goto again;
 		}
 
-/* If user changed the number of worker threads, then make the */
-/* necessary changes.  Restart worker threads so that we are running */
+/* If user changed the number of worker threads, then make the necessary changes.  Restart worker threads so that we are running */
 /* the correct number of worker threads. */
 
 		if (m_num_thread != NUM_WORKER_THREADS) {
@@ -927,6 +924,16 @@ void options_resources (void)
 	can_upload = IniSectionGetInt (INI_FILE, "PrimeNet", "ProofUploads", 1);
 
 	askFloat ("Temporary disk space limit in GB/worker", &m_disk, 0.0, 1000.0);
+	if (m_memory_editable) {
+		float	max_mem;
+		max_mem = (float) (0.9 * physical_memory () / 1024.0);
+		askFloat ("Daytime P-1/P+1/ECM stage 2 memory in GB", &m_day_memory, 0.0, max_mem);
+		askFloat ("Nighttime P-1/P+1/ECM stage 2 memory in GB", &m_night_memory, 0.0, max_mem);
+		if (m_day_memory != m_night_memory) {
+			askStr ("Daytime begins at", m_start_time, 12);
+			askStr ("Daytime ends at", m_end_time, 12);
+		}
+	}
 	if (can_upload) {
 		askFloat ("Upload bandwidth limit in Mbps", &m_upload_bandwidth, 0.05, 10000.0);
 		askStr ("Upload large files time period start", m_upload_start, 8);
@@ -940,24 +947,14 @@ void options_resources (void)
 		if (max_emergency_mem < 1.0) max_emergency_mem = 1.0;
 		askStr ("Optional directory to hold large temporary files", m_temp_dir, 511);
 		askStr ("Optional directory to hold archived proofs", m_archive_dir, 511);
-		if (m_memory_editable) {
-			float	max_mem;
-			max_mem = (float) (0.9 * physical_memory () / 1024.0);
-			askFloat ("Daytime P-1/ECM stage 2 memory in GB", &m_day_memory, 0.0, max_mem);
-			askFloat ("Nighttime P-1/ECM stage 2 memory in GB", &m_night_memory, 0.0, max_mem);
-			if (m_day_memory != m_night_memory) {
-				askStr ("Daytime begins at", m_start_time, 12);
-				askStr ("Daytime ends at", m_end_time, 12);
-			}
-		}
 		askFloat ("Max emergency memory in GB/worker", &m_emergency_mem, 0.0, max_emergency_mem);
 		askNum ("Priority -- 1 is highly recommended, see readme.txt", &m_priority, 1, 10);
 		if (m_download_mb) {
 			askNum ("Certification work limit in % of CPU time", &m_cert_cpu, 1, 100);
 		}
-		if (CPU_HYPERTHREADS > 1 && OS_CAN_SET_AFFINITY) {
+		if (HW_NUM_CORES != HW_NUM_THREADS && OS_CAN_SET_AFFINITY) {
 			askYN ("Use hyperthreading for trial factoring (recommended)", &m_hyper_tf);
-			askYN ("Use hyperthreading for PRP, LL, P-1, ECM (not recommended)", &m_hyper_ll);
+			askYN ("Use hyperthreading for PRP, LL, P-1, P+1, ECM (not recommended)", &m_hyper_ll);
 		}
 	}
 
@@ -1093,31 +1090,28 @@ void options_preferences (void)
 
 void options_torture (void)
 {
-	unsigned long m_thread, m_type, m_minfft, m_maxfft;
+	unsigned long m_cores, m_type, m_minfft, m_maxfft;
 	unsigned long m_memory, m_timefft;
 	unsigned long mem, blendmemory;
-	int	m_custom, m_weak, m_avx512, m_fma3, m_avx, m_sse2;
+	int	m_hyperthreading, m_custom, m_weak, m_avx512, m_fma3, m_avx, m_sse2;
 
-	m_thread = NUM_CPUS * CPU_HYPERTHREADS;
+	m_cores = HW_NUM_CORES;
+	m_hyperthreading = (HW_NUM_CORES != HW_NUM_THREADS);
 	mem = physical_memory ();
 	// New in 29.5, default to all but 3GB of memory for the large FFT and blend test.
 	// On my Skylake-X linux machine mprime crashes if it uses all but 2.5GB (maybe due
 	// to large pages allocated by a running production mprime).
-	if (mem >= 5000) {
-		blendmemory = GetSuggestedMemory (mem - 3000);
-	} else if (mem >= 2000) {
-		blendmemory = GetSuggestedMemory (mem - 512);
-	} else if (mem >= 500) {
-		blendmemory = GetSuggestedMemory (mem - 256);
-	} else if (mem >= 200) {
-		blendmemory = GetSuggestedMemory (mem / 2);
-	} else {
-		blendmemory = 8;
-	}
+	if (mem >= 5000) blendmemory = GetSuggestedMemory (mem - 3000);
+	else if (mem >= 2000) blendmemory = GetSuggestedMemory (mem - 512);
+	else if (mem >= 500) blendmemory = GetSuggestedMemory (mem - 256);
+	else if (mem >= 200) blendmemory = GetSuggestedMemory (mem / 2);
+	else blendmemory = 8;
 
-	// Get number of threads to run.  It will affect our FFT size calculations.
-	if (NUM_CPUS * CPU_HYPERTHREADS > 1)
-		askNum ("Number of torture test threads to run", &m_thread, 1, NUM_CPUS * CPU_HYPERTHREADS);
+	// Get number of cores to test.  It will affect our FFT size calculations.
+	if (HW_NUM_CORES > 1)
+		askNum ("Number of cores to torture test", &m_cores, 1, HW_NUM_CORES);
+	if (HW_NUM_CORES != HW_NUM_THREADS)
+		askYN ("Use hyperthreading (more stressful)", &m_hyperthreading);
 
 	// Ask which torture test to run
 	if (CPU_TOTAL_L4_CACHE_SIZE) {
@@ -1139,7 +1133,7 @@ void options_torture (void)
 	// Calculate default FFT sizes
 	{
 		int	minfft, maxfft;
-		tortureTestDefaultSizes (m_type - 1, m_thread, &minfft, &maxfft);
+		tortureTestDefaultSizes (m_type - 1, m_cores, &minfft, &maxfft);
 		m_minfft = minfft, m_maxfft = maxfft;
 	}
 	if (m_minfft < 4) m_minfft = 4;
@@ -1148,7 +1142,7 @@ void options_torture (void)
 
 	// Assign other options
 	m_memory = (m_type <= 3 ? 0 : blendmemory);
-	m_timefft = (m_thread > NUM_CPUS ? 6 : 3);
+	m_timefft = (m_hyperthreading ? 6 : 3);
 
 	// Let user customize
 	m_custom = FALSE;
@@ -1180,13 +1174,14 @@ void options_torture (void)
 #endif
 
 	if (askOkCancel ()) {
+		IniWriteInt (INI_FILE, "TortureHyperthreading", m_hyperthreading);
 		IniWriteInt (INI_FILE, "MinTortureFFT", m_minfft);
 		IniWriteInt (INI_FILE, "MaxTortureFFT", m_maxfft);
 		IniWriteInt (INI_FILE, "TortureMem", m_memory);
 		IniWriteInt (INI_FILE, "TortureTime", m_timefft);
 		m_weak = m_avx512 * CPU_AVX512F + m_fma3 * CPU_FMA3 + m_avx * CPU_AVX + m_sse2 * CPU_SSE2;
 		IniWriteInt (INI_FILE, "TortureWeak", m_weak);
-		LaunchTortureTest (m_thread, TRUE);
+		LaunchTortureTest (m_cores, TRUE);
 	}
 }
 
@@ -1215,12 +1210,12 @@ void options_benchmark (void)
 		if (m_minFFT != m_maxFFT) askYN ("Limit FFT sizes (mimic older benchmarking code)", &m_limit_FFT_sizes);
 	}
 
-	sprintf (m_cores, "%lu", NUM_CPUS);
-	m_hyperthreading = IniGetInt (INI_FILE, "BenchHyperthreads", 1);
-	if (NUM_CPUS > 1 || CPU_HYPERTHREADS > 1) {
+	sprintf (m_cores, "%" PRIu32, HW_NUM_COMPUTE_CORES);
+	m_hyperthreading = (HW_NUM_CORES != HW_NUM_THREADS && IniGetInt (INI_FILE, "BenchHyperthreads", 1));
+	if (HW_NUM_CORES > 1 || HW_NUM_CORES != HW_NUM_THREADS) {
 		printf ("\nCPU cores to benchmark\n");
-		if (NUM_CPUS > 1) askStr ("Number of CPU cores (comma separated list of ranges)", m_cores, 511);
-		if (CPU_HYPERTHREADS > 1) askYN ("Benchmark hyperthreading", &m_hyperthreading);
+		if (HW_NUM_CORES > 1) askStr ("Number of CPU cores (comma separated list of ranges)", m_cores, 511);
+		if (HW_NUM_CORES != HW_NUM_THREADS) askYN ("Benchmark hyperthreading", &m_hyperthreading);
 	}
 
 	if (m_bench_type == 0) {
@@ -1234,7 +1229,7 @@ void options_benchmark (void)
 		// To come up with a rational default for number of workers, we need to know the maximum number of
 		// cores the benchmark will be running on.
 		max_cores = 1;
-		for (i = 2; i <= NUM_CPUS; i++) if (is_number_in_list (i, m_cores)) max_cores = i;
+		for (i = 2; i <= HW_NUM_CORES; i++) if (is_number_in_list (i, m_cores)) max_cores = i;
 		// If testing all FFT implementations. then default to the current num_workers.
 		numvals = 0;
 		if (NUM_WORKER_THREADS <= max_cores) sorted_add_unique (vals, &numvals, NUM_WORKER_THREADS);
@@ -1243,7 +1238,7 @@ void options_benchmark (void)
 		// with the most common best values for number of workers: 1, num_threading_nodes, num_cores, num_workers
 		if (!m_all_FFT_impl) {
 			sorted_add_unique (vals, &numvals, 1);
-			if (NUM_THREADING_NODES <= max_cores) sorted_add_unique (vals, &numvals, NUM_THREADING_NODES);
+			if (HW_NUM_THREADING_NODES <= max_cores) sorted_add_unique (vals, &numvals, HW_NUM_THREADING_NODES);
 			sorted_add_unique (vals, &numvals, max_cores);
 		}
 		sprintf (m_workers, "%d", vals[0]);
@@ -1270,7 +1265,7 @@ void options_benchmark (void)
 			IniWriteInt (INI_FILE, "AllBench", m_all_FFT_impl);
 			IniWriteInt (INI_FILE, "BenchTime", m_bench_time);
 		}
-		LaunchBench (m_bench_type);
+		LaunchBench (m_bench_type, FALSE);
 	}
 }
 
@@ -1284,7 +1279,7 @@ void help_about (void)
 	printf ("GIMPS: Mersenne Prime Search\n");
 	printf ("Web site: http://mersenne.org\n");
 	printf ("%s\n", app_string);
-	printf ("Copyright 1996-2020 Mersenne Research, Inc.\n");
+	printf ("Copyright 1996-2021 Mersenne Research, Inc.\n");
 	printf ("Author: George Woltman\n");
 	printf ("Email:  woltman@alum.mit.edu\n");
 	askOK ();
@@ -1325,7 +1320,7 @@ void test_welcome (void)
 		test_primenet ();
 		if (USE_PRIMENET && STARTUP_IN_PROGRESS) options_cpu ();
 		if (STARTUP_IN_PROGRESS) options_resources ();
-		if (USE_PRIMENET && STARTUP_IN_PROGRESS) test_worker_threads ();
+		if (USE_PRIMENET && STARTUP_IN_PROGRESS) test_workers ();
 		if (USE_PRIMENET && STARTUP_IN_PROGRESS) {
 			STARTUP_IN_PROGRESS = 0;
 			set_comm_timers ();
@@ -1356,7 +1351,7 @@ void main_menu (void)
 	printf ("\t     Main Menu\n");
 	printf ("\n");
 	printf ("\t 1.  Test/Primenet\n");
-	printf ("\t 2.  Test/Worker threads\n");
+	printf ("\t 2.  Test/Workers\n");
 	printf ("\t 3.  Test/Status\n");
 	if (WORKER_THREADS_ACTIVE && active_workers_count () < WORKER_THREADS_ACTIVE)
 		printf ("\t 4.  Test/Continue or Stop\n");
@@ -1400,7 +1395,7 @@ void main_menu (void)
 /* Test/User Information dialog */
 
 	case 2:
-		test_worker_threads ();
+		test_workers ();
 		break;
 
 /* Test/Status message */

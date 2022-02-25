@@ -8,7 +8,7 @@
 | NOTE:  These routines only work if you open no more than 10 ini files.  Also,
 | you must not change the working directory at any time during program execution.
 |
-| Copyright 2016-2020 Mersenne Research, Inc.  All rights reserved
+| Copyright 2016-2021 Mersenne Research, Inc.  All rights reserved
 +---------------------------------------------------------------------*/
 
 /* Include files */
@@ -1022,8 +1022,7 @@ void parse_timed_ini_value (
 	min_wakeup_time = 0;
 	for ( ; ; ) {
 
-/* If we don't see a "during" clause, then either there are no timed sections */
-/* or we've reached the final else clause.  Return the else clause value. */
+/* If we don't see a "during" clause, then either there are no timed sections or we've reached the final else clause.  Return the else clause value. */
 
 		during_clause = strstr (rest_of_line, " during ");
 		if (during_clause == NULL) {
@@ -1033,8 +1032,20 @@ void parse_timed_ini_value (
 			break;
 		}
 
-/* We've got a timed section, see if the current time is */
-/* within this timed section. */
+/* We've got a timed section, if the "during" value is the same as the "else" value then return the during value but don't bother with setting */
+/* a new wake up time.  This prevents needless wakeups for memory settings such as "1024 during 2:00-4:00 else 1024". */
+
+		else_clause = strstr (rest_of_line, " else ");
+		if (else_clause != NULL &&
+		    during_clause - rest_of_line == strlen (else_clause + 6) &&
+		    memcmp (rest_of_line, else_clause + 6, during_clause - rest_of_line) == 0) {
+			*start_offset = (unsigned int) (rest_of_line - line);
+			*len = (unsigned int) (during_clause - rest_of_line);
+			*seconds_valid = min_wakeup_time;
+			break;
+		}
+
+/* We've got a timed section, see if the current time is within this timed section. */
 
 		if (analyzeTimeLine (during_clause+8, current_time, &wakeup_time)) {
 			*start_offset = (unsigned int) (rest_of_line - line);
@@ -1043,16 +1054,13 @@ void parse_timed_ini_value (
 			break;
 		}
 
-/* We're not in this timed section, remember which timed section */
-/* will come into effect first.  This will be the end time of the "else" */
-/* section. */
+/* We're not in this timed section, remember which timed section will come into effect first.  This will be the end time of the "else" section. */
 
 		if (min_wakeup_time == 0 || wakeup_time < min_wakeup_time)
 			min_wakeup_time = wakeup_time;
 
 /* Move on to the next timed section. */
 
-		else_clause = strstr (during_clause, " else ");
 		if (else_clause != NULL) rest_of_line = else_clause + 6;
 		else rest_of_line += strlen (rest_of_line);
 	}

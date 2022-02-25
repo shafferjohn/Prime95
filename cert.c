@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 2020 Mersenne Research, Inc.  All rights reserved
+| Copyright 2020-2021 Mersenne Research, Inc.  All rights reserved
 |
 | This file contains routines to certify a PRP proof.
 +---------------------------------------------------------------------*/
@@ -66,7 +66,7 @@ int writeCertSaveFile (			/* Returns TRUE if successful */
 	closeWriteSaveFile (write_save_file_state, fd);
 	return (TRUE);
 
-/* An error occured.  Delete the current file. */
+/* An error occurred.  Delete the current file. */
 
 writeerr:
 	sprintf (buf, WRITEFILEERR, write_save_file_state->base_filename);
@@ -164,15 +164,12 @@ int cert (
 
 	if (IniGetInt (LOCALINI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&cs.gwdata);
 	if (IniGetInt (INI_FILE, "HyperthreadPrefetch", 0)) gwset_hyperthread_prefetch (&cs.gwdata);
-	if (HYPERTHREAD_LL) {
-		sp_info->normal_work_hyperthreads = IniGetInt (LOCALINI_FILE, "HyperthreadLLcount", CPU_HYPERTHREADS);
-		gwset_will_hyperthread (&cs.gwdata, sp_info->normal_work_hyperthreads);
-	}
-	gwset_bench_cores (&cs.gwdata, NUM_CPUS);
+	if (HYPERTHREAD_LL) sp_info->normal_work_hyperthreading = TRUE, gwset_will_hyperthread (&cs.gwdata, 2);
+	gwset_bench_cores (&cs.gwdata, HW_NUM_CORES);
 	gwset_bench_workers (&cs.gwdata, NUM_WORKER_THREADS);
 	if (ERRCHK) gwset_will_error_check (&cs.gwdata);
 	else gwset_will_error_check_near_limit (&cs.gwdata);
-	gwset_num_threads (&cs.gwdata, CORES_PER_TEST[thread_num] * sp_info->normal_work_hyperthreads);
+	gwset_num_threads (&cs.gwdata, get_worker_num_threads (thread_num, HYPERTHREAD_LL));
 	gwset_thread_callback (&cs.gwdata, SetAuxThreadPriority);
 	gwset_thread_callback_data (&cs.gwdata, sp_info);
 	gwset_minimum_fftlen (&cs.gwdata, w->minimum_fftlen);

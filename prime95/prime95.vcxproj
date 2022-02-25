@@ -99,8 +99,8 @@
     </Midl>
     <ClCompile>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
-      <AdditionalIncludeDirectories>..;..\gwnum;\curl-7.70.0-win32-mingw\include\curl;\hwloc-win32-build-2.2.0\include;\gmp32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;PSAPI_VERSION=1;NDEBUG;_WINDOWS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..;..\gwnum;\curl-7.70.0-win32-mingw\include\curl;\hwloc-win32-build-2.4.1\include;\gmp32;\boost_1_76_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>PORT=1;WIN32;PSAPI_VERSION=1;NDEBUG;_WINDOWS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -114,14 +114,15 @@
       <WarningLevel>Level3</WarningLevel>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <DebugInformationFormat />
-      <CompileAs>Default</CompileAs>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ForcedIncludeFiles>stdafx.h</ForcedIncludeFiles>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>factor32.obj;..\gwnum\gwnum.lib;wininet.lib;ws2_32.lib;nafxcw.lib;\curl-7.70.0-win32-mingw\lib\libcurl.dll.a;c:\hwloc-win32-build-2.2.0\lib\libhwloc.lib;c:\gmp32\libgmp-gw1.lib;winmm.lib;libcmt.lib;kernel32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>factor32.obj;..\gwnum\gwnum.lib;wininet.lib;ws2_32.lib;nafxcw.lib;\curl-7.70.0-win32-mingw\lib\libcurl.dll.a;c:\hwloc-win32-build-2.4.1\lib\libhwloc.lib;c:\gmp32\libgmp-gw1.lib;winmm.lib;libcmt.lib;kernel32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>.\Release/prime95.exe</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <DelayLoadDLLs>oleacc.dll;ole32.dll;oleaut32.dll;advapi32.dll;wininet.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
@@ -132,7 +133,7 @@
       <SubSystem>Windows</SubSystem>
       <LargeAddressAware>true</LargeAddressAware>
       <TargetMachine>MachineX86</TargetMachine>
-      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -145,8 +146,8 @@
     </Midl>
     <ClCompile>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
-      <AdditionalIncludeDirectories>..;..\gwnum;\gmp64;\curl-7.70.0-win64-mingw\include\curl;\hwloc-win64-build-2.2.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;PSAPI_VERSION=1;NDEBUG;_WINDOWS;ADD_UNDERSCORES;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..;..\gwnum;\gmp64;\curl-7.70.0-win64-mingw\include\curl;\hwloc-win64-build-2.4.1\include;\boost_1_76_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>PORT=4;WIN32;PSAPI_VERSION=1;NDEBUG;_WINDOWS;ADD_UNDERSCORES;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -159,16 +160,17 @@
       <ProgramDataBaseFileName>c:\temp\prime95.release64.pdb</ProgramDataBaseFileName>
       <WarningLevel>Level3</WarningLevel>
       <SuppressStartupBanner>true</SuppressStartupBanner>
-      <DebugInformationFormat />
-      <CompileAs>Default</CompileAs>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <CompileAs>CompileAsCpp</CompileAs>
       <AssemblerOutput />
+      <ForcedIncludeFiles>stdafx.h</ForcedIncludeFiles>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>amd64\factor64.obj;..\gwnum\gwnum64.lib;\hwloc-win64-build-2.2.0\lib\libhwloc.lib;\gmp64\libgmp-gw1.lib;\curl-7.70.0-win64-mingw\lib\libcurl.dll.a;wininet.lib;nafxcw.lib;libcmt.lib;kernel32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>amd64\factor64.obj;..\gwnum\gwnum64.lib;\hwloc-win64-build-2.4.1\lib\libhwloc.lib;\gmp64\libgmp-gw1.lib;\curl-7.70.0-win64-mingw\lib\libcurl.dll.a;wininet.lib;nafxcw.lib;libcmt.lib;kernel32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>.\x64\Release/prime95.exe</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <DelayLoadDLLs>wininet.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
@@ -192,8 +194,8 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..;..\gwnum;\curl-7.70.0-win32-mingw\include\curl;\hwloc-win32-build-2.2.0\include;\gmp32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;PSAPI_VERSION=1;_DEBUG;_WINDOWS;GDEBUG;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..;..\gwnum;\curl-7.70.0-win32-mingw\include\curl;\hwloc-win32-build-2.4.1\include;\gmp32;\boost_1_76_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>PORT=1;WIN32;PSAPI_VERSION=1;_DEBUG;_WINDOWS;GDEBUG;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <BufferSecurityCheck>true</BufferSecurityCheck>
@@ -206,14 +208,15 @@
       <WarningLevel>Level3</WarningLevel>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
-      <CompileAs>Default</CompileAs>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ForcedIncludeFiles>stdafx.h</ForcedIncludeFiles>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>_AFXDLL;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>factor32.obj;..\gwnum\gwnumd.lib;ws2_32.lib;wininet.lib;\curl-7.70.0-win32-mingw\lib\libcurl.dll.a;c:\hwloc-win32-build-2.2.0\lib\libhwloc.lib;c:\gmp32\libgmp-gw1.lib;winmm.lib;kernel32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>factor32.obj;..\gwnum\gwnumd.lib;ws2_32.lib;wininet.lib;\curl-7.70.0-win32-mingw\lib\libcurl.dll.a;c:\hwloc-win32-build-2.4.1\lib\libhwloc.lib;c:\gmp32\libgmp-gw1.lib;winmm.lib;kernel32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>.\Debug\prime95.exe</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <IgnoreSpecificDefaultLibraries>libcmt;msvcrt;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
@@ -224,7 +227,7 @@
       <SubSystem>Windows</SubSystem>
       <LargeAddressAware>true</LargeAddressAware>
       <TargetMachine>MachineX86</TargetMachine>
-      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -237,8 +240,8 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..;..\gwnum;\gmp64;\curl-7.70.0-win64-mingw\include\curl;\hwloc-win64-build-2.2.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;PSAPI_VERSION=1;_DEBUG;_WINDOWS;GDEBUG;ADD_UNDERSCORES;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..;..\gwnum;\gmp64;\curl-7.70.0-win64-mingw\include\curl;\hwloc-win64-build-2.4.1\include;\boost_1_76_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>PORT=4;WIN32;PSAPI_VERSION=1;_DEBUG;_WINDOWS;GDEBUG;ADD_UNDERSCORES;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <BufferSecurityCheck>true</BufferSecurityCheck>
@@ -251,14 +254,15 @@
       <WarningLevel>Level3</WarningLevel>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <CompileAs>Default</CompileAs>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ForcedIncludeFiles>stdafx.h</ForcedIncludeFiles>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>_AFXDLL;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>amd64\factor64.obj;..\gwnum\gwnum64d.lib;\hwloc-win64-build-2.2.0\lib\libhwloc.lib;\gmp64\libgmp-gw1.lib;\curl-7.70.0-win64-mingw\lib\libcurl.dll.a;wininet.lib;kernel32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>amd64\factor64.obj;..\gwnum\gwnum64d.lib;\hwloc-win64-build-2.4.1\lib\libhwloc.lib;\gmp64\libgmp-gw1.lib;\curl-7.70.0-win64-mingw\lib\libcurl.dll.a;wininet.lib;kernel32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>.\x64\Debug/prime95.exe</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
@@ -273,6 +277,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\cJSON.c" />
+    <ClCompile Include="..\ecm.cpp" />
+    <ClCompile Include="..\pair.cpp" />
+    <ClCompile Include="..\pm1prob.c" />
     <ClCompile Include="BenchmarkDlg.cpp" />
     <ClCompile Include="ChildFrm.cpp" />
     <ClCompile Include="CpuDlg.cpp" />

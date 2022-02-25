@@ -6,9 +6,9 @@
 # objconv comes courtesy of Agner Fog.  Download available at
 # http://www.agner.org/optimize/#objconv
 
-masm=uasm64 /c -coff
-#masm=uasm64 /c -Fl -coff
-#masm=uasm64 /c -Fl -Sf -Sa -Sg -coff
+masm=uasm64 /c -coff -safeseh
+#masm=uasm64 /c -Fl -coff -safeseh
+#masm=uasm64 /c -Fl -Sf -Sa -Sg -coff -safeseh
 #masm=ml /c /coff
 #masm=ml /c /coff /Fl /Sf /Sa
 
@@ -26,7 +26,7 @@ all:	gwnumd.lib gwnum.lib linux\gwnum.a macosx\gwnum.a release\ecmstag1.obj debu
 # Make libraries out of the object files
 
 gwnumd.lib: debug\cpuid.obj debug\gwnum.obj debug\gwtables.obj debug\gwthread.obj debug\gwini.obj debug\gwbench.obj debug\gwutil.obj \
-	    debug\gwdbldbl.obj debug\giants.obj mult.obj mult1.obj mult1aux.obj mult2.obj mult2p.obj mult2a.obj mult2aux.obj \
+	    debug\gwdbldbl.obj debug\giants.obj debug\radix.obj mult.obj mult1.obj mult1aux.obj mult2.obj mult2p.obj mult2a.obj mult2aux.obj \
 	    mult3.obj mult3p.obj mult3a.obj mult3ap.obj mult4.obj mult4p.obj gianthlp.obj cpuidhlp.obj hyperhlp.obj \
 	    xmult1ax.obj xmult2.obj xmult2a_core.obj xmult2a_k8.obj xmult2ax.obj xmult3.obj xmult3a_core.obj xmult3a_k8.obj xmult3ax.obj \
 	    hg_blend.obj hg_core.obj hg_p4.obj hg_p4tp.obj hg_k8.obj hg_k10.obj \
@@ -45,8 +45,8 @@ gwnumd.lib: debug\cpuid.obj debug\gwnum.obj debug\gwtables.obj debug\gwthread.ob
     lib /OUT:gwnumd.lib debug\*.obj *.obj
 
 gwnum.lib: release\cpuid.obj release\gwnum.obj release\gwtables.obj release\gwthread.obj release\gwini.obj release\gwbench.obj \
-	   release\gwutil.obj release\gwdbldbl.obj release\giants.obj mult.obj mult1.obj mult1aux.obj mult2.obj mult2p.obj mult2a.obj \
-	   mult2aux.obj mult3.obj mult3p.obj mult3a.obj mult3ap.obj mult4.obj mult4p.obj gianthlp.obj cpuidhlp.obj hyperhlp.obj \
+	   release\gwutil.obj release\gwdbldbl.obj release\giants.obj release\radix.obj mult.obj mult1.obj mult1aux.obj mult2.obj mult2p.obj \
+	   mult2a.obj mult2aux.obj mult3.obj mult3p.obj mult3a.obj mult3ap.obj mult4.obj mult4p.obj gianthlp.obj cpuidhlp.obj hyperhlp.obj \
 	   xmult1ax.obj xmult2.obj xmult2a_core.obj xmult2a_k8.obj xmult2ax.obj xmult3.obj xmult3a_core.obj xmult3a_k8.obj xmult3ax.obj \
 	   hg_blend.obj hg_core.obj hg_p4.obj hg_p4tp.obj hg_k8.obj hg_k10.obj \
 	   r4_core.obj r4_p4.obj r4_p4tp.obj r4_k8.obj r4_k10.obj \
@@ -177,6 +177,12 @@ release\giants.obj: giants.c giants.h
 
 debug\giants.obj: giants.c giants.h
     $(cldo) /Fodebug\giants.obj giants.c
+
+release\radix.obj: radix.c radix.h gwnum.h
+    $(cl) /Forelease\radix.obj radix.c
+
+debug\radix.obj: radix.c radix.h gwnum.h
+    $(cld) /Fodebug\radix.obj radix.c
 
 release\ecmstag1.obj: ecmstag1.c gwnum.h
     $(cl)  /Ic:\gmp32 /Forelease\ecmstag1.obj ecmstag1.c

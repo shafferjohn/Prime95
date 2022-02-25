@@ -25,6 +25,7 @@
 //  AUTHOR: Craig Link - Microsoft Developer Support
 //
 
+#define bool int
 
 #include <windows.h>
 #include <direct.h>
@@ -38,8 +39,6 @@
 #include "service.h"
 #include "gwnum.h"
 #include "giants.h"
-
-
 
 // internal variables
 SERVICE_STATUS          ssStatus;       // current status of the service
@@ -84,6 +83,8 @@ void main(int argc, char **argv)
         { TEXT(SZSERVICENAME), (LPSERVICE_MAIN_FUNCTION)service_main },
         { NULL, NULL }
     };
+
+    NO_GUI = 1;
 
 /* Change the working directory to the same directory that */
 /* the executable is located. */

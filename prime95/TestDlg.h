@@ -1,5 +1,7 @@
 // TestDlg.h : header file
 //
+//  Copyright 1995-2021 Mersenne Research, Inc. All rights reserved.
+//
 
 /////////////////////////////////////////////////////////////////////////////
 // CTestDlg dialog
@@ -13,9 +15,9 @@ public:
 // Dialog Data
 	//{{AFX_DATA(CTestDlg)
 	enum { IDD = IDD_TEST };
-	CStatic	c_thread_text;
-	CEdit	c_thread;
-	UINT	m_thread;
+	CStatic	c_worker_text;
+	CEdit	c_worker;
+	UINT	m_worker;
 	UINT	m_p;
 	//}}AFX_DATA
 

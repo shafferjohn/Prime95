@@ -1,6 +1,15 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
 +---------------------------------------------------------------------*/
+
+#ifndef _COMMONB_H
+#define _COMMONB_H
+
+/* This is used by C and C++ code.  If used in a C++ program, don't let the C++ compiler mangle names. */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 //#define SERVER_TESTING
 
@@ -22,7 +31,7 @@
 #define ALL_WORKERS 8888	// Special value for first arg of LaunchWorkerThreads
 int LaunchWorkerThreads (int, int);
 int LaunchTortureTest (unsigned long, int);
-int LaunchBench (int);
+int LaunchBench (int, int);
 int LaunchAdvancedTime (unsigned long, unsigned long);
 
 /* Callback routines */
@@ -47,32 +56,43 @@ void checkPauseListCallback (void);
 #define SET_PRIORITY_QA			5
 #define SET_PRIORITY_BUSY_LOOP		6
 struct PriorityInfo {
- 	int	type;			/* Type defined above */
-	int	worker_num;		/* Worker number -- output informative messages to this worker's window */
-	int	verbose_flag;		/* Output affinity messages to the worker window */
-	int	aux_thread_num;		/* Set when gwnum launches auxiliary threads */
-	int	aux_hyperthread;	/* Set when gwnum launches auxiliary hyperthreads */
+ 	uint32_t type;			/* Type defined above */
+	uint32_t worker_num;		/* Worker number -- output informative messages to this worker's window */
+	uint32_t verbosity;		/* Output affinity messages to the worker window */
+	uint32_t aux_thread_num;	/* Set when gwnum launches auxiliary threads */
+	bool	aux_hyperthread;	/* Set when gwnum launches auxiliary prefetching hyperthread */
 	union {
 		struct {		/* Normal work info */
-			int	normal_work_hyperthreads;	/* Number of hyperthreads to be assigned to same core */
+			int	normal_work_hyperthreading;	/* True if worker will use hyperthreading */
 		};
 		struct {		/* Torture test info */
 			int	torture_num_workers;		/* Total number of torture test worker windows */
-			int	torture_threads_per_test;	/* Number of threads per torture test (usually one) */
+			int	torture_core_num;		/* CPU core to torture */
+			int	torture_thread_num;		/* Hyperthread number (nth torture test for this core) */
+			bool	torture_hyperthreading;		/* True if doing a hyperthreaded torture test */
 		};
 		struct {		/* Advanced/Time info */
-			int	time_hyperthreads;		/* Number of hyperthreads to be assigned to same core */
+			bool	time_hyperthreading;		/* True if doing a hyperthreaded timing */
 		};
 		struct {		/* Benchmark info */
-			int	bench_base_cpu_num;		/* First CPU core to set affinity to */
-			int	bench_hyperthreads;		/* Number of hyperthreads to be assigned to same core */
+			int	bench_base_core_num;		/* First CPU core to set affinity to */
+			bool	bench_hyperthreading;		/* True if doing a hyperthreaded benchmark */
 		};
 		struct {		/* Busy loop info */
-			int	busy_loop_cpu;			/* CPU core to keep busy */
+			int	busy_loop_core;			/* CPU core to keep busy */
 		};
 	};
 };
 void SetPriority (struct PriorityInfo *);
+void SetAuxThreadPriority (int aux_thread_num, int action, void *data);
+/* The hwloc library numbers cores from 0 to HW_NUM_CORES-1.  But we do not necessarily assign cores in that order. */
+/* With the introduction of Alder Lake, we first assign compute/performance cores.  Then assign efficiency cores. */
+/* This routine maps "prime95 core numbers" into "hwloc core numbers", returning the index into the HW_CORES array */
+uint32_t get_ranked_core (uint32_t core_num);
+/* Return the number of threads gwnum will need to use when running on several possibly hyperthreaded cores */
+uint32_t get_ranked_num_threads (uint32_t base_core_num, uint32_t num_cores, bool hyperthreading);
+/* Return the number of threads gwnum will need to use when a worker is running on several possibly hyperthreaded cores */
+uint32_t get_worker_num_threads (uint32_t worker_num, bool hyperthreading);
 
 /* Internal routines that do the real work */
 
@@ -89,16 +109,68 @@ int primeFactor (int, struct PriorityInfo *, struct work_unit *, unsigned int);
 int prime (int, struct PriorityInfo *, struct work_unit *, int);
 int prp (int, struct PriorityInfo *, struct work_unit *, int);
 int cert (int, struct PriorityInfo *, struct work_unit *, int);
-int ecm (int, struct PriorityInfo *, struct work_unit *);
-int pminus1 (int, struct PriorityInfo *, struct work_unit *);
-int pfactor (int, struct PriorityInfo *, struct work_unit *);
-double guess_pminus1_probability (struct work_unit *w);
 void autoBench (void);
 
 /* Utility routines */
 
 int isKnownMersennePrime (unsigned long);
 void makestr (unsigned long, unsigned long, unsigned long, char *);
+
+int pick_fft_size (int thread_num, struct work_unit *w);
+int exponent_near_fft_limit (gwhandle *gwdata);
+void calc_output_frequencies (gwhandle *gwdata, double *output_frequency, double *output_title_frequency);
+double trunc_percent (double percent);
+int testSaveFilesFlag (int thread_num);
+int SleepFive (int thread_num);
+
+#define TIMER_NL	0x1
+#define TIMER_CLR	0x2
+#define TIMER_OPT_CLR	0x4
+#define TIMER_MS	0x8
+
+void clear_timers (double *timers, int num_timers);
+void clear_timer (double *timers, int i);
+void start_timer (double *timers, int i);
+void start_timer_from_zero (double *timers, int i);
+void end_timer (double *timers, int i);
+void divide_timer (double *timers, int i, int j);
+double timer_value (double *timers, int i);
+void print_timer (double *timers, int i, char *buf, int flags);
+
+/* Data structure used in reading save files and their backups as well as renaming bad save files. */
+
+typedef struct read_save_file_state {
+	int	thread_num;
+	int	read_attempt;
+	int	a_save_file_existed;
+	int	a_non_bad_save_file_existed;
+	int	num_original_bad_files;
+	int	num_save_files_renamed;
+	char	base_filename[80];
+	char	current_filename[80];
+} readSaveFileState;
+
+void readSaveFileStateInit (readSaveFileState *state, int thread_num, char *filename);
+int saveFileExists (readSaveFileState *state);
+void saveFileBad (readSaveFileState *state);
+extern const char ALLSAVEBAD_MSG[];
+
+/* Data structure used in writing save files and their backups */
+
+typedef struct write_save_file_state {
+	char	base_filename[80];
+	int	num_ordinary_save_files;
+	int	num_special_save_files;		/* Example: Number of save files to keep that passed the Jacobi error check */
+	uint64_t special;			/* Bit array for which ordinary save files are special */
+} writeSaveFileState;
+
+void uniquifySaveFile (int thread_num, char *filename);
+void writeSaveFileStateInit (writeSaveFileState *state, char *filename, int num_special_save_files);
+int openWriteSaveFile (writeSaveFileState *state);
+void closeWriteSaveFile (writeSaveFileState *state, int fd);
+void setWriteSaveFileSpecial (writeSaveFileState *state);
+void deleteWriteSaveFile (writeSaveFileState *state, int fd);
+void unlinkSaveFiles (writeSaveFileState *state);
 
 /* Stop routines */
 
@@ -141,7 +213,16 @@ void stop_worker_for_abort (int);
 void mem_settings_have_changed (void);
 unsigned long max_mem (int);
 int avail_mem (int, unsigned long, unsigned long, unsigned int *);
+#define MEM_USAGE_NOT_SET 0x1		/* The mem_in_use value is just a guess as the work unit for the thread has not started yet or is restarting. */
+#define MEM_RESTARTING	0x2		/* The mem_in_use value will be changing soon as the thread is being restarted because it was using too much memory. */
+#define MEM_WILL_BE_VARIABLE_USAGE 0x4	/* The current work unit will be a variable memory user.  We just don't know how much it will use yet. */
+#define	MEM_VARIABLE_USAGE 0x8		/* The current work unit is using a lot of memory now and if needed could use less if restarted. */
+#define MEM_WAITING 0x10		/* Set if thread is waiting for another thread to stop before returning from set_memory_usage */
 int set_memory_usage (int, int, unsigned long);
+void set_restart_if_max_memory_change (int thread_num);
+void clear_restart_if_max_memory_change (int thread_num);
+
+int avail_mem_not_sufficient (int thread_num, unsigned long min_memory, unsigned long desired_memory);
 
 /* Handy macros to help in calling memory routines.  Macros tell */
 /* us how many gwnums fit in given megabytes AND how many megabytes */
@@ -204,12 +285,15 @@ void registerThreadTermination (void);
 void raiseAllWorkerThreadPriority (void);
 void flashWindowAndBeep (void);
 int primeSieveTest (int);
-int setN (gwhandle *, int, struct work_unit *, giant *);
-int ecm_QA (int, struct PriorityInfo *);
-int pminus1_QA (int, struct PriorityInfo *);
 int test_randomly (int, struct PriorityInfo *);
 int test_all_impl (int, struct PriorityInfo *);
 
 /* Messages */
 
 #define BENCH_SPEED  "The CPU speed in Options/CPU may not be correct.  An incorrect value will result in inaccurate timings.  Are you sure this is the correct CPU speed value?"
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

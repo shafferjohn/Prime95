@@ -1,6 +1,6 @@
 // Microsoft Visual C++ generated resource script.
 //
-// Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
+// Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
 //
 
 #include "resource.h"
@@ -260,7 +260,7 @@ BEGIN
     LTEXT           "GIMPS: Mersenne Prime Search",IDC_STATIC,40,9,155,8,SS_NOPREFIX
     LTEXT           "Web site: http://mersenne.org",IDC_LINK,40,19,114,10
     LTEXT           "app string",IDC_APP_STRING,40,31,185,8
-    LTEXT           "Copyright © 1996-2020 Mersenne Research, Inc.",IDC_STATIC,40,41,179,8
+    LTEXT           "Copyright © 1996-2021 Mersenne Research, Inc.",IDC_STATIC,40,41,179,8
     LTEXT           "Author: George Woltman",IDC_STATIC,40,51,128,8
     LTEXT           "Email:  woltman@alum.mit.edu",IDC_STATIC,40,61,161,8
     DEFPUSHBUTTON   "OK",IDOK,199,7,32,14,WS_GROUP
@@ -271,8 +271,8 @@ STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Test a Specific Exponent"
 FONT 8, "MS Sans Serif", 0, 0, 0x0
 BEGIN
-    LTEXT           "&Worker number:",IDC_THREAD_TEXT,7,10,64,10
-    EDITTEXT        IDC_THREAD,87,7,22,12
+    LTEXT           "&Worker number:",IDC_WORKER_TEXT,7,10,64,10
+    EDITTEXT        IDC_WORKER,87,7,22,12
     LTEXT           "&Exponent to test:",IDC_STATIC,7,25,55,10
     EDITTEXT        IDC_P,68,24,42,12,ES_NUMBER
     DEFPUSHBUTTON   "OK",IDOK,117,7,50,14
@@ -292,29 +292,38 @@ BEGIN
     PUSHBUTTON      "Cancel",IDCANCEL,228,24,50,14
 END
 
-IDD_RESOURCES DIALOGEX 0, 0, 310, 106
+IDD_RESOURCES DIALOGEX 0, 0, 290, 165
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Resource Limits and Settings"
 FONT 8, "MS Sans Serif", 0, 0, 0x0
 BEGIN
-    GROUPBOX        "Disk resources",IDC_STATIC,8,6,214,28
+    GROUPBOX        "Disk resources",IDC_STATIC,8,6,204,28
     LTEXT           "&Temporary disk space limit (GB / worker):",IDC_STATIC,12,18,149,10
-    EDITTEXT        IDC_DISK,155,16,36,12,ES_AUTOHSCROLL
-    GROUPBOX        "Network resources",IDC_STATIC,8,40,233,58
-    LTEXT           "&Upload bandwidth limit (Mbps):",IDC_UPLOAD_BANDWIDTH_TEXT,12,52,158,10
-    EDITTEXT        IDC_UPLOAD_BANDWIDTH,192,50,36,12,ES_AUTOHSCROLL
-    LTEXT           "Upload large files during time period:",IDC_UPLOAD_START_TEXT,12,67,123,10
-    EDITTEXT        IDC_UPLOAD_START,136,65,36,12,ES_AUTOHSCROLL
-    CTEXT           "to",IDC_UPLOAD_END_TEXT,176,67,12,10,SS_NOPREFIX
-    EDITTEXT        IDC_UPLOAD_END,192,65,36,12,ES_AUTOHSCROLL
-    LTEXT           "&Download limit for certification work (MB / day):",IDC_STATIC,12,82,168,10
-    EDITTEXT        IDC_DOWNLOAD_MB,192,80,36,12,ES_AUTOHSCROLL
-    DEFPUSHBUTTON   "OK",IDOK,254,8,50,14
-    PUSHBUTTON      "Cancel",IDCANCEL,254,26,50,14
-    PUSHBUTTON      "Advanced...",IDC_ADVANCED,254,45,50,14
+    EDITTEXT        IDC_DISK,163,16,36,12,ES_AUTOHSCROLL
+    GROUPBOX        "Memory resources",IDC_STATIC,8,39,204,58
+    LTEXT           "&Daytime P-1/P+1/ECM stage 2 memory (GB):",IDC_DAY_MEMORY_TEXT,12,51,162,10
+    EDITTEXT        IDC_DAY_MEMORY,163,49,36,12
+    LTEXT           "&Nighttime P-1/P+1/ECM stage 2 memory (GB):",IDC_NIGHT_MEMORY_TEXT,12,66,162,10
+    EDITTEXT        IDC_NIGHT_MEMORY,163,64,36,12
+    LTEXT           "Daytime &begins:",IDC_START_TIME_TEXT,12,81,51,10
+    EDITTEXT        IDC_START_TIME,64,79,37,12,ES_AUTOHSCROLL
+    LTEXT           "&ends:",IDC_END_TIME_TEXT,109,81,20,10
+    EDITTEXT        IDC_END_TIME,132,79,36,12,ES_AUTOHSCROLL
+    GROUPBOX        "Network resources",IDC_STATIC,8,102,233,58
+    LTEXT           "&Upload bandwidth limit (Mbps):",IDC_UPLOAD_BANDWIDTH_TEXT,12,114,158,10
+    EDITTEXT        IDC_UPLOAD_BANDWIDTH,192,112,36,12,ES_AUTOHSCROLL
+    LTEXT           "Upload large files during time period:",IDC_UPLOAD_START_TEXT,12,129,123,10
+    EDITTEXT        IDC_UPLOAD_START,136,127,36,12,ES_AUTOHSCROLL
+    CTEXT           "to",IDC_UPLOAD_END_TEXT,176,129,12,10,SS_NOPREFIX
+    EDITTEXT        IDC_UPLOAD_END,192,127,36,12,ES_AUTOHSCROLL
+    LTEXT           "&Download limit for certification work (MB / day):",IDC_STATIC,12,144,168,10
+    EDITTEXT        IDC_DOWNLOAD_MB,192,142,36,12,ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "OK",IDOK,234,8,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,234,26,50,14
+    PUSHBUTTON      "Advanced...",IDC_ADVANCED,234,45,50,14
 END
 
-IDD_ADVANCED_RESOURCES DIALOGEX 0, 0, 311, 241
+IDD_ADVANCED_RESOURCES DIALOGEX 0, 0, 311, 197
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Advanced Resource Limits and Settings"
 FONT 8, "MS Sans Serif", 0, 0, 0x0
@@ -324,26 +333,18 @@ BEGIN
     EDITTEXT        IDC_TEMP_DIR,12,30,218,12,ES_AUTOHSCROLL
     LTEXT           "Optional directory to hold &archived proofs:",IDC_ARCHIVE_DIR_TEXT,12,47,177,10
     EDITTEXT        IDC_ARCHIVE_DIR,12,59,218,12,ES_AUTOHSCROLL
-    GROUPBOX        "Memory resources",IDC_STATIC,8,83,278,73
-    LTEXT           "&Daytime P-1/ECM stage 2 memory (GB):",IDC_DAY_MEMORY_TEXT,12,98,162,10
-    EDITTEXT        IDC_DAY_MEMORY,172,96,36,12
-    LTEXT           "&Nighttime P-1/ECM stage 2 memory (GB):",IDC_NIGHT_MEMORY_TEXT,12,113,162,10
-    EDITTEXT        IDC_NIGHT_MEMORY,172,111,36,12
-    LTEXT           "Daytime &begins:",IDC_START_TIME_TEXT,12,128,51,10
-    EDITTEXT        IDC_START_TIME,64,126,37,12,ES_AUTOHSCROLL
-    LTEXT           "&ends:",IDC_END_TIME_TEXT,109,128,20,10
-    EDITTEXT        IDC_END_TIME,132,126,36,12,ES_AUTOHSCROLL
-    LTEXT           "&Max emergency memory (GB / worker):",IDC_STATIC,12,142,162,10
-    EDITTEXT        IDC_EMERGENCY_MEM,172,140,36,12
-    GROUPBOX        "CPU resources",IDC_STATIC,8,161,279,74
-    LTEXT           "&Priority (priority of 1 is highly recommended, see readme.txt):",IDC_STATIC,12,174,188,8
-    EDITTEXT        IDC_PRIORITY,214,172,36,12,ES_AUTOHSCROLL
-    LTEXT           "&Certification work limit (% of CPU time):",IDC_CERT_CPU_TEXT,12,188,188,8
-    EDITTEXT        IDC_CERT_CPU,214,186,36,12,ES_AUTOHSCROLL
+    GROUPBOX        "Memory resources",IDC_STATIC,8,83,278,29
+    LTEXT           "&Max emergency memory (GB / worker):",IDC_STATIC,12,98,162,10
+    EDITTEXT        IDC_EMERGENCY_MEM,172,96,36,12
+    GROUPBOX        "CPU resources",IDC_STATIC,8,117,279,74
+    LTEXT           "&Priority (priority of 1 is highly recommended, see readme.txt):",IDC_STATIC,12,130,188,8
+    EDITTEXT        IDC_PRIORITY,214,128,36,12,ES_AUTOHSCROLL
+    LTEXT           "&Certification work limit (% of CPU time):",IDC_CERT_CPU_TEXT,12,144,188,8
+    EDITTEXT        IDC_CERT_CPU,214,142,36,12,ES_AUTOHSCROLL
     CONTROL         "Use &hyperthreading for trial factoring (recommended, requires 64-bit Windows)",IDC_HYPER_TF,
-                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,203,268,10
-    CONTROL         "Use h&yperthreading for PRP, LL, CERT, P-1, ECM (not recommended)",IDC_HYPER_LL,
-                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,217,268,10
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,159,268,10
+    CONTROL         "Use h&yperthreading for PRP, LL, CERT, P-1, P+1, ECM (not recommended)",IDC_HYPER_LL,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,173,268,10
     DEFPUSHBUTTON   "OK",IDOK,250,11,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,250,28,50,14
 END
@@ -478,8 +479,8 @@ STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Factor Number Using ECM"
 FONT 8, "MS Sans Serif", 0, 0, 0x0
 BEGIN
-    LTEXT           "&Worker number:",IDC_THREAD_TEXT,7,9,54,10
-    EDITTEXT        IDC_THREAD,64,7,22,12
+    LTEXT           "&Worker number:",IDC_WORKER_TEXT,7,9,54,10
+    EDITTEXT        IDC_WORKER,64,7,22,12
     LTEXT           "&Number to factor:",-1,7,25,51,10
     EDITTEXT        IDC_P4,59,23,33,12,ES_RIGHT
     LTEXT           "*",-1,96,26,8,8
@@ -502,8 +503,8 @@ STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Factor Number Using P-1"
 FONT 8, "MS Sans Serif", 0, 0, 0x0
 BEGIN
-    LTEXT           "&Worker number:",IDC_THREAD_TEXT,7,10,64,10
-    EDITTEXT        IDC_THREAD,64,7,22,12
+    LTEXT           "&Worker number:",IDC_WORKER_TEXT,7,10,64,10
+    EDITTEXT        IDC_WORKER,64,7,22,12
     LTEXT           "&Number to factor:",-1,7,29,51,10
     EDITTEXT        IDC_P4,59,27,33,12,ES_RIGHT
     LTEXT           "*",-1,96,30,8,8
@@ -553,8 +554,9 @@ STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Run a Torture Test"
 FONT 8, "MS Sans Serif", 0, 0, 0x0
 BEGIN
-    LTEXT           "Number of torture test &threads to run:",IDC_THREAD_TEXT,8,9,119,10
-    EDITTEXT        IDC_THREAD,132,7,36,12
+    LTEXT           "Number of cores to &torture test:",IDC_CORES_TEXT,8,9,104,10
+    EDITTEXT        IDC_CORES,114,7,20,12
+    CONTROL         "Use hyperthreading (more stressful)",IDC_HYPERTHREADING,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,142,9,152,10
     CONTROL         "Smallest FFTs (tests L1/L&2 caches, high power/heat/CPU stress)",IDC_L2_CACHE,
                     "Button",BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP,7,23,282,10
     CONTROL         "Small FFTs (tests L1/L2/L&3 caches, maximum power/heat/CPU stress)",IDC_L3_CACHE,
@@ -589,21 +591,22 @@ BEGIN
     PUSHBUTTON      "Cancel",IDCANCEL,295,24,50,14
 END
 
-IDD_WORKER_THREADS DIALOGEX 0, 0, 309, 130
+IDD_WORKER_THREADS DIALOGEX 0, 0, 309, 143
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Worker Windows"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    LTEXT           "Number of worker &windows to run:",IDC_THREAD_TEXT,7,18,112,10
-    EDITTEXT        IDC_THREAD,126,16,36,12
-    GROUPBOX        "Worker-specific options",IDC_WORKGROUP,3,40,302,70
-    LTEXT           "Worker &number:",IDC_THREADNUM_TEXT,9,55,57,8
+    LTEXT           "Number of worker &windows to run:",IDC_WORKER_TEXT,7,18,112,10
+    EDITTEXT        IDC_WORKER,126,16,36,12
+    GROUPBOX        "Worker-specific options",IDC_WORKGROUP,3,40,302,83
+    LTEXT           "Worker &number:",IDC_WORKERNUM_TEXT,9,55,57,8
     COMBOBOX        IDC_COMBO1,90,53,105,84,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Type of work to &get:",IDC_WORK_TYPE_TEXT,9,73,66,8
     COMBOBOX        IDC_COMBO2,90,71,200,81,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "&CPU cores to use (multithreading):",IDC_NUMCPUS_TEXT,9,91,118,8
     EDITTEXT        IDC_NUMCPUS,129,89,36,12
-    CONTROL         "Get occasional &proof certification work",IDC_CERT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,115,200,10
+    LTEXT           "Minimum number of CPU cores is based on work preference and hours per day settings",IDC_STATIC,9,106,289,8
+    CONTROL         "Get occasional &proof certification work",IDC_CERT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,128,200,10
     DEFPUSHBUTTON   "OK",IDOK,255,7,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,255,24,50,14
 END
@@ -614,8 +617,8 @@ CAPTION "Start one or all workers"
 FONT 8, "MS Sans Serif", 0, 0, 0x0
 BEGIN
     CONTROL         "&Start all workers",IDC_RADIO1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,13,89,10
-    LTEXT           "&Worker number to start:",IDC_THREAD_TEXT,7,30,76,10
-    EDITTEXT        IDC_THREAD,87,29,22,12
+    LTEXT           "&Worker number to start:",IDC_WORKER_TEXT,7,30,76,10
+    EDITTEXT        IDC_WORKER,87,29,22,12
     DEFPUSHBUTTON   "OK",IDOK,117,7,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,117,24,50,14
 END
@@ -626,8 +629,8 @@ CAPTION "Stop one or all workers"
 FONT 8, "MS Sans Serif", 0, 0, 0x0
 BEGIN
     CONTROL         "&Stop all workers",IDC_RADIO1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,13,89,10
-    LTEXT           "&Worker number to stop:",IDC_THREAD_TEXT,7,30,76,10
-    EDITTEXT        IDC_THREAD,87,29,22,12
+    LTEXT           "&Worker number to stop:",IDC_WORKER_TEXT,7,30,76,10
+    EDITTEXT        IDC_WORKER,87,29,22,12
     DEFPUSHBUTTON   "OK",IDOK,117,7,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,117,24,50,14
 END
@@ -639,8 +642,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 30,3,1,0
- PRODUCTVERSION 30,3,0,0
+ FILEVERSION 30,7,1,0
+ PRODUCTVERSION 30,7,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -656,12 +659,12 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "FileDescription", "PRIME95 Application"
-            VALUE "FileVersion", "30, 3, 1, 0"
+            VALUE "FileVersion", "30, 7, 1, 0"
             VALUE "InternalName", "PRIME95"
-            VALUE "LegalCopyright", "Copyright © 1996-2020, Mersenne Research Inc."
+            VALUE "LegalCopyright", "Copyright © 1996-2021, Mersenne Research Inc."
             VALUE "OriginalFilename", "PRIME95.EXE"
             VALUE "ProductName", "PRIME95 Application"
-            VALUE "ProductVersion", "30, 3, 0, 0"
+            VALUE "ProductVersion", "30, 7, 0, 0"
         END
     END
     BLOCK "VarFileInfo"

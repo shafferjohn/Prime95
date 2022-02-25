@@ -1,5 +1,7 @@
 // StartDlg.cpp : implementation file
 //
+//  Copyright 1995-2021 Mersenne Research, Inc. All rights reserved.
+//
 
 #include "stdafx.h"
 #include "Prime95.h"
@@ -19,8 +21,8 @@ CStartDlg::CStartDlg(CWnd* pParent /*=NULL*/)
 	: CDialog(CStartDlg::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CStartDlg)
-	m_thread = 1;
-	m_all_threads = 1;
+	m_worker = 1;
+	m_all_workers = 1;
 	//}}AFX_DATA_INIT
 }
 
@@ -28,14 +30,14 @@ void CStartDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialog::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CStartDlg)
-	DDX_Check(pDX, IDC_RADIO1, m_all_threads);
-	DDX_Control(pDX, IDC_THREAD_TEXT, c_thread_text);
-	DDX_Control(pDX, IDC_THREAD, c_thread);
-	DDX_Text(pDX, IDC_THREAD, m_thread);
-	DDV_MinMaxUInt(pDX, m_thread, 1, WORKER_THREADS_ACTIVE > NUM_WORKER_THREADS ? WORKER_THREADS_ACTIVE : NUM_WORKER_THREADS);
+	DDX_Check(pDX, IDC_RADIO1, m_all_workers);
+	DDX_Control(pDX, IDC_WORKER_TEXT, c_worker_text);
+	DDX_Control(pDX, IDC_WORKER, c_worker);
+	DDX_Text(pDX, IDC_WORKER, m_worker);
+	DDV_MinMaxUInt(pDX, m_worker, 1, WORKER_THREADS_ACTIVE > NUM_WORKER_THREADS ? WORKER_THREADS_ACTIVE : NUM_WORKER_THREADS);
 	//}}AFX_DATA_MAP
-	c_thread_text.EnableWindow (!m_all_threads);
-	c_thread.EnableWindow (!m_all_threads);
+	c_worker_text.EnableWindow (!m_all_workers);
+	c_worker.EnableWindow (!m_all_workers);
 }
 
 
@@ -52,7 +54,7 @@ END_MESSAGE_MAP()
 void CStartDlg::OnBnClickedRadio1()
 {
 	UpdateData ();
-	c_thread_text.EnableWindow (!m_all_threads);
-	c_thread.EnableWindow (!m_all_threads);
+	c_worker_text.EnableWindow (!m_all_workers);
+	c_worker.EnableWindow (!m_all_workers);
 }
 

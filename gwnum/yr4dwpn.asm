@@ -1,4 +1,4 @@
-; Copyright 2011-2017 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2020 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -25,6 +25,449 @@ INCLUDE yr4dwpnpass1sc.mac
 INCLUDE yr4dwpnpass2.mac
 
 _TEXT SEGMENT
+
+;; To reduce executable size, we call common code to do the very few real FFT words in the last FFT level
+
+IF (@INSTR(,%yarch,<CORE>) NE 0)			;; Only build these once -- contains no FMA3-specific code
+
+IFNDEF X86_64
+PROCF	yreal_fft_final1a				;; One pass version has no current push_amt
+	int_prolog 0,0,0
+	yr4_4cl_eight_reals_four_complex_fft_final rsi, 4*64, 64, 2*64
+	int_epilog 0,0,0
+yreal_fft_final1a ENDP
+ENDIF
+PROCF	yreal_fft_final1
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_fft_final rsi, 4*64, 64, 2*64
+	int_epilog 0,16,0
+yreal_fft_final1 ENDP
+PROCF	yreal_fft_final2
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_fft_final rsi, 64, 4*64, 8*64
+	int_epilog 0,16,0
+yreal_fft_final2 ENDP
+PROCF	yreal_fft_final3
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_fft_final rsi, 64, 16*64, 32*64
+	int_epilog 0,16,0
+yreal_fft_final3 ENDP
+PROCF	yreal_fft_final4
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_fft_final rsi, 64, (64*64+64), 2*(64*64+64)
+	int_epilog 0,16,0
+yreal_fft_final4 ENDP
+PROCF	yreal_fft_final4a
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_fft_final rsi, 64, (64*64+128), 2*(64*64+128)
+	int_epilog 0,16,0
+yreal_fft_final4a ENDP
+PROCF	yreal_fft_final5
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_fft_final rsi, 64, 4*(64*64+64), 8*(64*64+64)
+	int_epilog 0,16,0
+yreal_fft_final5 ENDP
+PROCF	yreal_fft_final6
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_fft_final rsi, 64, 16*(64*64+64), 32*(64*64+64)
+	int_epilog 0,16,0
+yreal_fft_final6 ENDP
+
+IFNDEF X86_64
+PROCF	yreal_square1a				;; One pass version has no current push_amt
+	int_prolog 0,0,0
+	yr4_4cl_eight_reals_four_complex_with_square rsi, 4*64, 64, 2*64
+	int_epilog 0,0,0
+yreal_square1a ENDP
+ENDIF
+PROCF	yreal_square1
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_square rsi, 4*64, 64, 2*64
+	int_epilog 0,16,0
+yreal_square1 ENDP
+PROCF	yreal_square2
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_square rsi, 64, 4*64, 8*64
+	int_epilog 0,16,0
+yreal_square2 ENDP
+PROCF	yreal_square3
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_square rsi, 64, 16*64, 32*64
+	int_epilog 0,16,0
+yreal_square3 ENDP
+PROCF	yreal_square4
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_square rsi, 64, (64*64+64), 2*(64*64+64)
+	int_epilog 0,16,0
+yreal_square4 ENDP
+PROCF	yreal_square4a
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_square rsi, 64, (64*64+128), 2*(64*64+128)
+	int_epilog 0,16,0
+yreal_square4a ENDP
+PROCF	yreal_square5
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_square rsi, 64, 4*(64*64+64), 8*(64*64+64)
+	int_epilog 0,16,0
+yreal_square5 ENDP
+PROCF	yreal_square6
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_square rsi, 64, 16*(64*64+64), 32*(64*64+64)
+	int_epilog 0,16,0
+yreal_square6 ENDP
+
+IFNDEF X86_64
+PROCF	yreal_mult1a				;; One pass version has no current push_amt
+	int_prolog 0,0,0
+	yr4_4cl_eight_reals_four_complex_with_mult rsi, 4*64, 64, 2*64
+	int_epilog 0,0,0
+yreal_mult1a ENDP
+ENDIF
+PROCF	yreal_mult1
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mult rsi, 4*64, 64, 2*64
+	int_epilog 0,16,0
+yreal_mult1 ENDP
+PROCF	yreal_mult2
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mult rsi, 64, 4*64, 8*64
+	int_epilog 0,16,0
+yreal_mult2 ENDP
+PROCF	yreal_mult3
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mult rsi, 64, 16*64, 32*64
+	int_epilog 0,16,0
+yreal_mult3 ENDP
+PROCF	yreal_mult4
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mult rsi, 64, (64*64+64), 2*(64*64+64)
+	int_epilog 0,16,0
+yreal_mult4 ENDP
+PROCF	yreal_mult4a
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mult rsi, 64, (64*64+128), 2*(64*64+128)
+	int_epilog 0,16,0
+yreal_mult4a ENDP
+PROCF	yreal_mult5
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mult rsi, 64, 4*(64*64+64), 8*(64*64+64)
+	int_epilog 0,16,0
+yreal_mult5 ENDP
+PROCF	yreal_mult6
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mult rsi, 64, 16*(64*64+64), 32*(64*64+64)
+	int_epilog 0,16,0
+yreal_mult6 ENDP
+
+IFNDEF X86_64
+PROCF	yreal_mulf1a				;; One pass version has no current push_amt
+	int_prolog 0,0,0
+	yr4_4cl_eight_reals_four_complex_with_mulf rsi, 4*64, 64, 2*64
+	int_epilog 0,0,0
+yreal_mulf1a ENDP
+ENDIF
+PROCF	yreal_mulf1
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mulf rsi, 4*64, 64, 2*64
+	int_epilog 0,16,0
+yreal_mulf1 ENDP
+PROCF	yreal_mulf2
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mulf rsi, 64, 4*64, 8*64
+	int_epilog 0,16,0
+yreal_mulf2 ENDP
+PROCF	yreal_mulf3
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mulf rsi, 64, 16*64, 32*64
+	int_epilog 0,16,0
+yreal_mulf3 ENDP
+PROCF	yreal_mulf4
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mulf rsi, 64, (64*64+64), 2*(64*64+64)
+	int_epilog 0,16,0
+yreal_mulf4 ENDP
+PROCF	yreal_mulf4a
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mulf rsi, 64, (64*64+128), 2*(64*64+128)
+	int_epilog 0,16,0
+yreal_mulf4a ENDP
+PROCF	yreal_mulf5
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mulf rsi, 64, 4*(64*64+64), 8*(64*64+64)
+	int_epilog 0,16,0
+yreal_mulf5 ENDP
+PROCF	yreal_mulf6
+	int_prolog 0,16,0
+	yr4_4cl_eight_reals_four_complex_with_mulf rsi, 64, 16*(64*64+64), 32*(64*64+64)
+	int_epilog 0,16,0
+yreal_mulf6 ENDP
+
+
+PROCF	y8real_fft_final1
+	int_prolog 0,0,0
+	yr8_8cl_sixteen_reals_eight_complex_fft_final rsi, 8*64, 64, 2*64, 4*64
+	int_epilog 0,0,0
+y8real_fft_final1 ENDP
+PROCF	y8real_fft_final2
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_fft_final rsi, 2*64, 32*64, (64*64+128), 64
+	int_epilog 0,16,0
+y8real_fft_final2 ENDP
+PROCF	y8real_fft_final3
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_fft_final rsi, 2*64, 2*(64*64+64), 4*(64*64+64), 64
+	int_epilog 0,16,0
+y8real_fft_final3 ENDP
+PROCF	y8real_fft_final4
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_fft_final rsi, 2*64, 8*(64*64+64), 16*(64*64+64), 64
+	int_epilog 0,16,0
+y8real_fft_final4 ENDP
+
+PROCF	y8real_square1
+	int_prolog 0,0,0
+	yr8_8cl_sixteen_reals_eight_complex_with_square rsi, 8*64, 64, 2*64, 4*64
+	int_epilog 0,0,0
+y8real_square1 ENDP
+PROCF	y8real_square2
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_with_square rsi, 2*64, 32*64, (64*64+128), 64
+	int_epilog 0,16,0
+y8real_square2 ENDP
+PROCF	y8real_square3
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_with_square rsi, 2*64, 2*(64*64+64), 4*(64*64+64), 64
+	int_epilog 0,16,0
+y8real_square3 ENDP
+PROCF	y8real_square4
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_with_square rsi, 2*64, 8*(64*64+64), 16*(64*64+64), 64
+	int_epilog 0,16,0
+y8real_square4 ENDP
+
+PROCF	y8real_mult1
+	int_prolog 0,0,0
+	yr8_8cl_sixteen_reals_eight_complex_with_mult rsi, 8*64, 64, 2*64, 4*64
+	int_epilog 0,0,0
+y8real_mult1 ENDP
+PROCF	y8real_mult2
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_with_mult rsi, 2*64, 32*64, (64*64+128), 64
+	int_epilog 0,16,0
+y8real_mult2 ENDP
+PROCF	y8real_mult3
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_with_mult rsi, 2*64, 2*(64*64+64), 4*(64*64+64), 64
+	int_epilog 0,16,0
+y8real_mult3 ENDP
+PROCF	y8real_mult4
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_with_mult rsi, 2*64, 8*(64*64+64), 16*(64*64+64), 64
+	int_epilog 0,16,0
+y8real_mult4 ENDP
+
+PROCF	y8real_mulf1
+	int_prolog 0,0,0
+	yr8_8cl_sixteen_reals_eight_complex_with_mulf rsi, 8*64, 64, 2*64, 4*64
+	int_epilog 0,0,0
+y8real_mulf1 ENDP
+PROCF	y8real_mulf2
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_with_mulf rsi, 2*64, 32*64, (64*64+128), 64
+	int_epilog 0,16,0
+y8real_mulf2 ENDP
+PROCF	y8real_mulf3
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_with_mulf rsi, 2*64, 2*(64*64+64), 4*(64*64+64), 64
+	int_epilog 0,16,0
+y8real_mulf3 ENDP
+PROCF	y8real_mulf4
+	int_prolog 0,16,0
+	yr8_8cl_sixteen_reals_eight_complex_with_mulf rsi, 2*64, 8*(64*64+64), 16*(64*64+64), 64
+	int_epilog 0,16,0
+y8real_mulf4 ENDP
+
+;; Generate code to support gwaddmul4 and gwsubmul4 with radix-8 last step.  There aren't FMA3 versions of these routines
+
+IFDEF X86_64
+PROCF	y8complex_mult_opcode1
+	int_prolog 0,16,0
+	yr8_8c_mult_opcode rsi, 64, 2*64, 4*64
+	int_epilog 0,16,0
+y8complex_mult_opcode1 ENDP
+PROCF	y8complex_mult_opcode2
+	int_prolog 0,16,0
+	yr8_8c_mult_opcode rsi, 32*64, (64*64+128), 64
+	int_epilog 0,16,0
+y8complex_mult_opcode2 ENDP
+PROCF	y8complex_mult_opcode3
+	int_prolog 0,16,0
+	yr8_8c_mult_opcode rsi, 2*(64*64+64), 4*(64*64+64), 64
+	int_epilog 0,16,0
+y8complex_mult_opcode3 ENDP
+PROCF	y8complex_mult_opcode4
+	int_prolog 0,16,0
+	yr8_8c_mult_opcode rsi, 8*(64*64+64), 16*(64*64+64), 64
+	int_epilog 0,16,0
+y8complex_mult_opcode4 ENDP
+
+PROCF	y8complex_mulf_opcode1
+	int_prolog 0,16,0
+	yr8_8c_mulf_opcode rsi, 64, 2*64, 4*64
+	int_epilog 0,16,0
+y8complex_mulf_opcode1 ENDP
+PROCF	y8complex_mulf_opcode2
+	int_prolog 0,16,0
+	yr8_8c_mulf_opcode rsi, 32*64, (64*64+128), 64
+	int_epilog 0,16,0
+y8complex_mulf_opcode2 ENDP
+PROCF	y8complex_mulf_opcode3
+	int_prolog 0,16,0
+	yr8_8c_mulf_opcode rsi, 2*(64*64+64), 4*(64*64+64), 64
+	int_epilog 0,16,0
+y8complex_mulf_opcode3 ENDP
+PROCF	y8complex_mulf_opcode4
+	int_prolog 0,16,0
+	yr8_8c_mulf_opcode rsi, 8*(64*64+64), 16*(64*64+64), 64
+	int_epilog 0,16,0
+y8complex_mulf_opcode4 ENDP
+ENDIF
+
+ELSE
+
+EXTRN	yreal_fft_final1:PROC
+EXTRN	yreal_fft_final2:PROC
+EXTRN	yreal_fft_final3:PROC
+EXTRN	yreal_fft_final4:PROC
+EXTRN	yreal_fft_final4a:PROC
+EXTRN	yreal_fft_final5:PROC
+EXTRN	yreal_fft_final6:PROC
+EXTRN	yreal_square1:PROC
+EXTRN	yreal_square2:PROC
+EXTRN	yreal_square3:PROC
+EXTRN	yreal_square4:PROC
+EXTRN	yreal_square4a:PROC
+EXTRN	yreal_square5:PROC
+EXTRN	yreal_square6:PROC
+EXTRN	yreal_mult1:PROC
+EXTRN	yreal_mult2:PROC
+EXTRN	yreal_mult3:PROC
+EXTRN	yreal_mult4:PROC
+EXTRN	yreal_mult4a:PROC
+EXTRN	yreal_mult5:PROC
+EXTRN	yreal_mult6:PROC
+EXTRN	yreal_mulf1:PROC
+EXTRN	yreal_mulf2:PROC
+EXTRN	yreal_mulf3:PROC
+EXTRN	yreal_mulf4:PROC
+EXTRN	yreal_mulf4a:PROC
+EXTRN	yreal_mulf5:PROC
+EXTRN	yreal_mulf6:PROC
+EXTRN	y8real_fft_final1:PROC
+EXTRN	y8real_fft_final2:PROC
+EXTRN	y8real_fft_final3:PROC
+EXTRN	y8real_fft_final4:PROC
+EXTRN	y8real_square1:PROC
+EXTRN	y8real_square2:PROC
+EXTRN	y8real_square3:PROC
+EXTRN	y8real_square4:PROC
+EXTRN	y8real_mult1:PROC
+EXTRN	y8real_mult2:PROC
+EXTRN	y8real_mult3:PROC
+EXTRN	y8real_mult4:PROC
+EXTRN	y8real_mulf1:PROC
+EXTRN	y8real_mulf2:PROC
+EXTRN	y8real_mulf3:PROC
+EXTRN	y8real_mulf4:PROC
+
+IFDEF X86_64
+EXTRN	y8complex_mult_opcode1:PROC
+EXTRN	y8complex_mult_opcode2:PROC
+EXTRN	y8complex_mult_opcode3:PROC
+EXTRN	y8complex_mult_opcode4:PROC
+EXTRN	y8complex_mulf_opcode1:PROC
+EXTRN	y8complex_mulf_opcode2:PROC
+EXTRN	y8complex_mulf_opcode3:PROC
+EXTRN	y8complex_mulf_opcode4:PROC
+ENDIF
+
+ENDIF
+
+;; Generate the AVX and FMA3 versions of the radix-4 opcode routines
+
+IFDEF X86_64
+PROCFP	ycomplex_mult_opcode1
+	int_prolog 0,16,0
+	yr4_4c_mult_opcode rsi, 64, 2*64
+	int_epilog 0,16,0
+ENDPP	ycomplex_mult_opcode1
+PROCFP	ycomplex_mult_opcode2
+	int_prolog 0,16,0
+	yr4_4c_mult_opcode rsi, 4*64, 8*64
+	int_epilog 0,16,0
+ENDPP	ycomplex_mult_opcode2
+PROCFP	ycomplex_mult_opcode3
+	int_prolog 0,16,0
+	yr4_4c_mult_opcode rsi, 16*64, 32*64
+	int_epilog 0,16,0
+ENDPP	ycomplex_mult_opcode3
+PROCFP	ycomplex_mult_opcode4
+	int_prolog 0,16,0
+	yr4_4c_mult_opcode rsi, (64*64+64), 2*(64*64+64)
+	int_epilog 0,16,0
+ENDPP	ycomplex_mult_opcode4
+PROCFP	ycomplex_mult_opcode4a
+	int_prolog 0,16,0
+	yr4_4c_mult_opcode rsi, (64*64+128), 2*(64*64+128)
+	int_epilog 0,16,0
+ENDPP	ycomplex_mult_opcode4a
+PROCFP	ycomplex_mult_opcode5
+	int_prolog 0,16,0
+	yr4_4c_mult_opcode rsi, 4*(64*64+64), 8*(64*64+64)
+	int_epilog 0,16,0
+ENDPP	ycomplex_mult_opcode5
+PROCFP	ycomplex_mult_opcode6
+	int_prolog 0,16,0
+	yr4_4c_mult_opcode rsi, 16*(64*64+64), 32*(64*64+64)
+	int_epilog 0,16,0
+ENDPP	ycomplex_mult_opcode6
+
+PROCFP	ycomplex_mulf_opcode1
+	int_prolog 0,16,0
+	yr4_4c_mulf_opcode rsi, 64, 2*64
+	int_epilog 0,16,0
+ENDPP	ycomplex_mulf_opcode1
+PROCFP	ycomplex_mulf_opcode2
+	int_prolog 0,16,0
+	yr4_4c_mulf_opcode rsi, 4*64, 8*64
+	int_epilog 0,16,0
+ENDPP	ycomplex_mulf_opcode2
+PROCFP	ycomplex_mulf_opcode3
+	int_prolog 0,16,0
+	yr4_4c_mulf_opcode rsi, 16*64, 32*64
+	int_epilog 0,16,0
+ENDPP	ycomplex_mulf_opcode3
+PROCFP	ycomplex_mulf_opcode4
+	int_prolog 0,16,0
+	yr4_4c_mulf_opcode rsi, (64*64+64), 2*(64*64+64)
+	int_epilog 0,16,0
+ENDPP	ycomplex_mulf_opcode4
+PROCFP	ycomplex_mulf_opcode4a
+	int_prolog 0,16,0
+	yr4_4c_mulf_opcode rsi, (64*64+128), 2*(64*64+128)
+	int_epilog 0,16,0
+ENDPP	ycomplex_mulf_opcode4a
+PROCFP	ycomplex_mulf_opcode5
+	int_prolog 0,16,0
+	yr4_4c_mulf_opcode rsi, 4*(64*64+64), 8*(64*64+64)
+	int_epilog 0,16,0
+ENDPP	ycomplex_mulf_opcode5
+PROCFP	ycomplex_mulf_opcode6
+	int_prolog 0,16,0
+	yr4_4c_mulf_opcode rsi, 16*(64*64+64), 32*(64*64+64)
+	int_epilog 0,16,0
+ENDPP	ycomplex_mulf_opcode6
+ENDIF
 
 ;; Generate shared pass 1 routines optimized for this architecture
 

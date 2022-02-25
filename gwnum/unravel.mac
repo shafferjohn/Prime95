@@ -1,4 +1,4 @@
-; Copyright 1995-2019 - Mersenne Research, Inc.  All rights reserved
+; Copyright 1995-2020 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -2247,6 +2247,15 @@ ENDIF
 	ENDM
 
 CALLP	MACRO x
+IFDEF zarch
+	call	@CATSTR(&x,%zarch)
+ELSE
+IFDEF yarch
+	call	@CATSTR(&x,%yarch)
+ELSE
+IFDEF xarch
+	call	@CATSTR(&x,%xarch)
+ELSE
 IFDEF PFETCH
 	call	&x&P3
 ELSE
@@ -2254,6 +2263,9 @@ IFDEF PPRO
 	call	&x&PPRO
 ELSE
 	call	&x
+ENDIF
+ENDIF
+ENDIF
 ENDIF
 ENDIF
 	ENDM

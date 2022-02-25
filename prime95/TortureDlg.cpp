@@ -1,6 +1,6 @@
 // TortureDlg.cpp : implementation file
 //
-// Copyright 1995-2019 Mersenne Research, Inc.  All rights reserved
+// Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
 //
 
 #include "stdafx.h"
@@ -14,7 +14,8 @@ IMPLEMENT_DYNAMIC(CTortureDlg, CDialog)
 CTortureDlg::CTortureDlg(CWnd* pParent /*=NULL*/)
 	: CDialog(CTortureDlg::IDD, pParent)
 	, m_torture_type(4)
-	, m_thread (1)
+	, m_cores (1)
+	, m_hyperthreading(TRUE)
 	, m_minfft(0)
 	, m_maxfft(0)
 	, m_in_place(FALSE)
@@ -35,8 +36,9 @@ CTortureDlg::~CTortureDlg()
 void CTortureDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialog::DoDataExchange(pDX);
-	DDX_Text(pDX, IDC_THREAD, m_thread);
-	DDV_MinMaxUInt(pDX, m_thread, 1, NUM_CPUS * CPU_HYPERTHREADS);
+	DDX_Text(pDX, IDC_CORES, m_cores);
+	DDV_MinMaxUInt(pDX, m_cores, 1, HW_NUM_CORES);
+	DDX_Check(pDX, IDC_HYPERTHREADING, m_hyperthreading);
 	DDX_Radio(pDX, IDC_L2_CACHE, m_torture_type);
 	DDX_Text(pDX, IDC_MINFFT, m_minfft);
 	DDV_MinMaxInt(pDX, m_minfft, 4,
@@ -62,8 +64,9 @@ void CTortureDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Check(pDX, IDC_SSE2, m_sse2);
 #endif
 
-	DDX_Control(pDX, IDC_THREAD_TEXT, c_thread_text);
-	DDX_Control(pDX, IDC_THREAD, c_thread);
+	DDX_Control(pDX, IDC_CORES_TEXT, c_cores_text);
+	DDX_Control(pDX, IDC_CORES, c_cores);
+	DDX_Control(pDX, IDC_HYPERTHREADING, c_hyperthreading);
 	DDX_Control(pDX, IDC_L3_CACHE, c_L3_cache);
 	DDX_Control(pDX, IDC_L4_CACHE, c_L4_cache);
 	DDX_Control(pDX, IDC_MINFFT_TEXT, c_minfft_text);
@@ -86,18 +89,19 @@ void CTortureDlg::DoDataExchange(CDataExchange* pDX)
 
 	if (m_torture_type != 5) {		// Custom
 		// Calculate default FFT sizes
-		tortureTestDefaultSizes (m_torture_type, m_thread, &m_minfft, &m_maxfft);
+		tortureTestDefaultSizes (m_torture_type, m_cores, &m_minfft, &m_maxfft);
 		if (m_minfft < 4) m_minfft = 4;
 		if (m_maxfft < m_minfft) m_maxfft = m_minfft;
 		if (m_maxfft > 32768) m_maxfft = 32768;
 		// Assign other options
 		m_in_place = (m_torture_type <= 2);		// TRUE for L2/L3/L4 cache
 		m_memory = m_in_place ? 0 : m_blendmemory;
-		m_timefft = (m_thread > NUM_CPUS ? 6 : 3);
+		m_timefft = (m_hyperthreading ? 6 : 3);
 	}
 
-	c_thread_text.EnableWindow (NUM_CPUS * CPU_HYPERTHREADS > 1);
-	c_thread.EnableWindow (NUM_CPUS * CPU_HYPERTHREADS > 1);
+	c_cores_text.EnableWindow (HW_NUM_CORES > 1);
+	c_cores.EnableWindow (HW_NUM_CORES > 1);
+	c_hyperthreading.EnableWindow (HW_NUM_CORES != HW_NUM_THREADS);
 	c_L3_cache.EnableWindow (CPU_TOTAL_L3_CACHE_SIZE > 0);
 	c_L4_cache.EnableWindow (CPU_TOTAL_L4_CACHE_SIZE > 0);
 	c_minfft_text.EnableWindow (m_torture_type == 5);
@@ -121,7 +125,7 @@ void CTortureDlg::DoDataExchange(CDataExchange* pDX)
 
 
 BEGIN_MESSAGE_MAP(CTortureDlg, CDialog)
-	ON_EN_KILLFOCUS(IDC_THREAD, OnEnKillfocusThread)
+	ON_EN_KILLFOCUS(IDC_CORES, OnEnKillfocusCores)
 	ON_BN_CLICKED(IDC_L2_CACHE, OnBnClickedL2Cache)
 	ON_BN_CLICKED(IDC_L3_CACHE, OnBnClickedL3Cache)
 	ON_BN_CLICKED(IDC_L4_CACHE, OnBnClickedL4Cache)
@@ -142,7 +146,7 @@ END_MESSAGE_MAP()
 
 // CTortureDlg message handlers
 
-void CTortureDlg::OnEnKillfocusThread()
+void CTortureDlg::OnEnKillfocusCores()
 {
 	UpdateData ();
 	UpdateData (0);

@@ -9,7 +9,7 @@ CPPFLAGS = -I.. -I../qd -O2 -march=i486 -malign-double
 
 AR = ar
 
-OBJS = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o ecmstag1.o
+OBJS = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o radix.o ecmstag1.o
 
 LIB = gwnum.a
 

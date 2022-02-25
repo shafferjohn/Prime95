@@ -14,6 +14,10 @@ public:
 	//{{AFX_DATA(CResourcesDlg)
 	enum { IDD = IDD_RESOURCES };
 	float	m_disk;
+	float	m_day_memory;
+	float	m_night_memory;
+	CString	m_start_time;
+	CString	m_end_time;
 	float	m_upload_bandwidth;
 	CString m_upload_start;
 	CString m_upload_end;
@@ -62,10 +66,6 @@ public:
 	CStatic	c_archive_dir_text;
 	CEdit	c_archive_dir;
 	CString	m_archive_dir;
-	float	m_day_memory;
-	float	m_night_memory;
-	CString	m_start_time;
-	CString	m_end_time;
 	float	m_emergency_mem;
 	UINT	m_priority;
 	CStatic	c_cert_cpu_text;

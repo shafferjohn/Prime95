@@ -1,5 +1,5 @@
 //
-// Copyright 1995-2019 Mersenne Research, Inc.  All rights reserved
+// Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
 //
 
 #pragma once
@@ -23,7 +23,8 @@ protected:
 
 	DECLARE_MESSAGE_MAP()
 public:
-	UINT	m_thread;
+	UINT	m_cores;
+	BOOL	m_hyperthreading;	
 	int m_torture_type;
 	int m_minfft;
 	int m_maxfft;
@@ -34,8 +35,9 @@ public:
 	int m_fma3;
 	int m_avx;
 	int m_sse2;
-	CStatic	c_thread_text;
-	CEdit	c_thread;
+	CStatic	c_cores_text;
+	CEdit	c_cores;
+	CButton c_hyperthreading;
 	CButton c_L3_cache;
 	CButton c_L4_cache;
 	CStatic c_minfft_text;
@@ -54,7 +56,7 @@ public:
 
 	int	m_blendmemory;
 
-	afx_msg void OnEnKillfocusThread();
+	afx_msg void OnEnKillfocusCores();
 	afx_msg void OnBnClickedL2Cache();
 	afx_msg void OnBnClickedL3Cache();
 	afx_msg void OnBnClickedL4Cache();

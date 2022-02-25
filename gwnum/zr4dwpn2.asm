@@ -1,4 +1,4 @@
-; Copyright 2011-2019 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2021 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -18,7 +18,55 @@ INCLUDE zr4.mac
 INCLUDE zr4dwpnpass1sc.mac
 INCLUDE zr4dwpnpass2.mac
 
+;;EXTRN zrfoo:PROC
+
 _TEXT SEGMENT
+
+PROCFP	zreal_fft_final
+	int_prolog 0,0,0
+	zr64_hundredtwentyeight_real_fft_final_preload
+	zr64_hundredtwentyeight_real_fft_final rsi, 8*128, 1*128, 2*128, 4*128, rdx, 0*ZMM_SCD4, rdi, 0*ZMM_SCD4, 1
+	int_epilog 0,0,0
+ENDPP	zreal_fft_final 
+
+PROCFP	zreal_square
+	int_prolog 0,0,0
+	zr64_hundredtwentyeight_real_with_square_preload
+	zr64_hundredtwentyeight_real_with_square rsi, 8*128, 1*128, 2*128, 4*128, rdx, 0*ZMM_SCD4, rdi, 0*ZMM_SCD4, 1
+	int_epilog 0,0,0
+ENDPP	zreal_square 
+
+PROCFP	zreal_mult
+	int_prolog 0,0,0
+	zr64_hundredtwentyeight_real_with_mult_preload
+	zr64_hundredtwentyeight_real_with_mult rsi, 8*128, 1*128, 2*128, 4*128, rdx, 0*ZMM_SCD4, rdi, 0*ZMM_SCD4, 1
+	int_epilog 0,0,0
+ENDPP	zreal_mult 
+
+PROCFP	zreal_mulf
+	int_prolog 0,0,0
+	zr64f_hundredtwentyeight_real_with_mulf_preload
+	zr64f_hundredtwentyeight_real_with_mulf rsi, 8*128, 1*128, 2*128, 4*128, rdx, 0*ZMM_SCD4, rdi, 0*ZMM_SCD4, 1
+	int_epilog 0,0,0
+ENDPP	zreal_mulf 
+
+PROCF	zcomplex_square_opcode
+	int_prolog 0,0,0
+	zr64_64c_square_opcode rsi, 1*128, 2*128, 4*128
+	int_epilog 0,0,0
+zcomplex_square_opcode ENDP
+
+PROCF	zcomplex_mult_opcode
+	int_prolog 0,0,0
+	zr64_64c_mult_opcode rsi, 1*128, 2*128, 4*128
+	int_epilog 0,0,0
+zcomplex_mult_opcode ENDP
+
+PROCF	zcomplex_mulf_opcode
+	int_prolog 0,0,0
+	zr64_64c_mulf_opcode rsi, 1*128, 2*128, 4*128
+	int_epilog 0,0,0
+zcomplex_mulf_opcode ENDP
 
 ;; Generate real and complex pass 2 routines optimized for this architecture
 

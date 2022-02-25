@@ -1,33 +1,22 @@
 
+#define bool int
+
 #include "windows.h"
 #include <winnls.h>
 #include <tchar.h>
 #include "main.h"
 #include "prime95.h"
 #include <direct.h>
-#include <math.h>
 #include <ctype.h>
 #include <dos.h>
-#include <fcntl.h>
-#include <io.h>
-#include <memory.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/timeb.h>
 
-#define PORT	5
-#include "gwnum.h"
-#include "gwutil.h"
-#include "cJSON.h"
-#include "cJSON.c"
+#include "common.h"
 #include "pm1prob.h"
-#include "pm1prob.c"
 #include "md5.c"
 #include "commona.c"
 #include "commonb.c"
 #include "commonc.c"
-#include "ecm.c"
 #include "comm95b.c"
 //#define _WIN32_WINNT 0x0502	// (Windows 2003 Server - same as afx_v32.h for sddl.h)
 #include "comm95c.c"

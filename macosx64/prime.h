@@ -1,20 +1,18 @@
-/* Copyright 1995-2020 Mersenne Research, Inc. */
+/* Copyright 1995-2021 Mersenne Research, Inc. */
 /* Author:  George Woltman */
 /* Email: woltman@alum.mit.edu */
 
 /* Handy definitions */
 
+#define _XOPEN_SOURCE 500
+typedef int bool;
 #include "common.h"
+#include <strings.h>
+#include <time.h>
+#include <unistd.h>
 
 /* Port number used in version numbers and result reporting. */
 
-#ifdef __linux__
-#ifdef X86_64
-#define PORT	8
-#else
-#define PORT	2
-#endif
-#endif
 #ifdef __FreeBSD__
 #ifdef X86_64
 #define PORT	12
@@ -43,43 +41,6 @@
 #define MPRIME_LOADAVG
 #endif
 
-/* Handle differences between Windows and Linux runtime libraries */
-
-#define _commit(f)	fsync(f)
-#define _open		open
-#define _close		close
-#define _read		read
-#define _write		write
-#define _lseek		lseek
-#define _lseeki64	lseek
-#define _fseeki64	fseek
-#define _chsize_s	ftruncate
-#define _unlink		unlink
-#define _creat		creat
-#define _chdir		chdir
-#define closesocket	close
-#define IsCharAlphaNumeric(c) isalnum(c)
-#define _stricmp	strcasecmp
-
-#ifndef __WATCOMC__
-#define _O_APPEND	O_APPEND
-#define _O_RDONLY	O_RDONLY
-#define _O_WRONLY	O_WRONLY
-#define _O_RDWR		O_RDWR
-#define _O_CREAT	O_CREAT
-#define _O_TRUNC	O_TRUNC
-#define _O_BINARY 	0
-#define _O_TEXT		0
-#endif
-
-/* Handle differences between Windows and OS/2 runtime libraries */
-
-#ifdef __IBMC__
-#define stricmp(x,y)  stricmp(x,y)
-#define _commit(f)    /* no commit/fsync on OS/2 */
-#define _ftime        _ftime
-#endif
-
 /* The common include files */
 
 #ifndef X86_64
@@ -94,10 +55,7 @@
 
 #include <gmp.h>
 
-#include <time.h>
 /*#define SERVER_TESTING*/
-extern int NO_GUI;
-#include "common.h"
 #include "cpuid.h"
 #include "gwnum.h"
 #include "gwbench.h"

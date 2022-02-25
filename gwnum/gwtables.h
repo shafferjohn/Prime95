@@ -2,7 +2,7 @@
 | This file contains various utility routines that may be used by gwnum
 | setup.
 |
-|  Copyright 2011-2019 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2011-2021 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 #ifndef _GWTABLES_H
@@ -66,7 +66,8 @@ struct gwasm_data {
 	char	zero_fft;		/* TRUE if zero upper half in normalize */
 	char	const_fft;		/* TRUE if mul-by-const in normalize */
 	char	add_sub_smallmul_op;	/* TRUE if we are processing carries from an add/sub/smallmul operation */
-	char	UNUSED_CHARS[5];
+	char	mul4_opcode;		/* 0 for normal gwmul3, 1 for gwaddmul4, 2 for gwsubmul4 */
+	char	UNUSED_CHARS[4];
 	uint32_t ADDIN_ROW;		/* For adding a constant after multiply */
 	uint32_t ADDIN_OFFSET;
 	double	ADDIN_VALUE;		/* Value to add in after a multiply */
@@ -123,7 +124,7 @@ struct gwasm_data {
 	void	*sincos5;
 	gwthread hyperthread_id;	/* Thread ID of prefetching hyperthread */
 	gwevent hyperthread_work_to_do;	/* Event to signal hyperthread to begin prefetching */
-	void	*UNUSED_PTRS[1];
+	void	*SRC3ARG;		/* Function argument */
 	uint32_t *ASM_TIMERS;		/* Timers used for optimizing code */
 
 	uint32_t COPYZERO[8];		/* Offsets to help in gwcopyzero */

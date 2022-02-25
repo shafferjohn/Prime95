@@ -2,7 +2,7 @@
 /* so that they can be included in both the command-line mprime version as */
 /* well as the Mac OS X GUI version. */
 
-/* Copyright 1995-2020 Mersenne Research, Inc. */
+/* Copyright 1995-2021 Mersenne Research, Inc. */
 /* Author:  George Woltman */
 /* Email: woltman@alum.mit.edu */
 
@@ -483,9 +483,9 @@ int ProofFileNames (char filenames[50][255])	// Returns number of matching filen
 	/* scan the directory matching the pattern *.proof for each file name */
 	num_files = 0;
 	while ((entry = readdir(dir)) != NULL) {
-
 		/* check if the pattern matches */
-		if (strstr (entry->d_name, ".proof") != NULL) {
+		int	len = (int) strlen (entry->d_name);
+		if (len > 6 && strcmp (entry->d_name + len - 6, ".proof") == 0) {
 			if (num_files < 50) strcpy (filenames[num_files++], entry->d_name);
 		}
 	}
@@ -502,3 +502,10 @@ char getDirectorySeparator ()
 	return ('/');
 }
 
+/* Tell malloc to free memory back to the OS */
+
+void mallocFreeForOS () {
+#ifdef __linux__
+	malloc_trim (0);
+#endif
+}

@@ -7,12 +7,12 @@
 # http://www.agner.org/optimize/#objconv
 
 #### -EP can be useful instead of a listing
-masm64=uasm64 /c /DX86_64 /DWINDOWS64 -win64
-#masm64=uasm64 /c /DX86_64 /DWINDOWS64 /Fl /Sf /Sa -win64
+masm64=uasm64 /c /DX86_64 /DWINDOWS64 -win64 -safeseh
+#masm64=uasm64 /c /DX86_64 /DWINDOWS64 /Fl /Sf /Sa -win64 -safeseh
 #masm64=ml64 /c /DX86_64 /DWINDOWS64
 #masm64=ml64 /c /DX86_64 /DWINDOWS64 /Fl /Sf /Sa
-masm64lx=uasm64 /c /DX86_64 /DLINUX64 -win64
-#masm64lx=uasm64 /c /DX86_64 /DLINUX64 /Fl /Sf /Sa -win64
+masm64lx=uasm64 /c /DX86_64 /DLINUX64 -win64 -safeseh
+#masm64lx=uasm64 /c /DX86_64 /DLINUX64 /Fl /Sf /Sa -win64 -safeseh
 #masm64lx=ml64 /c /DX86_64 /DLINUX64
 objconv=c:\objconv\objconv
 
@@ -32,8 +32,8 @@ all:	gwnum64.lib gwnum64d.lib linux64\gwnum.a macosx64\gwnum.a amd64\release\ecm
 
 gwnum64.lib: amd64\release\cpuid.obj amd64\release\gwnum.obj amd64\release\gwtables.obj amd64\release\gwthread.obj \
 	     amd64\release\gwini.obj amd64\release\gwbench.obj amd64\release\gwutil.obj amd64\release\gwdbldbl.obj \
-	     amd64\release\giants.obj amd64\xmult1ax.obj amd64\xmult2.obj amd64\xmult2a_core.obj amd64\xmult2a_k8.obj amd64\xmult2ax.obj \
-	     amd64\xmult3.obj amd64\xmult3a_core.obj amd64\xmult3a_k8.obj amd64\xmult3ax.obj \
+	     amd64\release\giants.obj amd64\release\radix.obj amd64\xmult1ax.obj amd64\xmult2.obj amd64\xmult2a_core.obj \
+	     amd64\xmult2a_k8.obj amd64\xmult2ax.obj amd64\xmult3.obj amd64\xmult3a_core.obj amd64\xmult3a_k8.obj amd64\xmult3ax.obj \
 	     amd64\hg_blend.obj amd64\hg_core.obj amd64\hg_p4.obj amd64\hg_k8.obj amd64\hg_k10.obj \
 	     amd64\r4_core.obj amd64\r4_p4.obj amd64\r4_k8.obj amd64\r4_k10.obj \
 	     amd64\r4delay_core.obj amd64\r4delay_p4.obj amd64\r4delay_k8.obj amd64\r4delay_k10.obj \
@@ -53,8 +53,8 @@ gwnum64.lib: amd64\release\cpuid.obj amd64\release\gwnum.obj amd64\release\gwtab
 
 gwnum64d.lib: amd64\debug\cpuid.obj amd64\debug\gwnum.obj amd64\debug\gwtables.obj amd64\debug\gwthread.obj \
 	      amd64\debug\gwini.obj amd64\debug\gwbench.obj amd64\debug\gwutil.obj amd64\debug\gwdbldbl.obj \
-	      amd64\debug\giants.obj amd64\xmult1ax.obj amd64\xmult2.obj amd64\xmult2a_core.obj amd64\xmult2a_k8.obj amd64\xmult2ax.obj \
-	      amd64\xmult3.obj amd64\xmult3a_core.obj amd64\xmult3a_k8.obj amd64\xmult3ax.obj \
+	      amd64\debug\giants.obj amd64\debug\radix.obj amd64\xmult1ax.obj amd64\xmult2.obj amd64\xmult2a_core.obj \
+	      amd64\xmult2a_k8.obj amd64\xmult2ax.obj amd64\xmult3.obj amd64\xmult3a_core.obj amd64\xmult3a_k8.obj amd64\xmult3ax.obj \
 	      amd64\hg_blend.obj amd64\hg_core.obj amd64\hg_p4.obj amd64\hg_k8.obj amd64\hg_k10.obj \
 	      amd64\r4_core.obj amd64\r4_p4.obj amd64\r4_k8.obj amd64\r4_k10.obj \
 	      amd64\r4delay_core.obj amd64\r4delay_p4.obj amd64\r4delay_k8.obj amd64\r4delay_k10.obj \
@@ -189,6 +189,12 @@ amd64\release\giants.obj: giants.c giants.h
 
 amd64\debug\giants.obj: giants.c giants.h
     $(cl64do) /Foamd64\debug\giants.obj giants.c
+
+amd64\release\radix.obj: radix.c radix.h gwnum.h
+    $(cl64) /Foamd64\release\radix.obj radix.c
+
+amd64\debug\radix.obj: radix.c radix.h gwnum.h
+    $(cl64d) /Foamd64\debug\radix.obj radix.c
 
 amd64\release\ecmstag1.obj: ecmstag1.c gwnum.h
     $(cl64) /Ic:\gmp64 /Foamd64\release\ecmstag1.obj ecmstag1.c

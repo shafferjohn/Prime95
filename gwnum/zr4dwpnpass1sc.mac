@@ -1,4 +1,4 @@
-; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2020 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -100,6 +100,9 @@ type4:	start_timer 0
 
 	start_timer 21
 	mov	rsi, DESTARG			;; Get address of FFT data
+	add	rsi, DEST2ARG			;; Adjust for two destination case
+	mov	DESTARG, rsi			;; Normally pass1_wake_up_threads does this adjustment
+	mov	DATA_ADDR, rsi			;; Patch this address for zgw_carries
 	mov	r15, sincos2			;; Addr of column multipliers
 	lea	rdi, [r15+16*8]			;; Fudge flags pointer - after 8 column multipliers and 8 inverse column multipliers
 	bump	r15, 8*8			;; Inverse column multipliers
@@ -224,6 +227,9 @@ type4:	start_timer 0
 
 	start_timer 21
 	mov	rsi, DESTARG			;; Get address of FFT data
+	add	rsi, DEST2ARG			;; Adjust for two destination case
+	mov	DESTARG, rsi			;; Normally pass1_wake_up_threads does this adjustment
+	mov	DATA_ADDR, rsi			;; Patch this address for zgw_carries
 	mov	r15, sincos2			;; Addr of inverse column multipliers and complex premultipliers
 	lea	r13, [r15+8*8]			;; Premultiplier data is after 8 inverse column multipliers
 	mov	ecx, addcount1			;; Loop FFTLEN / 128 times

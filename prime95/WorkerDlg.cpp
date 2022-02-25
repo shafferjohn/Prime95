@@ -1,6 +1,6 @@
 // WorkerDlg.cpp : implementation file
 //
-// Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
+// Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
 //
 
 #include "stdafx.h"
@@ -13,15 +13,13 @@
 static char THIS_FILE[] = __FILE__;
 #endif
 
-// In theory, the maximum number of workers should be number of logical cpus.
-// However, local.ini could specify more worker threads than logical cpus (for
-// example, when local.ini is copied from a dual-core to a single-core machine).
-// We must let the user manipulate the options on these worker threads that
-// don't have a CPU to run on.
+// In theory, the maximum number of workers should be number of logical cpus.  However, local.txt could specify more workers than logical
+// cpus (for example, when local.txt is copied from a dual-core to a single-core machine).  We must let the user manipulate the options on these
+// workers that don't have a CPU to run on.
 
 unsigned int max_num_workers (void)
 {
-	return (max (NUM_WORKER_THREADS, NUM_CPUS));
+	return (max (NUM_WORKER_THREADS, HW_NUM_CORES));
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -32,8 +30,8 @@ CWorkerDlg::CWorkerDlg(CWnd* pParent /*=NULL*/)
 	: CDialog(CWorkerDlg::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CWorkerDlg)
-	m_num_thread = 1;
-	thread_num = 0;
+	m_num_workers = 1;
+	worker_num = 0;
 	memset (m_work_pref, 0, sizeof (m_work_pref));
 	memset (m_numcpus, 0, sizeof (m_numcpus));
 	m_cert_work = 1;
@@ -45,14 +43,14 @@ void CWorkerDlg::DoDataExchange(CDataExchange* pDX)
 
 	CDialog::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CWorkerDlg)
-	DDX_Control(pDX, IDC_THREAD_TEXT, c_num_thread_text);
-	DDX_Control(pDX, IDC_THREAD, c_num_thread);
-	DDX_Text(pDX, IDC_THREAD, m_num_thread);
-	DDV_MinMaxUInt(pDX, m_num_thread, 1, max_num_workers ());
+	DDX_Control(pDX, IDC_WORKER_TEXT, c_num_workers_text);
+	DDX_Control(pDX, IDC_WORKER, c_num_workers);
+	DDX_Text(pDX, IDC_WORKER, m_num_workers);
+	DDV_MinMaxUInt(pDX, m_num_workers, 1, max_num_workers ());
 	DDX_Control(pDX, IDC_WORKGROUP, c_workgroup);
 
-	DDX_Control(pDX, IDC_THREADNUM_TEXT, c_threadnum_text);
-	DDX_Control(pDX, IDC_COMBO1, c_threadnum);
+	DDX_Control(pDX, IDC_WORKERNUM_TEXT, c_workernum_text);
+	DDX_Control(pDX, IDC_COMBO1, c_workernum);
 
 	DDX_Control(pDX, IDC_WORK_TYPE_TEXT, c_work_pref_text);
 	DDX_Control(pDX, IDC_COMBO2, c_work_pref);
@@ -63,24 +61,24 @@ void CWorkerDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_CERT, c_cert_work);
 	DDX_Check(pDX, IDC_CERT, m_cert_work);
 	//}}AFX_DATA_MAP
-	c_num_thread_text.EnableWindow (max_num_workers () > 1);
-	c_num_thread.EnableWindow (max_num_workers () > 1);
-	c_workgroup.EnableWindow (USE_PRIMENET || NUM_CPUS > 1);
-	c_threadnum_text.EnableWindow (m_num_thread > 1);
-	c_threadnum.EnableWindow (m_num_thread > 1);
+	c_num_workers_text.EnableWindow (max_num_workers () > 1);
+	c_num_workers.EnableWindow (max_num_workers () > 1);
+	c_workgroup.EnableWindow (USE_PRIMENET || HW_NUM_CORES > 1);
+	c_workernum_text.EnableWindow (m_num_workers > 1);
+	c_workernum.EnableWindow (m_num_workers > 1);
 	c_work_pref_text.EnableWindow (USE_PRIMENET);
 	c_work_pref.EnableWindow (USE_PRIMENET);
-	c_numcpus_text.EnableWindow (m_num_thread < NUM_CPUS || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
-	c_numcpus.EnableWindow (m_num_thread < NUM_CPUS || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
+	c_numcpus_text.EnableWindow (m_num_workers < HW_NUM_CORES || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
+	c_numcpus.EnableWindow (m_num_workers < HW_NUM_CORES || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
 	c_cert_work.EnableWindow (USE_PRIMENET);
 }
 
 
 BEGIN_MESSAGE_MAP(CWorkerDlg, CDialog)
 	//{{AFX_MSG_MAP(CWorkerDlg)
-	ON_EN_KILLFOCUS(IDC_THREAD, &CWorkerDlg::OnEnKillfocusNumThread)
-	ON_CBN_SELCHANGE(IDC_COMBO1, &CWorkerDlg::OnCbnKillfocusThreadNum)
-	ON_CBN_KILLFOCUS(IDC_COMBO1, &CWorkerDlg::OnCbnKillfocusThreadNum)
+	ON_EN_KILLFOCUS(IDC_WORKER, &CWorkerDlg::OnEnKillfocusNumWorkers)
+	ON_CBN_SELCHANGE(IDC_COMBO1, &CWorkerDlg::OnCbnKillfocusWorkerNum)
+	ON_CBN_KILLFOCUS(IDC_COMBO1, &CWorkerDlg::OnCbnKillfocusWorkerNum)
 	ON_CBN_KILLFOCUS(IDC_COMBO2, &CWorkerDlg::OnCbnKillfocusWorkType)
 	ON_EN_KILLFOCUS(IDC_NUMCPUS, &CWorkerDlg::OnEnKillfocusNumCpus)
 	//}}AFX_MSG_MAP
@@ -94,7 +92,7 @@ int CWorkerDlg::AreAllTheSame (
 {
 	int	i;
 
-	for (i = 1; i < (int) m_num_thread; i++)
+	for (i = 1; i < (int) m_num_workers; i++)
 		if (array[i-1] != array[i]) return (FALSE);
 	return (TRUE);
 }
@@ -173,30 +171,30 @@ void CWorkerDlg::InitComboBoxText (void)
 	int	i, sel;
 	char	buf[80];
 
-// Populate the thread number combo box
+// Populate the worker number combo box
 
-	c_threadnum_text.EnableWindow (m_num_thread > 1);
-	c_threadnum.EnableWindow (m_num_thread > 1);
-	c_threadnum.ResetContent ();
-	if (m_num_thread == 1) {
-		thread_num = 1;
-		c_threadnum.AddString ("Worker #1");
-		c_threadnum.SetCurSel (0);
+	c_workernum_text.EnableWindow (m_num_workers > 1);
+	c_workernum.EnableWindow (m_num_workers > 1);
+	c_workernum.ResetContent ();
+	if (m_num_workers == 1) {
+		worker_num = 1;
+		c_workernum.AddString ("Worker #1");
+		c_workernum.SetCurSel (0);
 	} else {
-		if (thread_num > (int) m_num_thread) thread_num = 0;
-		c_threadnum.AddString ("All workers");
-		for (i = 1; i <= (int) m_num_thread; i++) {
+		if (worker_num > (int) m_num_workers) worker_num = 0;
+		c_workernum.AddString ("All workers");
+		for (i = 1; i <= (int) m_num_workers; i++) {
 			sprintf (buf, "Worker #%d", i);
-			c_threadnum.AddString (buf);
+			c_workernum.AddString (buf);
 		}
-		c_threadnum.SetCurSel (thread_num);
+		c_workernum.SetCurSel (worker_num);
 	}
 
 // Populate the work type combo box
 
 	c_work_pref.ResetContent ();
-	if (thread_num > 0)
-		sel = map_work_pref_to_sel (m_work_pref[thread_num-1]);
+	if (worker_num > 0)
+		sel = map_work_pref_to_sel (m_work_pref[worker_num-1]);
 	else if (AreAllTheSame (m_work_pref))
 		sel = map_work_pref_to_sel (m_work_pref[0]);
 	else {
@@ -221,8 +219,8 @@ void CWorkerDlg::InitComboBoxText (void)
 
 // Populate the num cpus edit box.
 
-	if (thread_num > 0) {
-		sprintf (buf, "%d", m_numcpus[thread_num-1]);
+	if (worker_num > 0) {
+		sprintf (buf, "%d", m_numcpus[worker_num-1]);
 		c_numcpus.SetWindowText (buf);
 	} else if (AreAllTheSame (m_numcpus)) {
 		sprintf (buf, "%d", m_numcpus[0]);
@@ -230,8 +228,8 @@ void CWorkerDlg::InitComboBoxText (void)
 	} else {
 		c_numcpus.SetWindowText ("Mixed");
 	}
-	c_numcpus_text.EnableWindow (m_num_thread < NUM_CPUS || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
-	c_numcpus.EnableWindow (m_num_thread < NUM_CPUS || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
+	c_numcpus_text.EnableWindow (m_num_workers < HW_NUM_CORES || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
+	c_numcpus.EnableWindow (m_num_workers < HW_NUM_CORES || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
 }
 
 
@@ -247,30 +245,27 @@ BOOL CWorkerDlg::OnInitDialog()
 	return TRUE;  // return TRUE  unless you set the focus to a control
 }
 
-void CWorkerDlg::OnEnKillfocusNumThread()
+void CWorkerDlg::OnEnKillfocusNumWorkers()
 {
 	char	buf[80];
-	unsigned int num_thread;
+	unsigned int num_workers;
 
-	c_num_thread.GetWindowText (buf, sizeof (buf));
-	num_thread = atoi (buf);
-	if (num_thread < 1) num_thread = 1;
-	if (num_thread > max_num_workers ())
-		num_thread = max_num_workers ();
-	sprintf (buf, "%d", num_thread);
-	c_num_thread.SetWindowText (buf);
-	if (num_thread != m_num_thread) {
-		m_num_thread = num_thread;
-		InitComboBoxText ();
-				// Might change thread_num if we reduced
-				// number of worker threads
+	c_num_workers.GetWindowText (buf, sizeof (buf));
+	num_workers = atoi (buf);
+	if (num_workers < 1) num_workers = 1;
+	if (num_workers > max_num_workers ()) num_workers = max_num_workers ();
+	sprintf (buf, "%d", num_workers);
+	c_num_workers.SetWindowText (buf);
+	if (num_workers != m_num_workers) {
+		m_num_workers = num_workers;
+		InitComboBoxText ();		// Might change thread_num if we reduced number of workers
 	}
 }
 
-void CWorkerDlg::OnCbnKillfocusThreadNum()
+void CWorkerDlg::OnCbnKillfocusWorkerNum()
 {
-	thread_num = c_threadnum.GetCurSel ();
-	InitComboBoxText ();	// Display data for entered thread num
+	worker_num = c_workernum.GetCurSel ();
+	InitComboBoxText ();	// Display data for entered worker num
 }
 
 void CWorkerDlg::OnCbnKillfocusWorkType()
@@ -279,14 +274,14 @@ void CWorkerDlg::OnCbnKillfocusWorkType()
 	char	buf[10];
 
 	sel = c_work_pref.GetCurSel ();
-	if (thread_num) {
+	if (worker_num) {
 		work_pref = map_sel_to_work_pref (sel);
 		min_cores = min_cores_for_work_pref (work_pref);
 		if (work_pref != -1) {
-			m_work_pref[thread_num-1] = work_pref;
-			if (m_numcpus[thread_num-1] < min_cores) {
-				m_numcpus[thread_num-1] = min_cores;
-				sprintf (buf, "%d", m_numcpus[thread_num-1]);
+			m_work_pref[worker_num-1] = work_pref;
+			if (m_numcpus[worker_num-1] < min_cores) {
+				m_numcpus[worker_num-1] = min_cores;
+				sprintf (buf, "%d", m_numcpus[worker_num-1]);
 				c_numcpus.SetWindowText (buf);
 			}
 		}
@@ -322,12 +317,11 @@ void CWorkerDlg::OnEnKillfocusNumCpus()
 	if (buf[0] >= '0' && buf[0] <= '9') {
 		num_cpus = atoi (buf);
 		if (num_cpus < 1) num_cpus = 1;
-		if (num_cpus > NUM_CPUS)
-			num_cpus = NUM_CPUS;
-		if (thread_num) {
-			min_cores = min_cores_for_work_pref (m_work_pref[thread_num-1]);
+		if (num_cpus > HW_NUM_CORES) num_cpus = HW_NUM_CORES;
+		if (worker_num) {
+			min_cores = min_cores_for_work_pref (m_work_pref[worker_num-1]);
 			if (num_cpus < min_cores) num_cpus = min_cores;
-			m_numcpus[thread_num-1] = num_cpus;
+			m_numcpus[worker_num-1] = num_cpus;
 			sprintf (buf, "%d", num_cpus);
 			c_numcpus.SetWindowText (buf);
 		} else {
@@ -343,7 +337,7 @@ void CWorkerDlg::OnEnKillfocusNumCpus()
 			}
 		}
 	}
-	c_numcpus_text.EnableWindow (m_num_thread < NUM_CPUS || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
-	c_numcpus.EnableWindow (m_num_thread < NUM_CPUS || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
+	c_numcpus_text.EnableWindow (m_num_workers < HW_NUM_CORES || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
+	c_numcpus.EnableWindow (m_num_workers < HW_NUM_CORES || !AreAllTheSame (m_numcpus) || m_numcpus[0] != 1);
 }
 

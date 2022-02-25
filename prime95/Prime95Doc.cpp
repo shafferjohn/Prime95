@@ -1,6 +1,6 @@
 // Prime95Doc.cpp : implementation of the CPrime95Doc class
 //
-// Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
+// Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
 //
 
 #include "stdafx.h"
@@ -103,6 +103,7 @@ END_MESSAGE_MAP()
 
 CPrime95Doc::CPrime95Doc()
 {
+	NO_GUI = 0;
 }
 
 CPrime95Doc::~CPrime95Doc()
@@ -319,7 +320,7 @@ void CPrime95Doc::OnWorkerThreads()
 	CWorkerDlg dlg;
 	int	i;
 
-	dlg.m_num_thread = NUM_WORKER_THREADS;
+	dlg.m_num_workers = NUM_WORKER_THREADS;
 	for (i = 0; i < MAX_NUM_WORKER_THREADS; i++) {
 		dlg.m_work_pref[i] = WORK_PREFERENCE[i];
 		dlg.m_numcpus[i] = CORES_PER_TEST[i];
@@ -335,7 +336,7 @@ again:	if (dlg.DoModal () == IDOK) {
 
 		if (CPU_WORKER_DISK_SPACE < 12.0) {
 			int	changed = FALSE;
-			for (i = 0; i < dlg.m_num_thread; i++) {
+			for (i = 0; i < dlg.m_num_workers; i++) {
 				if (dlg.m_work_pref[i] == PRIMENET_WP_PRP_100M) {
 					dlg.m_work_pref[i] = PRIMENET_WP_PRP_FIRST;
 					changed = TRUE;
@@ -349,7 +350,7 @@ again:	if (dlg.DoModal () == IDOK) {
 
 		if (CPU_WORKER_DISK_SPACE < 1.5) {
 			int	warn = FALSE;
-			for (i = 0; i < dlg.m_num_thread; i++) {
+			for (i = 0; i < dlg.m_num_workers; i++) {
 				if (dlg.m_work_pref[i] == PRIMENET_WP_PRP_FIRST || dlg.m_work_pref[i] == PRIMENET_WP_PRP_WORLD_RECORD) {
 					warn = TRUE;
 				}
@@ -361,24 +362,21 @@ again:	if (dlg.DoModal () == IDOK) {
 /* If the user has allocated too many cores then raise a severe warning. */
 
 		total_num_cores = 0;
-		for (i = 0; i < dlg.m_num_thread; i++) total_num_cores += dlg.m_numcpus[i];
-		if (total_num_cores > NUM_CPUS &&
+		for (i = 0; i < dlg.m_num_workers; i++) total_num_cores += dlg.m_numcpus[i];
+		if (total_num_cores > HW_NUM_CORES &&
 		    AfxMessageBox (MSG_THREADS, MB_YESNO | MB_ICONQUESTION) == IDYES)
 			goto again;
 
-/* If user changed the number of worker threads, then make the */
-/* necessary changes.  Restart worker threads so that we are running */
-/* the correct number of worker threads. */
+/* If user changed the number of workers, then make the necessary changes.  Restart workers so that we are running the correct number of workers. */
 
-		if (dlg.m_num_thread != NUM_WORKER_THREADS) {
-			NUM_WORKER_THREADS = dlg.m_num_thread;
+		if (dlg.m_num_workers != NUM_WORKER_THREADS) {
+			NUM_WORKER_THREADS = dlg.m_num_workers;
 			IniWriteInt (LOCALINI_FILE, "WorkerThreads", NUM_WORKER_THREADS);
 			new_options = TRUE;
 			restart = TRUE;
 		}
 
-/* If the user changed any of the work preferences record it in the INI file */
-/* and tell the server */
+/* If the user changed any of the work preferences record it in the INI file and tell the server */
 
 		if (dlg.AreAllTheSame (dlg.m_work_pref)) {
 			if (! PTOIsGlobalOption (WORK_PREFERENCE) || WORK_PREFERENCE[0] != dlg.m_work_pref[0]) {
@@ -438,10 +436,10 @@ void CPrime95Doc::OnContinueSwitcher()
 		CStartDlg dlg;
 
 		if (dlg.DoModal () == IDOK) {
-			if (dlg.m_all_threads)
+			if (dlg.m_all_workers)
 				OnContinue ();
 			else
-				LaunchWorkerThreads (dlg.m_thread-1, FALSE);
+				LaunchWorkerThreads (dlg.m_worker-1, FALSE);
 		}
 	} else {
 		// Start the thread
@@ -469,10 +467,10 @@ void CPrime95Doc::OnStopSwitcher()
 		CStopDlg dlg;
 
 		if (dlg.DoModal () == IDOK) {
-			if (dlg.m_all_threads)
+			if (dlg.m_all_workers)
 				OnStop ();
 			else
-				stop_one_worker (dlg.m_thread-1);
+				stop_one_worker (dlg.m_worker-1);
 		}
 	} else {
 		// Stop the one active thread
@@ -504,9 +502,9 @@ void CPrime95Doc::OnTest()
 		w.b = 2;
 		w.n = dlg.m_p;
 		w.c = -1;
-		addWorkToDoLine (dlg.m_thread - 1, &w);
+		addWorkToDoLine (dlg.m_worker - 1, &w);
 		if (WORKER_THREADS_ACTIVE)
-			stop_worker_for_advanced_test (dlg.m_thread - 1);
+			stop_worker_for_advanced_test (dlg.m_worker - 1);
 		else
 			OnContinue ();
 	}
@@ -553,7 +551,7 @@ void CPrime95Doc::OnPminus1()
 		w.B1 = dlg.m_bound1;
 		w.B2_start = 0;
 		w.B2 = dlg.m_bound2;
-		addWorkToDoLine (dlg.m_thread - 1, &w);
+		addWorkToDoLine (dlg.m_worker - 1, &w);
 
 /* If worker threads are running, adding the work should have restarted */
 /* threads waiting for work.  Otherwise, start the worker threads. */
@@ -588,7 +586,7 @@ void CPrime95Doc::OnEcm()
 		w.B1 = dlg.m_bound1;
 		w.B2 = dlg.m_bound2;
 		w.curves_to_do = dlg.m_num_curves;
-		addWorkToDoLine (dlg.m_thread - 1, &w);
+		addWorkToDoLine (dlg.m_worker - 1, &w);
 
 /* If worker threads are running, adding the work should have restarted */
 /* threads waiting for work.  Otherwise, start the worker threads. */
@@ -682,12 +680,22 @@ void CPrime95Doc::OnCpu()
 		STARTUP_IN_PROGRESS = 0;
 }
 
+#define round_to_tenth(a)	((round((a) * 10.0)) / 10.0)
+
 void CPrime95Doc::OnResources() 
 {
 	CResourcesDlg dlg;
+	unsigned int day_memory, night_memory, day_start_time, day_end_time;
 	char	timebuf[20];
 
 	dlg.m_disk = CPU_WORKER_DISK_SPACE;
+	read_memory_settings (&day_memory, &night_memory, &day_start_time, &day_end_time);
+	dlg.m_day_memory = (float) round_to_tenth (day_memory / 1024.0);
+	dlg.m_night_memory = (float) round_to_tenth (night_memory / 1024.0);
+	minutesToStr (day_start_time, timebuf);
+	dlg.m_start_time = timebuf;
+	minutesToStr (day_end_time, timebuf);
+	dlg.m_end_time = timebuf;
 	dlg.m_upload_bandwidth = IniSectionGetFloat (INI_FILE, "PrimeNet", "UploadRateLimit", 0.25);
 	if (dlg.m_upload_bandwidth <= 0.0 || dlg.m_upload_bandwidth > 10000.0) dlg.m_upload_bandwidth = 10000.0;
 	IniSectionGetString (INI_FILE, "PrimeNet", "UploadStartTime", timebuf, sizeof (timebuf), "00:00");
@@ -699,12 +707,30 @@ void CPrime95Doc::OnResources()
 	dlg.m_download_mb = IniSectionGetInt (INI_FILE, "PrimeNet", "DownloadDailyLimit", 40);
 	dlg.m_can_upload = IniSectionGetInt (INI_FILE, "PrimeNet", "ProofUploads", 1);
 	if (dlg.DoModal () == IDOK) {
+		unsigned int new_day_start_time, new_day_end_time;
+
 		// Raise a warning if uesr drops the temp disk space below the threshold for first time work.
 		if (CPU_WORKER_DISK_SPACE >= 1.5 && dlg.m_disk < 1.5) {
 			AfxMessageBox (MSG_DISK, MB_ICONEXCLAMATION | MB_OK);
 		}
 		CPU_WORKER_DISK_SPACE = dlg.m_disk;
 		IniWriteFloat (LOCALINI_FILE, "WorkerDiskSpace", CPU_WORKER_DISK_SPACE);
+
+/* Save the new memory settings */
+
+		new_day_start_time = strToMinutes ((const char *) dlg.m_start_time);
+		new_day_end_time = strToMinutes ((const char *) dlg.m_end_time);
+		if (day_memory != (int) (dlg.m_day_memory * 1024.0)  ||
+		    night_memory != (int) (dlg.m_night_memory * 1024.0) ||
+		    day_start_time != new_day_start_time ||
+		    day_end_time != new_day_end_time) {
+			write_memory_settings ((int) (dlg.m_day_memory * 1024.0), (int) (dlg.m_night_memory * 1024.0), new_day_start_time, new_day_end_time);
+			mem_settings_have_changed ();
+			spoolMessage (PRIMENET_PROGRAM_OPTIONS, NULL);
+		}
+
+/* Write bandwidth settings */
+
 		IniSectionWriteFloat (INI_FILE, "PrimeNet", "UploadRateLimit", dlg.m_upload_bandwidth);
 		IniSectionWriteString (INI_FILE, "PrimeNet", "UploadStartTime", (const char *) dlg.m_upload_start);
 		IniSectionWriteString (INI_FILE, "PrimeNet", "UploadEndTime", (const char *) dlg.m_upload_end);
@@ -773,9 +799,9 @@ void CPrime95Doc::OnBenchmark()
 	dlg.m_limit_FFT_sizes = 0;			// IniGetInt (INI_FILE, "OnlyBench5678", 1);
 
 	// Init CPU cores dialog box entries
-	sprintf (default_cores_string, "%lu", NUM_CPUS);
+	sprintf (default_cores_string, "%" PRIu32, HW_NUM_COMPUTE_CORES);
 	dlg.m_bench_cores = default_cores_string;
-	dlg.m_hyperthreading = IniGetInt (INI_FILE, "BenchHyperthreads", 1);
+	dlg.m_hyperthreading = (HW_NUM_CORES != HW_NUM_THREADS && IniGetInt (INI_FILE, "BenchHyperthreads", 1));
 
 	// Init throughput dialog box entries
 	dlg.m_all_FFT_impl = IniGetInt (INI_FILE, "AllBench", 0);
@@ -787,8 +813,8 @@ void CPrime95Doc::OnBenchmark()
 	sorted_add_unique (vals, &numvals, NUM_WORKER_THREADS);
 	if (!dlg.m_all_FFT_impl) {
 		sorted_add_unique (vals, &numvals, 1);
-		sorted_add_unique (vals, &numvals, NUM_THREADING_NODES);
-		sorted_add_unique (vals, &numvals, NUM_CPUS);
+		sorted_add_unique (vals, &numvals, HW_NUM_THREADING_NODES);
+		sorted_add_unique (vals, &numvals, HW_NUM_COMPUTE_CORES);
 	}
 	sprintf (default_workers_string, "%d", vals[0]);
 	for (i = 1; i < numvals; i++) sprintf (default_workers_string + strlen (default_workers_string), ",%d", vals[i]);
@@ -809,7 +835,7 @@ void CPrime95Doc::OnBenchmark()
 			IniWriteInt (INI_FILE, "AllBench", dlg.m_all_FFT_impl);
 			IniWriteInt (INI_FILE, "BenchTime", dlg.m_bench_time);
 		}
-		LaunchBench (dlg.m_bench_type);
+		LaunchBench (dlg.m_bench_type, FALSE);
 	}
 }
 
@@ -825,7 +851,8 @@ void CPrime95Doc::OnTorture()
 
 	dlg.m_minfft = 4;
 	dlg.m_maxfft = (CPU_TOTAL_L4_CACHE_SIZE ? 32768 : 8192);
-	dlg.m_thread = NUM_CPUS * CPU_HYPERTHREADS;
+	dlg.m_cores = HW_NUM_CORES;
+	dlg.m_hyperthreading = (HW_NUM_CORES != HW_NUM_THREADS);
 	mem = physical_memory ();
 	// New in 29.5, raise the default memory used to all but 3GB on 64-bit machines.  Almost all machines today have
 	// more than 5GB of memory installed.  If memory serves me, there may be issues in Win32 allocating more than 2GB.
@@ -853,9 +880,10 @@ void CPrime95Doc::OnTorture()
 		dlg.m_in_place = TRUE;
 	}
 	dlg.m_memory = dlg.m_blendmemory;
-	dlg.m_timefft = CPU_HYPERTHREADS * 3;
+	dlg.m_timefft = dlg.m_hyperthreading ? 6 : 3;
 	if (dlg.DoModal () == IDOK) {
 		int	m_weak;
+		IniWriteInt (INI_FILE, "TortureHyperthreading", dlg.m_hyperthreading);
 		IniWriteInt (INI_FILE, "MinTortureFFT", dlg.m_minfft);
 		IniWriteInt (INI_FILE, "MaxTortureFFT", dlg.m_maxfft);
 		if (dlg.m_in_place) dlg.m_memory = 8;
@@ -863,7 +891,7 @@ void CPrime95Doc::OnTorture()
 		IniWriteInt (INI_FILE, "TortureTime", dlg.m_timefft);
 		m_weak = dlg.m_avx512 * CPU_AVX512F + dlg.m_fma3 * CPU_FMA3 + dlg.m_avx * CPU_AVX + dlg.m_sse2 * CPU_SSE2;
 		IniWriteInt (INI_FILE, "TortureWeak", m_weak);
-		LaunchTortureTest (dlg.m_thread, FALSE);
+		LaunchTortureTest (dlg.m_cores, FALSE);
 	}
 }
 
@@ -1140,7 +1168,7 @@ void CPrime95Doc::OnUsrTorture()
 {
 	int	num_threads;
 
-	num_threads = IniGetInt (INI_FILE, "TortureThreads", NUM_CPUS * CPU_HYPERTHREADS);
+	num_threads = IniGetInt (INI_FILE, "TortureThreads", HW_NUM_THREADS);
 	LaunchTortureTest (num_threads, FALSE);
 }
 
@@ -1159,32 +1187,12 @@ void flashWindowAndBeep ()
 /////////////////////////////////////////////////////////////////////////////
 // CPrime95Doc public routines
 
-#include <ctype.h>
-#include <dos.h>
-#include <fcntl.h>
-#include <io.h>
-#include <memory.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <gwutil.h>
-
-#ifdef X86_64
-#define PORT	4
-#else
-#define PORT	1
-#endif
-#include "cJSON.h"
-#include "cJSON.c"
-#include "pm1prob.h"
-#include "pm1prob.c"
 #include "md5.c"
 #include "comm95b.c"
 #include "comm95c.c"
 #include "commona.c"
 #include "commonb.c"
 #include "commonc.c"
-#include "ecm.c"
 #include "primenet.c"
 #include "proof_upload.c"
 #include "proof_getdata.c"

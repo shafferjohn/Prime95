@@ -1,8 +1,10 @@
 /*--------------------------------------------------------------------------
-| Copyright 2020 Mersenne Research, Inc.  All rights reserved
+| Copyright 2020-2021 Mersenne Research, Inc.  All rights reserved
 |
 | This file contains routines to upload one proof file to the Primenet server
 +--------------------------------------------------------------------------*/
+
+#include "cJSON.h"
 
 /* This routine archives or deletes a proof file */
 
@@ -443,7 +445,8 @@ void ProofUpload (char *filename)
 
 		item = cJSON_GetObjectItem(json, "FileUploaded");
 		if (item != NULL) {
-			OutputStr (COMM_THREAD_NUM, "Proof file successfully uploaded\n");
+			sprintf (buf, "Proof file %s successfully uploaded\n", filename);
+			OutputBoth (COMM_THREAD_NUM, buf);
 			archiveOrDelete (&fd, filename, fileMD5);
 			goto end;
 		}

@@ -1,5 +1,7 @@
 // TestDlg.cpp : implementation file
 //
+//  Copyright 1995-2021 Mersenne Research, Inc. All rights reserved.
+//
 
 #include "stdafx.h"
 #include "Prime95.h"
@@ -19,7 +21,7 @@ CTestDlg::CTestDlg(CWnd* pParent /*=NULL*/)
 	: CDialog(CTestDlg::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CTestDlg)
-	m_thread = 1;
+	m_worker = 1;
 	m_p = 0;
 	//}}AFX_DATA_INIT
 }
@@ -42,14 +44,14 @@ void CTestDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialog::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CTestDlg)
-	DDX_Control(pDX, IDC_THREAD_TEXT, c_thread_text);
-	DDX_Control(pDX, IDC_THREAD, c_thread);
-	DDX_Text(pDX, IDC_THREAD, m_thread);
-	DDV_MinMaxUInt(pDX, m_thread, 1, NUM_WORKER_THREADS);
+	DDX_Control(pDX, IDC_WORKER_TEXT, c_worker_text);
+	DDX_Control(pDX, IDC_WORKER, c_worker);
+	DDX_Text(pDX, IDC_WORKER, m_worker);
+	DDV_MinMaxUInt(pDX, m_worker, 1, NUM_WORKER_THREADS);
 	DDX_Text(pDX, IDC_P, m_p);
 	//}}AFX_DATA_MAP
-	c_thread_text.EnableWindow (NUM_WORKER_THREADS > 1);
-	c_thread.EnableWindow (NUM_WORKER_THREADS > 1);
+	c_worker_text.EnableWindow (NUM_WORKER_THREADS > 1);
+	c_worker.EnableWindow (NUM_WORKER_THREADS > 1);
 	DDV_MinMaxUInt(pDX, m_p, MIN_PRIME,
 		       CPU_FLAGS & CPU_FMA3 ? MAX_PRIME_FMA3 :
 		       CPU_FLAGS & CPU_SSE2 ? MAX_PRIME_SSE2 : MAX_PRIME);

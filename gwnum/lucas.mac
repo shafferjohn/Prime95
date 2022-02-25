@@ -1,4 +1,4 @@
-; Copyright 1995-2007 - Mersenne Research, Inc.  All rights reserved
+; Copyright 1995-2020 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -566,6 +566,7 @@ four_real_four_semireal_square MACRO R1,R2,R3,R4,R5,R6,R7,R8
 
 four_real_four_semireal_mult MACRO R1,R2,R3,R4,R5,R6,R7,R8
 	four_real_four_semireal_fft R1,R2,R3,R4,R5,R6,R7,R8
+	sub	ebx, ebx		;; Required for us to use the _mulf macro
 	four_real_four_semireal_mulf R1,R2,R3,R4,R5,R6,R7,R8
 	ENDM
 

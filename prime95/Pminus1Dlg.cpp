@@ -1,5 +1,7 @@
 // Pminus1Dlg.cpp : implementation file
 //
+//  Copyright 2000-2021 Mersenne Research, Inc. All rights reserved.
+//
 
 #include "stdafx.h"
 #include "Prime95.h"
@@ -19,7 +21,7 @@ CPminus1Dlg::CPminus1Dlg(CWnd* pParent /*=NULL*/)
 	: CDialog(CPminus1Dlg::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CPminus1Dlg)
-	m_thread = 1;
+	m_worker = 1;
 	m_k = 1.0;
 	m_b = 2;
 	m_n = 1277;
@@ -34,22 +36,21 @@ void CPminus1Dlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialog::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CPminus1Dlg)
-	DDX_Control(pDX, IDC_THREAD_TEXT, c_thread_text);
-	DDX_Control(pDX, IDC_THREAD, c_thread);
-	DDX_Text(pDX, IDC_THREAD, m_thread);
-	DDV_MinMaxUInt(pDX, m_thread, 1, NUM_WORKER_THREADS);
+	DDX_Control(pDX, IDC_WORKER_TEXT, c_worker_text);
+	DDX_Control(pDX, IDC_WORKER, c_worker);
+	DDX_Text(pDX, IDC_WORKER, m_worker);
+	DDV_MinMaxUInt(pDX, m_worker, 1, NUM_WORKER_THREADS);
 	DDX_Text(pDX, IDC_P4, m_k);
 	DDX_Text(pDX, IDC_P1, m_b);
 	DDV_MinMaxUInt (pDX, m_b, 2, 1000000000);
 	DDX_Text(pDX, IDC_P5, m_n);
-	DDV_MinMaxUInt (pDX, m_n, 1,
-			CPU_FLAGS & CPU_SSE2 ? MAX_PRIME_SSE2 : MAX_PRIME);
+	DDV_MinMaxUInt (pDX, m_n, 1, CPU_FLAGS & CPU_SSE2 ? MAX_PRIME_SSE2 : MAX_PRIME);
 	DDX_Text(pDX, IDC_P6, m_c);
 	DDX_Text(pDX, IDC_P2, m_bound1);
 	DDX_Text(pDX, IDC_P3, m_bound2);
 	//}}AFX_DATA_MAP
-	c_thread_text.EnableWindow (NUM_WORKER_THREADS > 1);
-	c_thread.EnableWindow (NUM_WORKER_THREADS > 1);
+	c_worker_text.EnableWindow (NUM_WORKER_THREADS > 1);
+	c_worker.EnableWindow (NUM_WORKER_THREADS > 1);
 }
 
 

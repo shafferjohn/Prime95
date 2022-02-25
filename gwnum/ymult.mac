@@ -1,4 +1,4 @@
-; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2020 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -9,12 +9,11 @@ yfft_1_ret MACRO
 	ad_epilog 0,1,rbx,rbp,rsi,rdi,ymm6,ymm7,ymm8,ymm9,ymm10,ymm11,ymm12,ymm13,ymm14,ymm15
 	ENDM
 
-; Return from a type 2,3, or 4 FFT - call the common normalization code
-; used in one-pass FFTs only.
+; Return from a type 2,3, or 4 FFT - call the common normalization code used in one-pass FFTs only.
 
 yfft_3_ret MACRO
 	start_timer 28
-	mov	rax, NORMRTN
+	mov	rax, NORMRTN	;; Call the normalization routine
 	call	rax
 	end_timer 28
 	ad_epilog 0,1,rbx,rbp,rsi,rdi,ymm6,ymm7,ymm8,ymm9,ymm10,ymm11,ymm12,ymm13,ymm14,ymm15

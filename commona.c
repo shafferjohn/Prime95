@@ -8,7 +8,7 @@
 | Commonb contains information used only during execution
 | Commonc contains information used during setup and execution
 |
-| Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
 +---------------------------------------------------------------------*/
 
 /* Routine to eliminate odd puctuation characters from user ID */
@@ -40,7 +40,7 @@ void rangeStatusMessage (
 {
 	unsigned int tnum, ll_and_prp_cnt, lines_per_worker;
 	int	mersennes;		/* TRUE if only testing Mersenne numbers */
-	double	prob, est, cert_est;
+	double	prob, est;
 	char	*orig_buf;
 
 /* Just in case the user hand added work to the worktodo file, reread it */
@@ -81,19 +81,20 @@ void rangeStatusMessage (
 
 /* Loop over all work units */
 
-	    w = NULL;
 	    est = 0.0;
-	    cert_est = 0.0;
-	    for ( ; ; ) {
+	    for (int pass = 0; pass <= 1; pass++)
+	    for (w = NULL; ; ) {
 		time_t	this_time;
 		char	timebuf[80];
 		unsigned int bits;
 
-/* Read the next line of the work file */
+/* Read the next line of the work file, handle CERT lines first */
 
 		w = getNextWorkToDoLine (tnum, w, SHORT_TERM_USE);
 		if (w == NULL) break;
 		if (w->work_type == WORK_NONE) continue;
+		if (pass == 0 && w->work_type != WORK_CERT) continue;
+		if (pass == 1 && w->work_type == WORK_CERT) continue;
 
 /* Keep track of whether we are only testing Mersenne numbers */
 
@@ -106,30 +107,27 @@ void rangeStatusMessage (
 		if (bits < 32) bits = 32;
 		if (w->work_type == WORK_TEST) {
 			ll_and_prp_cnt++;
-			prob += (bits - 1) * 1.733 * (w->pminus1ed ? 1.04 : 1.0) / (_log2(w->k) + _log2(w->b) * w->n);
+			prob += (bits - 1) * 1.733 * (w->pminus1ed ? 1.04 : 1.0) / (log2(w->k) + log2(w->b) * w->n);
 		}
 		if (w->work_type == WORK_DBLCHK) {
 			ll_and_prp_cnt++;
-			prob += (bits - 1) * 1.733 * ERROR_RATE * (w->pminus1ed ? 1.04 : 1.0) / (_log2(w->k) + _log2(w->b) * w->n);
+			prob += (bits - 1) * 1.733 * ERROR_RATE * (w->pminus1ed ? 1.04 : 1.0) / (log2(w->k) + log2(w->b) * w->n);
 		}
 		if (w->work_type == WORK_PRP) {
 			ll_and_prp_cnt++;
 			if (!w->prp_dblchk)
-				prob += (bits - 1) * 1.733 * (w->pminus1ed ? 1.04 : 1.0) / (_log2(w->k) + _log2(w->b) * w->n);
+				prob += (bits - 1) * 1.733 * (w->pminus1ed ? 1.04 : 1.0) / (log2(w->k) + log2(w->b) * w->n);
 			else
-				prob += (bits - 1) * 1.733 * PRP_ERROR_RATE * (w->pminus1ed ? 1.04 : 1.0) / (_log2(w->k) + _log2(w->b) * w->n);
+				prob += (bits - 1) * 1.733 * PRP_ERROR_RATE * (w->pminus1ed ? 1.04 : 1.0) / (log2(w->k) + log2(w->b) * w->n);
 		}
 
 /* Adjust our time estimate */
 
-		if (w->work_type == WORK_CERT) cert_est += work_estimate (tnum, w);
-		else est += work_estimate (tnum, w);
+		est += work_estimate (tnum, w);
 
-/* Stop adding worktodo lines if buffer is full.  We must still loop */
-/* through the worktodo lines to decrement the in-use counters. */
+/* Stop adding worktodo lines if buffer is full.  We must still loop through the worktodo lines to decrement the in-use counters. */
 
-		if ((unsigned int) (buf - orig_buf) >= buflen - 200 ||
-		    lines_output >= lines_per_worker-1) {
+		if ((unsigned int) (buf - orig_buf) >= buflen - 200 || lines_output >= lines_per_worker-1) {
 			if (! truncated_status_msg) {
 				strcpy (buf, "More...\n");
 				buf += strlen (buf);
@@ -153,6 +151,8 @@ void rangeStatusMessage (
 			sprintf (buf, "ECM %d curve%s B1=%.0f", w->curves_to_do, w->curves_to_do == 1 ? "" : "s", w->B1);
 		else if (w->work_type == WORK_PMINUS1)
 			sprintf (buf, "P-1 B1=%.0f", w->B1);
+		else if (w->work_type == WORK_PPLUS1)
+			sprintf (buf, "P+1 B1=%.0f", w->B1);
 		else if (w->work_type == WORK_FACTOR)
 			sprintf (buf, "factor from 2^%d to 2^%d", (int) w->sieve_depth, (int) w->factor_to);
 		else
@@ -165,8 +165,7 @@ void rangeStatusMessage (
 		buf += strlen (buf);
 
 		time (&this_time);
-		if (w->work_type == WORK_CERT) this_time += (long) cert_est;
-		else this_time += (long) (cert_est + est);
+		this_time += (time_t) est;
 		if (this_time < 2147483640.0) {
 			strcpy (timebuf, ctime (&this_time));
 			safe_strcpy (timebuf+16, timebuf+19);
@@ -208,14 +207,14 @@ int min_cores_for_work_pref (
 // If LL or PRP testing 100M digit numbers, use at least 4 cores (or all cores)
 
 	if (work_pref == PRIMENET_WP_LL_100M || work_pref == PRIMENET_WP_PRP_100M) {
-		if (NUM_CPUS < 8) cores = NUM_CPUS;
+		if (HW_NUM_CORES < 8) cores = HW_NUM_CORES;
 		else cores = 4;
 	}
 
 // If we aren't using the computer 24 hours a day, then scale the minimum number of cores up
 
 	cores = cores * 24 / CPU_HOURS;
-	if (cores > (int) NUM_CPUS) cores = NUM_CPUS;
+	if (cores > (int) HW_NUM_CORES) cores = HW_NUM_CORES;
 
 // Return the minimum number of cores
 

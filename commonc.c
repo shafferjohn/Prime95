@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
 |
 | This file contains routines and global variables that are common for
 | all operating systems the program has been ported to.  It is included
@@ -11,17 +11,18 @@
 | Commonc contains information used during setup and execution
 +---------------------------------------------------------------------*/
 
-static const char JUNK[]="Copyright 1996-2020 Mersenne Research, Inc. All rights reserved";
+static const char JUNK[]="Copyright 1996-2021 Mersenne Research, Inc. All rights reserved";
 
-char	INI_FILE[80] = {0};
-char	LOCALINI_FILE[80] = {0};
-char	WORKTODO_FILE[80] = {0};
-char	RESFILE[80] = {0};
-char	RESFILEBENCH[80] = {0};
-char	RESFILEJSON[80] = {0};
-char	SPOOL_FILE[80] = {0};
-char	LOGFILE[80] = {0};
+char	INI_FILE[260] = {0};
+char	LOCALINI_FILE[260] = {0};
+char	WORKTODO_FILE[260] = {0};
+char	RESFILE[260] = {0};
+char	RESFILEBENCH[260] = {0};
+char	RESFILEJSON[260] = {0};
+char	SPOOL_FILE[260] = {0};
+char	LOGFILE[260] = {0};
 char	*RESFILES[3] = {RESFILE, RESFILEBENCH, RESFILEJSON};
+int	NO_GUI = 1;
 
 char	USERID[21] = {0};
 char	COMPID[21] = {0};
@@ -61,8 +62,7 @@ int	BATTERY_PERCENT = 0;
 int	DEFEAT_POWER_SAVE = 1;
 int	TRAY_ICON = TRUE;
 int	HIDE_ICON = FALSE;
-int	MERGE_WINDOWS = 0;		/* Flags indicating which MDI */
-					/* windows to merge together */
+int	MERGE_WINDOWS = 0;		/* Flags indicating which MDI windows to merge together */
 double UNOFFICIAL_CPU_SPEED = 0.0;
 unsigned int ROLLING_AVERAGE = 0;
 unsigned int PRECISION = 2;
@@ -77,25 +77,22 @@ unsigned long INTERIM_RESIDUES = 0;
 unsigned long HYPERTHREADING_BACKOFF = 0;
 int	THROTTLE_PCT = 0;
 
-int	STARTUP_IN_PROGRESS = 0;/* True if displaying startup dialog boxes */
+int	STARTUP_IN_PROGRESS = 0;	/* True if displaying startup dialog boxes */
 
-unsigned long NUM_CPUS = 1;	/* Number of CPUs/Cores in the computer */
+gwmutex	OUTPUT_MUTEX;			/* Lock for screen and results file access */
+gwmutex	LOG_MUTEX;			/* Lock for prime.log access */
+gwmutex	WORKTODO_MUTEX;			/* Lock for accessing worktodo structure */
 
-gwmutex	OUTPUT_MUTEX;		/* Lock for screen and results file access */
-gwmutex	LOG_MUTEX;		/* Lock for prime.log access */
-gwmutex	WORKTODO_MUTEX;		/* Lock for accessing worktodo structure */
+gwevent AUTOBENCH_EVENT;		/* Event to wake up workers after an auto-benchmark */
 
-int	LAUNCH_TYPE = 0;	/* Type of worker threads launched */
-unsigned int WORKER_THREADS_ACTIVE = 0; /* Number of worker threads running */
-int	WORKER_THREADS_STOPPING = 0; /* TRUE iff worker threads are stopping */
+int	LAUNCH_TYPE = 0;		/* Type of worker threads launched */
+unsigned int WORKER_THREADS_ACTIVE = 0;	/* Number of worker threads running */
+int	WORKER_THREADS_STOPPING = 0;	/* TRUE iff worker threads are stopping */
 
-struct work_unit_array WORK_UNITS[MAX_NUM_WORKER_THREADS] = {0};
-				/* An array of work units for each */
-				/* worker thread */
-unsigned int WORKTODO_COUNT = 0;/* Count of valid work lines */
-unsigned int WORKTODO_IN_USE_COUNT = 0;/* Count of work units in use */
-int	WORKTODO_CHANGED = 0;	/* Flag indicating worktodo file needs */
-				/* writing */
+struct work_unit_array WORK_UNITS[MAX_NUM_WORKER_THREADS] = {0}; /* An array of work units for each worker thread */
+unsigned int WORKTODO_COUNT = 0;	/* Count of valid work lines */
+unsigned int WORKTODO_IN_USE_COUNT = 0;	/* Count of work units in use */
+int	WORKTODO_CHANGED = 0;		/* Flag indicating worktodo file needs writing */
 
 hwloc_topology_t hwloc_topology;	/* Hardware topology */
 uint32_t CPU_TOTAL_L1_CACHE_SIZE = 0;	/* Sum of all the L1 caches in KB as determined by hwloc */
@@ -109,15 +106,20 @@ uint32_t CPU_NUM_L4_CACHES = 0;		/* Number of L4 caches as determined by hwloc *
 int	CPU_L2_CACHE_INCLUSIVE = -1;	/* 1 if inclusive, 0 if exclusive, -1 if not known */
 int	CPU_L3_CACHE_INCLUSIVE = -1;	/* 1 if inclusive, 0 if exclusive, -1 if not known */
 int	CPU_L4_CACHE_INCLUSIVE = -1;	/* 1 if inclusive, 0 if exclusive, -1 if not known */
-unsigned int NUM_NUMA_NODES = 1;	/* Number of NUMA nodes in the computer */
-unsigned int NUM_THREADING_NODES = 1;	/* Number of nodes where it might be beneficial to keep a worker's threads in the same node */
 int	OS_CAN_SET_AFFINITY = 1;	/* hwloc supports setting CPU affinity (known exception is Apple) */
 
-gwevent AUTOBENCH_EVENT;	/* Event to wake up workers after an auto-benchmark */
+/* New in 30.7, HW_ globals to describe the underlying hardware.  Earlier versions of prime95 did not deal well with asymmetric cores/threads/caches. */
+
+uint32_t HW_NUM_CORES;			/* Total number of cores (physical processors) available */
+uint32_t HW_NUM_THREADS;		/* Total number of threads (logical processors) available */
+uint32_t HW_NUM_COMPUTE_CORES;		/* Number of cores that a program like ours should use (i.e. not Alder Lake efficiency cores) */
+uint32_t HW_NUM_THREADING_NODES;	/* Total number of nodes where it should be beneficial to assign a worker's cores within the same node */
+uint32_t HW_NUM_COMPUTE_THREADING_NODES;/* Same as HW_NUM_THREADING_NODES but only counting nodes governing compute cores */
+uint32_t HW_NUM_NUMA_NODES;		/* Total number of NUMA nodes in the computer */
+struct hw_core_info *HW_CORES = NULL;	/* Information on every core */
 
 /* Generate the application string.  This is sent to the server in a */
-/* UC (Update Computer info) call.  It is also displayed in the */
-/* Help/About dialog box. */
+/* UC (Update Computer info) call.  It is also displayed in the Help/About dialog box. */
 
 void generate_application_string (
 	char	*app_string)
@@ -274,7 +276,7 @@ void getCpuSpeed (void)
 
 	guessCpuSpeed ();
 
-/* Now let the user override the cpu speed from the local.ini file */
+/* Now let the user override the cpu speed from the local.txt file */
 
 	temp = IniGetInt (LOCALINI_FILE, "CpuSpeed", 99);
 	if (temp != 99) CPU_SPEED = temp;
@@ -352,28 +354,90 @@ void getCpuSpeed (void)
 	}
 }
 
+/* Internal routine to calculate the number of "threading nodes" in a cpu set.  A "threading node" represents a group of cores that we prefer to */
+/* assign to a single worker.  For example, there may well be a performance penalty if a worker's threads are on two different physical CPUS or */
+/* access data from two different L3 caches. */
+
+// NOTE:  We should beef up prime95's understanding of threading nodes.  There really should be a heirarchy of threading nodes.
+// Consider an 8/8 Alder Lake CPU.  The 8 performance cores share form a threading node, the 8 efficiency cores form another threading
+// node that is comprised of 2 subnodes -- there are two L2 caches serving 4 cores each.
+
+uint32_t calc_threading_nodes_for_cpuset (hwloc_bitmap_t cpuset)
+{
+	int	num_cores;
+	int	num_objs;
+	int	num_threading_nodes = 1;
+
+	num_cores = hwloc_get_nbobjs_inside_cpuset_by_type (hwloc_topology, cpuset, HWLOC_OBJ_CORE);
+
+	num_objs = hwloc_get_nbobjs_inside_cpuset_by_type (hwloc_topology, cpuset, HWLOC_OBJ_PACKAGE);
+	if (num_objs < num_cores && num_objs > num_threading_nodes) num_threading_nodes = num_objs;
+
+	num_objs = hwloc_get_nbobjs_inside_cpuset_by_type (hwloc_topology, cpuset, HWLOC_OBJ_NUMANODE);
+	if (num_objs < num_cores && num_objs > num_threading_nodes) num_threading_nodes = num_objs;
+
+	num_objs = hwloc_get_nbobjs_inside_cpuset_by_type (hwloc_topology, cpuset, HWLOC_OBJ_L4CACHE);
+	if (num_objs < num_cores && num_objs > num_threading_nodes) num_threading_nodes = num_objs;
+	num_objs = hwloc_get_nbobjs_inside_cpuset_by_type (hwloc_topology, cpuset, HWLOC_OBJ_L3CACHE);
+	if (num_objs < num_cores && num_objs > num_threading_nodes) num_threading_nodes = num_objs;
+	num_objs = hwloc_get_nbobjs_inside_cpuset_by_type (hwloc_topology, cpuset, HWLOC_OBJ_L2CACHE);
+	if (num_objs < num_cores && num_objs > num_threading_nodes) num_threading_nodes = num_objs;
+
+	return (num_threading_nodes);
+}
+
 /* Set the CPU flags based on the CPUID instruction.  Also, the advanced */
 /* user can override our guesses. */
 
 void getCpuInfo (void)
 {
 	int	depth, i, temp;
-			
+	uint32_t core;
+
 /* Get the CPU info using CPUID instruction */	
 
 	guessCpuType ();
 
-/* New in version 29!  Use hwloc info to determine NUM_CPUS and CPU_HYPERTHREADS.  Also get number of NUMA nodes */
+/* New in version 29!  Use hwloc info to determine HW_NUM_CORES and HW_NUM_THREADS.  Also get number of NUMA nodes */
 /* which we may use later on to allocate memory from the proper NUMA node. */
 /* We still allow overriding these settings using the INI file. */
 
-	NUM_CPUS = hwloc_get_nbobjs_by_type (hwloc_topology, HWLOC_OBJ_CORE);
-	if (NUM_CPUS < 1) NUM_CPUS = hwloc_get_nbobjs_by_type (hwloc_topology, HWLOC_OBJ_PU);
-	if (NUM_CPUS < 1) NUM_CPUS = 1;				// Shouldn't happen
-	CPU_HYPERTHREADS = hwloc_get_nbobjs_by_type (hwloc_topology, HWLOC_OBJ_PU) / NUM_CPUS;
-	if (CPU_HYPERTHREADS < 1) CPU_HYPERTHREADS = 1;		// Shouldn't happen
-	NUM_NUMA_NODES = hwloc_get_nbobjs_by_type (hwloc_topology, HWLOC_OBJ_NUMANODE);
-	if (NUM_NUMA_NODES < 1 || NUM_CPUS % NUM_NUMA_NODES != 0) NUM_NUMA_NODES = 1;
+	HW_NUM_CORES = hwloc_get_nbobjs_by_type (hwloc_topology, HWLOC_OBJ_CORE);
+	if (HW_NUM_CORES < 1) HW_NUM_CORES = hwloc_get_nbobjs_by_type (hwloc_topology, HWLOC_OBJ_PU);
+	if (HW_NUM_CORES < 1) HW_NUM_CORES = 1;			// Shouldn't happen
+	HW_NUM_THREADS = hwloc_get_nbobjs_by_type (hwloc_topology, HWLOC_OBJ_PU);
+	if (HW_NUM_THREADS < 1) HW_NUM_THREADS = 1;		// Shouldn't happen
+	HW_NUM_NUMA_NODES = hwloc_get_nbobjs_by_type (hwloc_topology, HWLOC_OBJ_NUMANODE);
+	if (HW_NUM_NUMA_NODES < 1) HW_NUM_NUMA_NODES = 1;
+
+/* Allow overriding the hwloc generated values for number of physical processors and NUMA nodes. */
+
+	HW_NUM_CORES = IniGetInt (LOCALINI_FILE, "NumCPUs", HW_NUM_CORES);
+	HW_NUM_CORES = IniGetInt (LOCALINI_FILE, "NumCores", HW_NUM_CORES);
+	if (HW_NUM_CORES < 1) HW_NUM_CORES = 1;
+	HW_NUM_THREADS = IniGetInt (LOCALINI_FILE, "NumThreads", HW_NUM_THREADS);
+	if (HW_NUM_THREADS < 1) HW_NUM_THREADS = 1;
+	HW_NUM_NUMA_NODES = IniGetInt (LOCALINI_FILE, "NumNUMANodes", HW_NUM_NUMA_NODES);
+	if (HW_NUM_NUMA_NODES == 0) HW_NUM_NUMA_NODES = 1;
+
+/* Create a structure to describe each physical core.  Initialize as performance cores with the appropriate number of hyperthreads. */
+
+	free (HW_CORES);
+	HW_CORES = (struct hw_core_info *) malloc (HW_NUM_CORES * sizeof (struct hw_core_info));
+	for (core = 0; core < HW_NUM_CORES; core++) {
+		HW_CORES[core].ranking = 1;		// Mark as a performance core
+		// Calculate number of threads
+		int	num_threads = 1;		// Default to one thread (no hyperthreading)
+		hwloc_obj_t obj = hwloc_get_obj_by_type (hwloc_topology, HWLOC_OBJ_CORE, core);		/* Get core obj */
+		if (obj == NULL) obj = hwloc_get_obj_by_type (hwloc_topology, HWLOC_OBJ_PU, core);	/* The above failed for someone use plan B */
+		if (obj != NULL) num_threads = hwloc_get_nbobjs_inside_cpuset_by_type (hwloc_topology, obj->cpuset, HWLOC_OBJ_PU);
+		// Let user override calculated number of threads
+		char key[50];
+		sprintf (key, "Core%" PRIu32 "NumThreads", core);
+		num_threads = IniGetInt (LOCALINI_FILE, key, num_threads);
+		if (num_threads < 1) num_threads = 1;
+		HW_CORES[core].num_threads = (uint16_t) num_threads;
+	}
 
 /* New in version 29.5, get L1/L2/L3/L4 total cache size for use in determining torture test FFT sizes. */
 /* Overwrite cpuid's linesize and associativity with hwloc's */
@@ -385,7 +449,6 @@ void getCpuInfo (void)
 	CPU_L2_CACHE_INCLUSIVE = -1;
 	CPU_L3_CACHE_INCLUSIVE = -1;
 	CPU_L4_CACHE_INCLUSIVE = -1;
-#if HWLOC_API_VERSION >= 0x00020000
 	for (depth = 0; depth < hwloc_topology_get_depth (hwloc_topology); depth++) {
 		for (i = 0; i < (int) hwloc_get_nbobjs_by_depth (hwloc_topology, depth); i++) {
 			hwloc_obj_t obj;
@@ -423,7 +486,6 @@ void getCpuInfo (void)
 			}
 		}
 	}
-#endif
 
 /* Overwrite the cache info calculated via CPUID as hwloc's info is more detailed and I believe more reliable. */
 /* We are transitioning away from using the cache size global variables computed by the CPUID code. */
@@ -436,9 +498,73 @@ void getCpuInfo (void)
 /* Note that the CPUID code in gwnum is not good at determining the number of L2 and L3 caches. */
 /* Fortunately, it should be rare that we rely on the CPUID code. */
 
-	if (CPU_NUM_L1_CACHES == 0 && CPU_L1_CACHE_SIZE > 0) CPU_TOTAL_L1_CACHE_SIZE = CPU_L1_CACHE_SIZE * NUM_CPUS, CPU_NUM_L1_CACHES = NUM_CPUS;
+	if (CPU_NUM_L1_CACHES == 0 && CPU_L1_CACHE_SIZE > 0) CPU_TOTAL_L1_CACHE_SIZE = CPU_L1_CACHE_SIZE * HW_NUM_CORES, CPU_NUM_L1_CACHES = HW_NUM_CORES;
 	if (CPU_NUM_L2_CACHES == 0 && CPU_L2_CACHE_SIZE > 0) CPU_TOTAL_L2_CACHE_SIZE = CPU_L2_CACHE_SIZE, CPU_NUM_L2_CACHES = 1;
 	if (CPU_NUM_L3_CACHES == 0 && CPU_L3_CACHE_SIZE > 0) CPU_TOTAL_L3_CACHE_SIZE = CPU_L3_CACHE_SIZE, CPU_NUM_L3_CACHES = 1;
+
+/* New in version 30.7.  Get the number of CPU kinds, figure out which are the efficiency cores. */
+
+	int kind_verbosity = IniGetInt (INI_FILE, "KindVerbosity", 0);
+	int cpu_kinds = hwloc_cpukinds_get_nr (hwloc_topology, 0);
+	if (kind_verbosity) {
+		char	buf[200];
+		sprintf (buf, "Hwloc %d kinds\n", cpu_kinds);
+		writeResultsBench (buf);
+	}
+
+	HW_NUM_THREADING_NODES = 0;
+	HW_NUM_COMPUTE_THREADING_NODES = 0;
+	hwloc_bitmap_t cpuset = hwloc_bitmap_alloc ();
+	for (int i = 0; i < cpu_kinds; i++) {
+		int	efficiency;
+		unsigned num_infos;
+		struct hwloc_info_s *infos;
+		uint32_t num_threading_nodes;
+
+		// Get info on this cpu kind as well as which cpu cores are of this cpu kind
+		if (hwloc_cpukinds_get_info (hwloc_topology, i, cpuset, &efficiency, &num_infos, &infos, 0) < 0) continue;
+		if (kind_verbosity) {
+			char	buf[200], str[80];
+			hwloc_bitmap_snprintf (str, sizeof (str), cpuset);
+			sprintf (buf, "Hwloc kind %d: Efficiency: %d, Cpuset: %s\n", i, efficiency, str);
+			writeResultsBench (buf);
+		}
+
+		// Try and compute the number of "threading nodes" for this cpu kind.
+		num_threading_nodes = calc_threading_nodes_for_cpuset (cpuset);
+		HW_NUM_THREADING_NODES += num_threading_nodes;
+
+		// Efficiency values are not set (-1), (0) most power efficient, or (1+) performance
+		// We earlier marked all cores as performance cores.  We only need to change things if there are multiple cpu_kinds
+		// and we encounter efficiency == 0.
+		if (cpu_kinds == 1 || efficiency != 0) {
+			HW_NUM_COMPUTE_THREADING_NODES += num_threading_nodes;
+			continue;
+		}
+
+		// Look at all HW_CORE structures to see which need changing
+		for (core = 0; core < HW_NUM_CORES; core++) {
+			hwloc_obj_t obj;
+			obj = hwloc_get_obj_by_type (hwloc_topology, HWLOC_OBJ_CORE, core);			/* Get proper core */
+			if (obj == NULL) obj = hwloc_get_obj_by_type (hwloc_topology, HWLOC_OBJ_PU, core);	/* Get proper core */
+			if (obj != NULL && hwloc_bitmap_isincluded (obj->cpuset, cpuset))
+				HW_CORES[core].ranking = 0;							// Mark this core as an efficiency core
+		}
+	}
+	hwloc_bitmap_free (cpuset);
+
+	// Let user override efficiency rankings
+	for (core = 0; core < HW_NUM_CORES; core++) {
+		char key[50];
+		sprintf (key, "Core%" PRIu32 "Ranking", core);
+		HW_CORES[core].ranking = (uint16_t) IniGetInt (LOCALINI_FILE, key, HW_CORES[core].ranking);
+	}
+
+/* Calculate the number of compute cores (as opposed to efficiency cores) */
+
+	HW_NUM_COMPUTE_CORES = 0;
+	for (core = 0; core < HW_NUM_CORES; core++) if (HW_CORES[core].ranking >= 1) HW_NUM_COMPUTE_CORES++;
+	ASSERTG (HW_NUM_COMPUTE_CORES > 0);
 
 /* Calculate hardware GUID (global unique identifier) using the CPUID info. */
 /* Well, it isn't unique but it is about as good as we can do and still have */
@@ -447,7 +573,7 @@ void getCpuInfo (void)
 
 	calc_hardware_guid ();
 
-/* Let the user override the cpu flags from the local.ini file */
+/* Let the user override the cpu flags from the local.txt file */
 
 	temp = IniGetInt (LOCALINI_FILE, "CpuSupportsRDTSC", 99);
 	if (temp == 0) CPU_FLAGS &= ~CPU_RDTSC;
@@ -517,39 +643,27 @@ void getCpuInfo (void)
 
 /* Let the user override the CPUID brand string.  It should never be necessary. */
 /* However, one Athlon owner's brand string became corrupted with illegal characters. */
-	
+
 	IniGetString (LOCALINI_FILE, "CpuBrand", CPU_BRAND, sizeof(CPU_BRAND), CPU_BRAND);
 
-/* Allow overriding the hwloc's generated values for number of physical processors, hyperthreads, and NUMA nodes. */
+/* Apply sane corrections if HW_NUM_COREs was reduced significantly) */
 
-	NUM_CPUS = IniGetInt (LOCALINI_FILE, "NumCPUs", NUM_CPUS);
-	if (NUM_CPUS == 0) NUM_CPUS = 1;
-	CPU_HYPERTHREADS = IniGetInt (LOCALINI_FILE, "CpuNumHyperthreads", CPU_HYPERTHREADS);
-	if (CPU_HYPERTHREADS == 0) CPU_HYPERTHREADS = 1;
-	NUM_NUMA_NODES = IniGetInt (LOCALINI_FILE, "NumNUMANodes", NUM_NUMA_NODES);
-	if (NUM_NUMA_NODES == 0) NUM_NUMA_NODES = 1;
-
-/* Apply sane corrections if NUM_CPUs was reduced significantly) */
-
-	if (CPU_NUM_L1_CACHES > NUM_CPUS) CPU_NUM_L1_CACHES = NUM_CPUS;
-	if (CPU_NUM_L2_CACHES > NUM_CPUS) CPU_NUM_L2_CACHES = NUM_CPUS;
-	if (CPU_NUM_L3_CACHES > NUM_CPUS) CPU_NUM_L3_CACHES = NUM_CPUS;
-	if (CPU_NUM_L4_CACHES > NUM_CPUS) CPU_NUM_L4_CACHES = NUM_CPUS;
-	if (NUM_NUMA_NODES > NUM_CPUS) NUM_NUMA_NODES = NUM_CPUS;
+	if (CPU_NUM_L1_CACHES > HW_NUM_CORES) CPU_NUM_L1_CACHES = HW_NUM_CORES;
+	if (CPU_NUM_L2_CACHES > HW_NUM_CORES) CPU_NUM_L2_CACHES = HW_NUM_CORES;
+	if (CPU_NUM_L3_CACHES > HW_NUM_CORES) CPU_NUM_L3_CACHES = HW_NUM_CORES;
+	if (CPU_NUM_L4_CACHES > HW_NUM_CORES) CPU_NUM_L4_CACHES = HW_NUM_CORES;
+	if (HW_NUM_NUMA_NODES > HW_NUM_CORES) HW_NUM_NUMA_NODES = HW_NUM_CORES;
 
 /* Let user override the CPU architecture */
 
 	CPU_ARCHITECTURE = IniGetInt (LOCALINI_FILE, "CpuArchitecture", CPU_ARCHITECTURE);
 
-/* We also compute the number of "threading nodes".  That is, number of nodes where we don't want to split a worker's threads */
-/* across 2 threading nodes.  For example, there may well be a performance penalty if a worker's threads are on two different */
-/* physical CPUS or access data from two different L3 caches. */
-// bug -- may need much more sophisticated hwloc code here, such as handling asymetric cores or caches per threading node
+/* Allow overriding the calculated number of threading nodes */
 
-	NUM_THREADING_NODES = hwloc_get_nbobjs_by_type (hwloc_topology, HWLOC_OBJ_PACKAGE);
-	if (CPU_NUM_L3_CACHES > NUM_THREADING_NODES) NUM_THREADING_NODES = CPU_NUM_L3_CACHES;
-	NUM_THREADING_NODES = IniGetInt (LOCALINI_FILE, "NumThreadingNodes", NUM_THREADING_NODES);
-	if (NUM_THREADING_NODES < 1 || NUM_CPUS % NUM_THREADING_NODES != 0) NUM_THREADING_NODES = 1;
+	HW_NUM_THREADING_NODES = IniGetInt (LOCALINI_FILE, "NumThreadingNodes", HW_NUM_THREADING_NODES);
+	if (HW_NUM_THREADING_NODES < 1) HW_NUM_THREADING_NODES = 1;
+	HW_NUM_COMPUTE_THREADING_NODES = IniGetInt (LOCALINI_FILE, "NumComputeThreadingNodes", HW_NUM_COMPUTE_THREADING_NODES);
+	if (HW_NUM_COMPUTE_THREADING_NODES < 1) HW_NUM_COMPUTE_THREADING_NODES = 1;
 
 /* Now get the CPU speed */
 
@@ -570,11 +684,13 @@ void getCpuDescription (
 /* Now format a pretty CPU description */
 
 	sprintf (buf, "%s\nCPU speed: %.2f MHz", CPU_BRAND, UNOFFICIAL_CPU_SPEED);
-	if (NUM_CPUS > 1 && CPU_HYPERTHREADS > 1)
-		sprintf (buf + strlen (buf), ", %lu hyperthreaded cores", NUM_CPUS);
-	else if (NUM_CPUS > 1)
-		sprintf (buf + strlen (buf), ", %lu cores", NUM_CPUS);
-	else if (CPU_HYPERTHREADS > 1)
+	if (HW_NUM_CORES != HW_NUM_COMPUTE_CORES)
+		sprintf (buf + strlen (buf), ", %" PRIu32 "/%" PRIu32 " performance/efficiency cores", HW_NUM_COMPUTE_CORES, HW_NUM_CORES - HW_NUM_COMPUTE_CORES);
+	else if (HW_NUM_CORES > 1 && HW_NUM_CORES != HW_NUM_THREADS)
+		sprintf (buf + strlen (buf), ", %" PRIu32 " hyperthreaded cores", HW_NUM_CORES);
+	else if (HW_NUM_CORES > 1)
+		sprintf (buf + strlen (buf), ", %" PRIu32 " cores", HW_NUM_CORES);
+	else if (HW_NUM_CORES != HW_NUM_THREADS)
 		sprintf (buf + strlen (buf), ", with hyperthreading");
 	strcat (buf, "\n");
 	if (CPU_FLAGS) {
@@ -681,15 +797,15 @@ int isPrime (
 
 
 /* Routines that use a simple sieve to find "may be prime" numbers.  That is, numbers without any small factors. */
-/* This is used by ECM and P-1.  Also, used by 64-bit trial factoring setup code. */
+/* This is used by ECM, P-1, and P+1.  Also, used by 64-bit trial factoring setup code. */
 
-#define MAX_PRIMES	6542		/* Num primes < 2^16 */
 typedef struct {
-	unsigned int *primes;
+	uint32_t *primes;				// Sieving primes and the bit-to-clear
 	uint64_t first_number;
 	unsigned int bit_number;
 	unsigned int num_primes;
 	unsigned int num_elimination_primes;
+	unsigned int max_elimination;
 	uint64_t start;
 	char	array[4096];
 } sieve_info;
@@ -699,20 +815,20 @@ typedef struct {
 void fill_sieve (
 	sieve_info *si)
 {
-	unsigned int i, fmax;
+	unsigned int i;
+	uint32_t fmax;
 
-/* Determine the first bit to clear */
+/* Determine the first sieve bit to clear for each small prime */
 
-	fmax = (unsigned int)
-		sqrt ((double) (si->first_number + sizeof (si->array) * 8 * 2));
+	fmax = (uint32_t) sqrt ((double) (si->first_number + sizeof (si->array) * 8 * 2));
 	for (i = si->num_primes; i < si->num_elimination_primes * 2; i += 2) {
-		unsigned long f, r, bit;
+		uint32_t f, r, bit;
 		f = si->primes[i];
 		if (f > fmax) break;
 		if (si->first_number == 3) {
 			bit = (f * f - 3) >> 1;
 		} else {
-			r = (unsigned long) (si->first_number % f);
+			r = (uint32_t) (si->first_number % f);
 			if (r == 0) bit = 0;
 			else if (r & 1) bit = (f - r) / 2;
 			else bit = (f + f - r) / 2;
@@ -726,12 +842,9 @@ void fill_sieve (
 
 	memset (si->array, 0xFF, sizeof (si->array));
 	for (i = 0; i < si->num_primes; i += 2) {
-		unsigned int f, bit;
+		uint32_t f, bit;
 		f = si->primes[i];
-		for (bit = si->primes[i+1];
-		     bit < sizeof (si->array) * 8;
-		     bit += f)
-			bitclr (si->array, bit);
+		for (bit = si->primes[i+1]; bit < sizeof (si->array) * 8; bit += f) bitclr (si->array, bit);
 		si->primes[i+1] = bit - sizeof (si->array) * 8;
 	}
 	si->bit_number = 0;
@@ -775,11 +888,17 @@ int start_sieve_with_limit (
 	si->start = start;
 	start |= 1;
 
+/* Delete old small primes array if it is not big enough */
+
+	if (si->primes != NULL && max_elimination_factor > si->max_elimination) {
+		free (si->primes);
+		si->primes = NULL;
+		si->first_number = 0;
+	}
+
 /* See if we can just reuse the existing sieve */
 
-	if (si->first_number &&
-	    start >= si->first_number &&
-	    start < si->first_number + sizeof (si->array) * 8 * 2) {
+	if (si->first_number && start >= si->first_number && start < si->first_number + sizeof (si->array) * 8 * 2) {
 		si->bit_number = (unsigned int) (start - si->first_number) / 2;
 		return (0);
 	}
@@ -787,14 +906,15 @@ int start_sieve_with_limit (
 /* Initialize sieving primes */
 
 	if (si->primes == NULL) {
-		unsigned int f;
+		uint32_t f;
 		unsigned int estimated_num_primes;
 		estimated_num_primes = (unsigned int) ((double) max_elimination_factor / (log ((double) max_elimination_factor) - 1.0) * 1.01);
-		si->primes = (unsigned int *) malloc (estimated_num_primes * 2 * sizeof (unsigned int));
+		si->primes = (uint32_t *) malloc (estimated_num_primes * 2 * sizeof (uint32_t));
 		if (si->primes == NULL) goto oom;
 		for (i = 0, f = 3; f <= max_elimination_factor && i < estimated_num_primes; f += 2)
 			if (isPrime (f)) si->primes[i*2] = f, i++;
 		si->num_elimination_primes = i;
+		si->max_elimination = max_elimination_factor;
 	}
 
 	si->first_number = start;
@@ -843,21 +963,27 @@ void end_sieve (
 	free (si);
 }
 
+/* Return the GCD of two numbers */
+
+uint64_t _intgcd (
+	uint64_t a,
+	uint64_t b)
+{
+	while (b != 0) {
+		uint64_t temp = a % b;
+		a = b;
+		b = temp;
+	}
+	return a;
+}
+
 /* Simple routine to determine if two numbers are relatively prime */
 
 int relatively_prime (
-	unsigned long i,
-	unsigned long D)
+	uint64_t a,
+	uint64_t b)
 {
-	unsigned long f;
-	for (f = 3; f * f <= i; f += 2) {
-		if (i % f != 0) continue;
-		if (D % f == 0) return (FALSE);
-		do {
-			i = i / f;
-		} while (i % f == 0);
-	}
-	return (i == 1 || D % i != 0);
+	return (_intgcd (a, b) == 1);
 }
 
 /* Calculate the modular inverse - no error checking is performed */
@@ -1123,23 +1249,18 @@ void nameAndReadIniFiles (
 /* Let the user rename these files and pick a different working directory */
 
 	IniGetString (INI_FILE, "WorkingDir", buf, sizeof(buf), NULL);
-	IniGetString (INI_FILE, "local.ini", LOCALINI_FILE, 80, LOCALINI_FILE);
-	IniGetString (INI_FILE, "worktodo.ini", WORKTODO_FILE, 80, WORKTODO_FILE);
-	IniGetString (INI_FILE, "results.txt", RESFILE, 80, RESFILE);
-	IniGetString (INI_FILE, "results.bench.txt", RESFILEBENCH, 80, RESFILEBENCH);
-	IniGetString (INI_FILE, "results.json.txt", RESFILEJSON, 80, RESFILEJSON);
-	IniGetString (INI_FILE, "prime.spl", SPOOL_FILE, 80, SPOOL_FILE);
-	IniGetString (INI_FILE, "prime.log", LOGFILE, 80, LOGFILE);
-	IniGetString (INI_FILE, "prime.ini", INI_FILE, 80, INI_FILE);
+	IniGetString (INI_FILE, "local.ini", LOCALINI_FILE, 260, LOCALINI_FILE);
+	IniGetString (INI_FILE, "worktodo.ini", WORKTODO_FILE, 260, WORKTODO_FILE);
+	IniGetString (INI_FILE, "results.txt", RESFILE, 260, RESFILE);
+	IniGetString (INI_FILE, "results.bench.txt", RESFILEBENCH, 260, RESFILEBENCH);
+	IniGetString (INI_FILE, "results.json.txt", RESFILEJSON, 260, RESFILEJSON);
+	IniGetString (INI_FILE, "prime.spl", SPOOL_FILE, 260, SPOOL_FILE);
+	IniGetString (INI_FILE, "prime.log", LOGFILE, 260, LOGFILE);
+	IniGetString (INI_FILE, "prime.ini", INI_FILE, 260, INI_FILE);
 	if (buf[0]) {
 		(void) _chdir (buf);
 		IniFileReread (INI_FILE);
 	}
-
-/* Merge an old primenet.ini file into a special section of prime.ini */
-
-	if (fileExists ("primenet.ini"))
-		IniAddFileMerge (INI_FILE, "primenet.ini", "PrimeNet");
 
 /* Perform other one-time initializations */
 
@@ -1255,9 +1376,9 @@ void initCommCode (void) {
 /* every time the INI file is read in case there have been changes to */
 /* the USE_PRIMENET or MANUAL_COMM variables. */
 
-//bug - do this on all rereads of prime.ini?  If so, only after comm windows
+//bug - do this on all rereads of prime.txt?  If so, only after comm windows
 //bug - is created (and I'm not sure the comm window should be recreated
-//bug - on every prime.ini reread (and what of the windows bugs where
+//bug - on every prime.txt reread (and what of the windows bugs where
 //bug - calling create_window from other than the main thread can hang
 	set_comm_timers ();
 
@@ -1272,20 +1393,16 @@ void initCommCode (void) {
 		spoolMessage (PRIMENET_UPDATE_COMPUTER_INFO, NULL);
 }
 
-/* Compute a good default value for number of workers based on NUMA / cache information from hwloc */
+/* Guess a good default value for number of workers based on NUMA / cache information from hwloc */
 
 int good_default_for_num_workers (void)
 {
 	int	cores_per_node;
 
-// bug -- very likely need much more sophisticated hwloc code here.  such as factoring in sharing L3 caches,
-// NUMA, asymetric package core counts
-// warning: we'll need to mimic the more sophisticated code in read_cores_per_test
+/* Default to roughly 4 cores per worker */
 
-/* Default to roughly 4 workers per worker */
-
-	cores_per_node = NUM_CPUS / NUM_THREADING_NODES;
-	return (NUM_THREADING_NODES * (cores_per_node <= 6 ? 1 : ((cores_per_node + 3) / 4)));
+	cores_per_node = HW_NUM_COMPUTE_CORES / HW_NUM_COMPUTE_THREADING_NODES;
+	return (HW_NUM_COMPUTE_THREADING_NODES * (cores_per_node <= 6 ? 1 : divide_rounding_up (cores_per_node, 4)));
 }
 
 /* Read CoresPerTest values.  This may require upgrading ThreadsPerTest to CoresPerTest. */
@@ -1314,9 +1431,9 @@ void read_cores_per_test (void)
 		// going on.  In the new scheme of things using hyperthreading is handled via
 		// a different INI setting.  Reduce the array values until we are not
 		// oversubscribing cores.
-		for (i = 0; total_threads > (int) NUM_CPUS && i < (int) NUM_WORKER_THREADS; i++) {
+		for (i = 0; total_threads > (int) HW_NUM_CORES && i < (int) NUM_WORKER_THREADS; i++) {
 			trim = temp[i] / 2;
-			if (total_threads - trim < (int) NUM_CPUS) trim = total_threads - NUM_CPUS;
+			if (total_threads - trim < (int) HW_NUM_CORES) trim = total_threads - HW_NUM_CORES;
 			temp[i] -= trim;
 			total_threads -= trim;
 		}
@@ -1340,32 +1457,35 @@ void read_cores_per_test (void)
 	PTOGetAll (LOCALINI_FILE, "CoresPerTest", CORES_PER_TEST, 0);
 
 /* If we did not find any settings, use hwloc's information to give us a good default setting. */
-/* For example, consider a dual CPU Xeon system with 9 cores per CPU.  A good setting for four */
-/* workers would be 4 cores, 5 cores, 4 cores, 5 cores.  That way, we do not have an LL test */
-/* spanning across CPUs. */
+/* For example, consider a dual CPU Xeon system with 9 cores per CPU.  A good setting for four workers */
+/* would be 4 cores, 5 cores, 4 cores, 5 cores.  That way, we do not have a PRP/LL test spanning across CPUs. */
 
 	if (CORES_PER_TEST[0] == 0) {
-		int	cores_per_node, nodes, workers, workers_this_node, cores_this_node;
+		int	cores, workers, node;
 
-// bug -- very likely need much more sophisticated hwloc code here.  such as factoring in sharing L3 caches,
-// NUMA, asymetric package core counts
-// warning: we'll need to mimic the more sophisticated code in good_default_for_num_workers
-
-/* Decide how many workers will run on each node.  Then distribute the cores among those workers. */
+/* Decide how many workers will run on each compute node.  Then distribute the cores among those workers. */
 
 		i = 0;
-		cores_per_node = NUM_CPUS / NUM_THREADING_NODES;
-		nodes = NUM_THREADING_NODES;
+		cores = HW_NUM_COMPUTE_CORES;
 		workers = NUM_WORKER_THREADS;
-		for ( ; nodes; nodes--) {
-			cores_this_node = cores_per_node;
-			workers_this_node = workers / nodes; workers -= workers_this_node;
+		for (node = 0; node < (int) HW_NUM_COMPUTE_THREADING_NODES; node++) {
+			// Make workers this node proportional to the fraction of total cores in this node.
+			// In the final node, we must assign all the workers we have not yet figured out.  This happens
+			// automatically as the final cores_this_node value must equal the unassigned compute cores remaining.
+			int cores_this_node = get_cores_in_threading_node (node);
+			int workers_this_node = divide_rounding (workers * cores_this_node, cores);
+			// Keep track of the number of cores and workers remaining
+			cores -= cores_this_node;
+			workers -= workers_this_node;
+			// Assign node cores to the node workers
 			for ( ; workers_this_node; workers_this_node--) {
 				temp[i] = cores_this_node / workers_this_node;
 				cores_this_node -= temp[i];
 				i++;
 			}
 		}
+		// Assert that all workers and compute cores were assigned
+		ASSERTG (workers == 0 && cores == 0);
 
 		// See if each worker has the same number of cores
 		for (i = 0, all_the_same = TRUE; i < (int) NUM_WORKER_THREADS; i++) {
@@ -1382,7 +1502,7 @@ void read_cores_per_test (void)
 
 	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
 		if (CORES_PER_TEST[i] < 1) CORES_PER_TEST[i] = 1;
-		if (CORES_PER_TEST[i] > NUM_CPUS) CORES_PER_TEST[i] = NUM_CPUS;
+		if (CORES_PER_TEST[i] > HW_NUM_CORES) CORES_PER_TEST[i] = HW_NUM_CORES;
 	}
 }
 
@@ -1568,9 +1688,7 @@ int readIniFiles (void)
 
 	INTERIM_FILES = IniGetInt (INI_FILE, "InterimFiles", 0);
 	INTERIM_RESIDUES = IniGetInt (INI_FILE, "InterimResidues", INTERIM_FILES);
-	HYPERTHREADING_BACKOFF =
-		IniGetInt (INI_FILE, "HyperthreadingBackoff",
-0);//bug		   CPU_HYPERTHREADS <= 1 ? 0 : 30);
+	HYPERTHREADING_BACKOFF = IniGetInt (INI_FILE, "HyperthreadingBackoff", 0);//bug	   CPU_HYPERTHREADS <= 1 ? 0 : 30);
 
 /* Option to slow down the program by sleeping after every iteration.  You */
 /* might use this on a laptop or a computer running in a hot room to keep */
@@ -1601,7 +1719,7 @@ int readIniFiles (void)
 /* or append work while the program is running.  This is especially handy */
 /* for workstations that are not physically accessible but there file */
 /* systems are by network.  If this feature was not available, the only */
-/* safe method for updating would be to stop the program, edit the .ini */
+/* safe method for updating would be to stop the program, edit the .txt */
 /* file, and restart the program. */
 
 int addFileExists (void)
@@ -1643,7 +1761,7 @@ void incorporateIniAddFiles (void)
 	char	filename[80];
 	char	*dot;
 
-/* Merge additions to prime.ini */
+/* Merge additions to prime.txt */
 
 	strcpy (filename, INI_FILE);
 	dot = strrchr (filename, '.');
@@ -1656,7 +1774,7 @@ void incorporateIniAddFiles (void)
 			IniAddFileMerge (INI_FILE, filename, NULL);
 	}
 
-/* Merge additions to local.ini */
+/* Merge additions to local.txt */
 
 	strcpy (filename, LOCALINI_FILE);
 	dot = strrchr (filename, '.');
@@ -2283,7 +2401,7 @@ void addKnownFermatFactors (
 /* If this is ECM or P-1 on a Fermat number, then automatically add known Fermat factors */
 
 	if (w->k == 1.0 && w->b == 2 && w->c == 1 &&
-	    (w->work_type == WORK_ECM || w->work_type == WORK_PMINUS1) &&
+	    (w->work_type == WORK_ECM || w->work_type == WORK_PMINUS1 || w->work_type == WORK_PPLUS1) &&
 	    IniGetInt (INI_FILE, "AddKnownFermatFactors", 1)) {
 		if (w->n == 4096) addKnownFermatFactor (w, "114689");
 		if (w->n == 4096) addKnownFermatFactor (w, "26017793");
@@ -2677,40 +2795,10 @@ illegal_line:	sprintf (buf, "Illegal line in worktodo.txt file: %s\n", line);
 		}
 	    }
 
-/* Handle ECM= lines.  Old style is: */
-/*   ECM=exponent,B1,B2,curves_to_do,unused[,specific_sigma,plus1,B2_start] */
-/* New style is: */
-/*   ECM2=k,b,n,c,B1,B2,curves_to_do[,specific_sigma,B2_start][,"factors"] */
+/* Handle ECM= and ECM2= lines.  Note we've deprecated the old (2002ish) ECM= syntax and now treat ECM= and ECM2= the same. */
+/*	ECM2=k,b,n,c,B1,B2,curves_to_do[,specific_sigma,B2_start][,"factors"] */
 
-	    else if (_stricmp (keyword, "ECM") == 0) {
-		char	*q;
-		w->work_type = WORK_ECM;
-		sscanf (value, "%ld", &w->n);
-		if ((q = strchr (value, ',')) == NULL) goto illegal_line;
-		w->B1 = atof (q+1);
-		if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
-		w->B2 = atof (q+1);
-		if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
-		w->curves_to_do = atoi (q+1);
-		if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
-		q = strchr (q+1, ',');
-		w->curve = 0;
-		if (q != NULL) {
-			w->curve = atof (q+1);
-			q = strchr (q+1, ',');
-		}
-		if (q != NULL) {
-			w->c = atoi (q+1);
-			if (w->c == 0) w->c = -1; /* old plus1 arg */
-			q = strchr (q+1, ',');
-		}
-		w->B2_start = w->B1;
-		if (q != NULL) {
-			double j;
-			j = atof (q+1);
-			if (j > w->B1) w->B2_start = j;
-		}
-	    } else if (_stricmp (keyword, "ECM2") == 0) {
+	    else if (_stricmp (keyword, "ECM") == 0 || _stricmp (keyword, "ECM2") == 0) {
 		int	i;
 		char	*q;
 		w->work_type = WORK_ECM;
@@ -2744,63 +2832,76 @@ illegal_line:	sprintf (buf, "Illegal line in worktodo.txt file: %s\n", line);
 		}
 	    }
 
-/* Handle Pminus1 lines:  Old style:				*/
-/*	Pminus1=exponent,B1,B2,plus1[,B2_start]			*/
-/* New style is:						*/
+/* Handle Pminus1 lines:						*/
 /*	Pminus1=k,b,n,c,B1,B2[,how_far_factored][,B2_start][,"factors"] */
 
 	    else if (_stricmp (keyword, "Pminus1") == 0) {
 		char	*q;
 		w->work_type = WORK_PMINUS1;
-		if (countCommas (value) <= 4) {
-			sscanf (value, "%ld", &w->n);
-			if ((q = strchr (value, ',')) == NULL)
-				goto illegal_line;
-			w->B1 = atof (q+1);
-			if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
-			w->B2 = atof (q+1);
-			if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
-			sscanf (q+1, "%ld", &w->c);
-			q = strchr (q+1, ',');
-			if (w->c == 0) w->c = -1; /* old plus1 arg */
-			if (q != NULL) {
-				double j;
-				j = atof (q+1);
-				if (j > w->B1) w->B2_start = j;
-			}
-		} else {
-			w->k = atof (value);
-			if ((q = strchr (value, ',')) == NULL)
-				goto illegal_line;
-			sscanf (q+1, "%lu,%lu,%ld", &w->b, &w->n, &w->c);
-			for (i = 1; i <= 3; i++)
-				if ((q = strchr (q+1, ',')) == NULL)
-					goto illegal_line;
-			w->B1 = atof (q+1);
-			if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
-			w->B2 = atof (q+1);
-			q = strchr (q+1, ',');
-			w->sieve_depth = 0.0;
-			if (q != NULL && q[1] != '"') {
-				double	j;
-				j = atof (q+1);
-				if (j < 100.0) {
-					w->sieve_depth = j;
-					q = strchr (q+1, ',');
-				}
-			}
-			w->B2_start = 0;
-			if (q != NULL && q[1] != '"') {
-				double	j;
-				j = atof (q+1);
-				if (j > w->B1) w->B2_start = j;
+		w->k = atof (value);
+		if ((q = strchr (value, ',')) == NULL) goto illegal_line;
+		sscanf (q+1, "%lu,%lu,%ld", &w->b, &w->n, &w->c);
+		for (i = 1; i <= 3; i++) if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
+		w->B1 = atof (q+1);
+		if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
+		w->B2 = atof (q+1);
+		q = strchr (q+1, ',');
+		w->sieve_depth = 0.0;
+		if (q != NULL && q[1] != '"') {
+			double	j;
+			j = atof (q+1);
+			if (j < 100.0) {
+				w->sieve_depth = j;
 				q = strchr (q+1, ',');
 			}
-			if (q != NULL && q[1] == '"') {
-				w->known_factors = (char *) malloc (strlen (q));
-				if (w->known_factors == NULL) goto nomem;
-				strcpy (w->known_factors, q+2);
-			}
+		}
+		w->B2_start = 0;
+		if (q != NULL && q[1] != '"') {
+			double	j;
+			j = atof (q+1);
+			if (j > w->B1) w->B2_start = j;
+			q = strchr (q+1, ',');
+		}
+		if (q != NULL && q[1] == '"') {
+			w->known_factors = (char *) malloc (strlen (q));
+			if (w->known_factors == NULL) goto nomem;
+			strcpy (w->known_factors, q+2);
+		}
+	    }
+
+/* Handle Pplus1 lines:							*/
+/*	Pplus1=k,b,n,c,B1,B2,nth_run[,how_far_factored][,"factors"]	*/
+/* where nth_run is 1 for start 2/7, 2 for start 6/5, 3+ for random start */
+
+	    else if (_stricmp (keyword, "Pplus1") == 0) {
+		char	*q;
+		w->work_type = WORK_PPLUS1;
+		w->k = atof (value);
+		if ((q = strchr (value, ',')) == NULL) goto illegal_line;
+		sscanf (q+1, "%lu,%lu,%ld", &w->b, &w->n, &w->c);
+		for (i = 1; i <= 3; i++) if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
+		w->B1 = atof (q+1);
+		if ((q = strchr (q+1, ',')) == NULL) goto illegal_line;
+		w->B2 = atof (q+1);
+		q = strchr (q+1, ',');
+		w->nth_run = 1;
+		if (q != NULL && q[1] != '"') {
+			int nth_run = atoi (q+1);
+			if (nth_run >= 1 && nth_run <= 3) w->nth_run = nth_run;
+			q = strchr (q+1, ',');
+		}
+		w->sieve_depth = 0.0;
+		if (q != NULL && q[1] != '"') {
+			double	j;
+			j = atof (q+1);
+			if (j >= 100.0) j = 0.0;
+			w->sieve_depth = j;
+			q = strchr (q+1, ',');
+		}
+		if (q != NULL && q[1] == '"') {
+			w->known_factors = (char *) malloc (strlen (q));
+			if (w->known_factors == NULL) goto nomem;
+			strcpy (w->known_factors, q+2);
 		}
 	    }
 
@@ -2889,7 +2990,7 @@ illegal_line:	sprintf (buf, "Illegal line in worktodo.txt file: %s\n", line);
 /* should never be asked to factor a number more than we are capable of. */
 
 	    if (w->k == 1.0 && w->b == 2 && !isPrime (w->n) && w->c == -1 && w->known_factors == NULL &&
-		w->work_type != WORK_ECM && w->work_type != WORK_PMINUS1 &&
+		w->work_type != WORK_ECM && w->work_type != WORK_PMINUS1 && w->work_type != WORK_PPLUS1 &&
 		!(w->work_type == WORK_PRP && IniGetInt (INI_FILE, "PhiExtensions", 0))) {
 		char	buf[80];
 		sprintf (buf, "Error: Worktodo.txt file contained composite exponent: %ld\n", w->n);
@@ -2917,6 +3018,13 @@ illegal_line:	sprintf (buf, "Illegal line in worktodo.txt file: %s\n", line);
 	    if (w->work_type == WORK_FACTOR && w->n > MAX_FACTOR && !IniGetInt (INI_FILE, "LargeTFexponents", 0)) {
 		char	buf[100];
 		sprintf (buf, "Error: Worktodo.txt file contained bad factoring assignment: %ld\n", w->n);
+		OutputBoth (MAIN_THREAD_NUM, buf);
+		goto illegal_line;
+	    }
+	    if ((w->work_type == WORK_PMINUS1 || w->work_type == WORK_PPLUS1 || w->work_type == WORK_ECM) &&
+		(w->B1 < 50000) && !IniGetInt (INI_FILE, "AllowLowB1", 0)) {
+		char	buf[100];
+		sprintf (buf, "Error: Worktodo.txt file has P-1/P+1/ECM with B1 < 50000 (exponent: %ld)\n", w->n);
 		OutputBoth (MAIN_THREAD_NUM, buf);
 		goto illegal_line;
 	    }
@@ -3204,6 +3312,14 @@ int writeWorkToDoFile (
 				sprintf (buf + strlen (buf), ",%.0f", w->sieve_depth);
 			if (w->B2_start > w->B1)
 				sprintf (buf + strlen (buf), ",%.0f", w->B2_start);
+			if (w->known_factors != NULL)
+				sprintf (buf + strlen (buf), ",\"%s\"", w->known_factors);
+			break;
+
+		case WORK_PPLUS1:
+			sprintf (buf, "Pplus1=%s%.0f,%lu,%lu,%ld,%.0f,%.0f,%d", idbuf, w->k, w->b, w->n, w->c, w->B1, w->B2, w->nth_run);
+			if (w->sieve_depth > 0.0)
+				sprintf (buf + strlen (buf), ",%.0f", w->sieve_depth);
 			if (w->known_factors != NULL)
 				sprintf (buf + strlen (buf), ",\"%s\"", w->known_factors);
 			break;
@@ -3522,7 +3638,7 @@ double work_estimate (
 		}
 
 		timing = gwmap_to_timing (w->k, w->b, w->n, w->c);
-		bits = (int) (w->n * _log2 (w->b));
+		bits = (int) (w->n * log2 (w->b));
 		if (bits <= 80000) overhead = 1.10;
 		else if (bits >= 1500000) overhead = 1.20;
 		else overhead = 1.10 + ((double) bits - 80000.0) / 1420000.0 * (1.20 - 1.10);
@@ -3565,7 +3681,7 @@ double work_estimate (
 			B2 = guess_B2;
 		} else {
 			B1 = w->B1;
-			B2 = w->B2;
+			B2 = w->B2 ? w->B2 : 40 * w->B1;
 		}
 
 		if (w->stage[0]) stage = atoi (&w->stage[1]);
@@ -3573,17 +3689,33 @@ double work_estimate (
 
 		timing = gwmap_to_timing (w->k, w->b, w->n, w->c);
 		stage1_time = timing * (1.4545 * B1);
-		if (B2)
-			stage2_time = timing * (0.06154 * (B2 - B1)) * 1.285;
-		else
-			stage2_time = timing * (0.06154 * 99.0 * B1) * 1.285;
+		stage2_time = (B2 >= B1) ? timing * (0.06154 * (B2 - B1)) * 1.285 : 0.0;
 
-		if (stage == 0)
-			est = stage1_time + stage2_time;
-		if (stage == 1)
-			est = stage1_time * (1.0 - pct_complete) + stage2_time;
-		if (stage == 2)
-			est = stage2_time * (1.0 - pct_complete);
+		if (stage == 0) est = stage1_time + stage2_time;
+		if (stage == 1) est = stage1_time * (1.0 - pct_complete) + stage2_time;
+		if (stage == 2) est = stage2_time * (1.0 - pct_complete);
+	}
+
+/* For P+1, stage 1 is 1.52 times P-1 stage 1, stage 2 is about the same */ 
+
+	if (w->work_type == WORK_PPLUS1) {
+		int	stage;
+		double	B1, B2;
+		double	stage1_time, stage2_time;
+
+		B1 = w->B1;
+		B2 = w->B2 ? w->B2 : 40 * w->B1;
+
+		if (w->stage[0]) stage = atoi (&w->stage[1]);
+		else stage = 0;
+
+		timing = gwmap_to_timing (w->k, w->b, w->n, w->c);
+		stage1_time = timing * (1.4545 * 1.52 * B1);
+		stage2_time = (B2 >= B1) ? timing * (0.06154 * (B2 - B1)) * 1.285 : 0.0;
+
+		if (stage == 0) est = stage1_time + stage2_time;
+		if (stage == 1) est = stage1_time * (1.0 - pct_complete) + stage2_time;
+		if (stage == 2) est = stage2_time * (1.0 - pct_complete);
 	}
 
 /* If factoring, guess how long that will take.  Timings are based on */
@@ -3700,7 +3832,7 @@ double work_estimate (
 
 	total_cores = 0;
 	for (i = 0; i < NUM_WORKER_THREADS; i++) total_cores += CORES_PER_TEST[i];
-	if (total_cores > NUM_CPUS) est *= (double) total_cores / (double) NUM_CPUS;
+	if (total_cores > HW_NUM_CORES) est *= (double) total_cores / (double) HW_NUM_CORES;
 
 /* Return the total estimated time in seconds */
 
@@ -3768,8 +3900,7 @@ unsigned int factorLimit (
 /*            Routines to compute the rolling average         */
 /**************************************************************/
 
-//bug - someway to avoid local.ini updates (to disk) if well_behaved_work
-// is set!!
+//bug - someway to avoid local.txt updates (to disk) if well_behaved_work is set!!
 
 /* Convert a string to a hash value */
 
@@ -3939,31 +4070,26 @@ void adjust_rolling_average (void)
 	/* If the user is running more worker threads than there are */
 	/* CPUs, then adjust the rolling average upward accordingly. */
 
-	if (NUM_WORKER_THREADS > NUM_CPUS)
-		rolling_average_this_period *=
-			(double) NUM_WORKER_THREADS / (double) NUM_CPUS;
+	if (NUM_WORKER_THREADS > HW_NUM_CORES)
+		rolling_average_this_period *= (double) NUM_WORKER_THREADS / (double) HW_NUM_CORES;
 
 	/* More safeguard against bogus or abruptly changing data */
 
 	if (rolling_average_this_period > 50000.0) goto no_update;
-	if (rolling_average_this_period < 0.5 * ROLLING_AVERAGE)
-		rolling_average_this_period = 0.5 * ROLLING_AVERAGE;
-	if (rolling_average_this_period > 2.0 * ROLLING_AVERAGE)
-		rolling_average_this_period = 2.0 * ROLLING_AVERAGE;
+	if (rolling_average_this_period < 0.5 * ROLLING_AVERAGE) rolling_average_this_period = 0.5 * ROLLING_AVERAGE;
+	if (rolling_average_this_period > 2.0 * ROLLING_AVERAGE) rolling_average_this_period = 2.0 * ROLLING_AVERAGE;
 
 /* Calculate the new rolling average - we use a 30-day rolling average */
 
 	pct = (double) time_in_this_period / (30.0 * 86400.0);
-	ROLLING_AVERAGE = (unsigned long)
-		((1.0 - pct) * ROLLING_AVERAGE +
-		 pct * rolling_average_this_period + 0.5);
+	ROLLING_AVERAGE = (unsigned long) ((1.0 - pct) * ROLLING_AVERAGE + pct * rolling_average_this_period + 0.5);
 
 	/* Safeguards against excessive rolling average values */
 
 	if (ROLLING_AVERAGE < 20) ROLLING_AVERAGE = 20;
 	if (ROLLING_AVERAGE > 4000) ROLLING_AVERAGE = 4000;
 
-/* Update rolling average data in the local.ini file */
+/* Update rolling average data in the local.txt file */
 
 no_update:
 	IniWriteInt (LOCALINI_FILE, "RollingHash", hash);
@@ -4016,6 +4142,7 @@ void tempFileName (
 	if (w->work_type == WORK_FACTOR) buf[0] = 'f';
 	if (w->work_type == WORK_ECM) buf[0] = 'e';
 	if (w->work_type == WORK_PMINUS1 || w->work_type == WORK_PFACTOR) buf[0] = 'm';
+	if (w->work_type == WORK_PPLUS1) buf[0] = 'n';
 	if (w->work_type == WORK_CERT) buf[0] = 'c';
 
 /* Prior to version 25.9 build 5, the pfactor work type used p as the */
@@ -4110,35 +4237,31 @@ void DirPlusFilename (
 int read_array (
 	int	fd,
 	char	*buf,
-	unsigned long len,
+	size_t	len,
 	unsigned long *sum)
 {
-	unsigned long i;
+	size_t	i;
 	unsigned char *ubuf;
 
-	if (_read (fd, buf, len) != len) return (FALSE);
+	if (__read (fd, buf, len) != len) return (FALSE);
 	ubuf = (unsigned char *) buf;
-	if (sum != NULL)
-		for (i = 0; i < len; i++)
-			*sum = (uint32_t) (*sum + ubuf[i]);
+	if (sum != NULL) for (i = 0; i < len; i++) *sum = (uint32_t) (*sum + ubuf[i]);
 	return (TRUE);
 }
 
 int write_array (
 	int	fd,
 	const char *buf,
-	unsigned long len,
+	size_t	len,
 	unsigned long *sum)
 {
-	unsigned long i;
+	size_t	i;
 	unsigned char *ubuf;
 
 	if (len == 0) return (TRUE);
-	if (_write (fd, buf, len) != len) return (FALSE);
+	if (__write (fd, buf, len) != len) return (FALSE);
 	ubuf = (unsigned char *) buf;
-	if (sum != NULL)
-		for (i = 0; i < len; i++)
-			*sum = (uint32_t) (*sum + ubuf[i]);
+	if (sum != NULL) for (i = 0; i < len; i++) *sum = (uint32_t) (*sum + ubuf[i]);
 	return (TRUE);
 }
 
@@ -4186,6 +4309,7 @@ int write_gwnum (
 	unsigned long *sum)
 {
 	giant	tmp;
+	gwnum	tmp_gwnum = NULL;
 	int	retcode;
 	unsigned long i, len, bytes;
 
@@ -4193,6 +4317,15 @@ int write_gwnum (
 	if (tmp == NULL) {
 		OutputBoth (MAIN_THREAD_NUM, "In write_gwnum, unexpected popg failure\n");
 		return (FALSE);
+	}
+	if (!gwnum_is_not_ffted (gwdata, g)) {
+		tmp_gwnum = gwalloc (gwdata);
+		if (tmp_gwnum == NULL) {
+			OutputBoth (MAIN_THREAD_NUM, "In write_gwnum, unexpected gwalloc failure\n");
+			goto err;
+		}
+		gwunfft (gwdata, g, tmp_gwnum);
+		g = tmp_gwnum;
 	}
 	retcode = gwtogiant (gwdata, g, tmp);
 	if (retcode) {
@@ -4220,12 +4353,54 @@ int write_gwnum (
 	*sum = (uint32_t) (*sum + len);
 	for (i = 0; i < len; i++) *sum = (uint32_t) (*sum + tmp->n[i]);
 	pushg (&gwdata->gdata, 1);
+	gwfree (gwdata, tmp_gwnum);
 	return (TRUE);
 err:	pushg (&gwdata->gdata, 1);
+	gwfree (gwdata, tmp_gwnum);
 	return (FALSE);
 }
 
 /* Routines to read and write values from and to a save file */
+
+int read_uint32 (
+	int	fd,
+	uint32_t *val,
+	unsigned long *sum)
+{
+	if (_read (fd, val, sizeof (uint32_t)) != sizeof (uint32_t)) return (FALSE);
+	if (sum != NULL) *sum = (uint32_t) (*sum + *val);
+	return (TRUE);
+}
+
+int write_uint32 (
+	int	fd,
+	uint32_t val,
+	unsigned long *sum)
+{
+	if (_write (fd, &val, sizeof (uint32_t)) != sizeof (uint32_t)) return (FALSE);
+	if (sum != NULL) *sum = (uint32_t) (*sum + val);
+	return (TRUE);
+}
+
+int read_uint64 (
+	int	fd,
+	uint64_t *val,
+	unsigned long *sum)
+{
+	if (_read (fd, val, sizeof (uint64_t)) != sizeof (uint64_t)) return (FALSE);
+	if (sum != NULL) *sum = (uint32_t) (*sum + (*val >> 32) + *val);
+	return (TRUE);
+}
+
+int write_uint64 (
+	int	fd,
+	uint64_t val,
+	unsigned long *sum)
+{
+	if (_write (fd, &val, sizeof (uint64_t)) != sizeof (uint64_t)) return (FALSE);
+	if (sum != NULL) *sum = (uint32_t) (*sum + (val >> 32) + val);
+	return (TRUE);
+}
 
 int read_short (			/* Used for old-style save files */
 	int	fd,
@@ -4291,26 +4466,24 @@ int write_slong (
 	return (TRUE);
 }
 
-int read_longlong (
+int read_int (
 	int	fd,
-	uint64_t *val,
+	int	*val,
 	unsigned long *sum)
 {
-	if (_read (fd, val, sizeof (uint64_t)) != sizeof (uint64_t))
-		return (FALSE);
-	if (sum != NULL) *sum = (uint32_t) (*sum + (*val >> 32) + *val);
+	long	tmp;
+
+	if (! read_slong (fd, &tmp, sum)) return (FALSE);
+	*val = (int) tmp;
 	return (TRUE);
 }
 
-int write_longlong (
+int write_int (
 	int	fd,
-	uint64_t val,
+	int	val,
 	unsigned long *sum)
 {
-	if (_write (fd, &val, sizeof (uint64_t)) != sizeof (uint64_t))
-		return (FALSE);
-	if (sum != NULL) *sum = (uint32_t) (*sum + (val >> 32) + val);
-	return (TRUE);
+	return (write_slong (fd, val, sum));
 }
 
 int read_double (
@@ -5081,6 +5254,9 @@ void kbnc_to_text (
 	case PRIMENET_WORK_TYPE_PMINUS1:
 		work_type_str = "P-1";
 		break;
+	case PRIMENET_WORK_TYPE_PPLUS1:
+		work_type_str = "P+1";
+		break;
 	case PRIMENET_WORK_TYPE_PRP:
 		work_type_str = prp_dblchk ? "PRPDC" : "PRP";
 		break;
@@ -5403,8 +5579,7 @@ int getProgramOptions (void)
 		}
 
 		if (pkt.num_workers != -1) {
-			if (pkt.num_workers > (int) (NUM_CPUS * CPU_HYPERTHREADS))
-				pkt.num_workers = NUM_CPUS * CPU_HYPERTHREADS;
+			if (pkt.num_workers > (int) (HW_NUM_THREADS)) pkt.num_workers = HW_NUM_THREADS;
 			NUM_WORKER_THREADS = pkt.num_workers;
 			IniWriteInt (LOCALINI_FILE, "WorkerThreads", NUM_WORKER_THREADS);
 			IniWriteInt (LOCALINI_FILE, "SrvrPO9", NUM_WORKER_THREADS);
@@ -5539,7 +5714,7 @@ int sendProgramOptions (
 
 /* Now save the shadow copy of the changed options in our LOCALINI file */
 /* so we can detect future changes to the program options (even if user */
-/* hand edits prime.ini!) */
+/* hand edits prime.txt!) */
 
 		if (work_pref_changed) {
 			if (tnum == -1)
@@ -5736,8 +5911,8 @@ retry:
 		pkt.L1_cache_size = CPU_L1_CACHE_SIZE;
 		pkt.L2_cache_size = CPU_L2_CACHE_SIZE;
 		pkt.L3_cache_size = CPU_L3_CACHE_SIZE;
-		pkt.num_cpus = NUM_CPUS;
-		pkt.num_hyperthread = CPU_HYPERTHREADS;
+		pkt.num_cpus = HW_NUM_CORES;
+		pkt.num_hyperthread = divide_rounding_up (HW_NUM_THREADS, HW_NUM_CORES);
 		pkt.mem_installed = physical_memory ();
 		pkt.cpu_speed = (int) CPU_SPEED;
 		pkt.hours_per_day = CPU_HOURS;
@@ -5772,7 +5947,7 @@ retry:
 
 //bug - who wins when user has also set some options locally during the
 //startup_in_progress code path?  What about options that came from a
-// copied prime.ini file - which take precedence?
+// copied prime.txt file - which take precedence?
 	if (server_options_counter == 1 &&
 	    server_options_counter > IniGetInt (LOCALINI_FILE, "SrvrP00", 0)) {
 		rc = getProgramOptions ();
@@ -5958,19 +6133,21 @@ retry:
 	    int	num_work_units;
 	    int	first_work_unit_interruptable = TRUE;
 
-/* Get work to do until we've accumulated enough to keep us busy for */
-/* a while.  If we have too much work to do, lets give some back. */
+/* Get work to do until we've accumulated enough to keep us busy for a while.  If we have too much work to do, lets give some back. */
 
 	    num_work_units = 0;
 	    est = 0.0;
+	    for (int pass = 0; pass <= 1; pass++)
 	    for (w = NULL; ; ) {
 		int	registered_assignment;
 
-/* Read the line of the work file */
+/* Read the line of the work file, handle all CERTs first */
 
 		w = getNextWorkToDoLine (tnum, w, SHORT_TERM_USE);
 		if (w == NULL) break;
 		if (w->work_type == WORK_NONE) continue;
+		if (pass == 0 && w->work_type != WORK_CERT) continue;
+		if (pass == 1 && w->work_type == WORK_CERT) continue;
 
 /* If we are quitting GIMPS or we have too much work queued up, */
 /* then return the assignment. */
@@ -6000,12 +6177,13 @@ retry:
 		}
 
 /* If this is the first work unit for this worker, clear flag if it might be costly to interrupt it with priority work */
-/* This would be P-1 (especially) or ECM where stage 2 setup can be expensive.  Also PRP tests that are near done should */
+/* This would be P-1 (especially) or ECM and P+1 where stage 2 setup can be expensive.  Also PRP tests that are near done should */
 /* be completed ASAP to free up the temp disk space they are using.  Actually, any work that is near done, the user might */
 /* be watching with anticipation for its completion. */
 
 		if (est == 0.0 && IniGetInt (LOCALINI_FILE, "CertDailyCPULimit", 10) < 50 &&
-		    (w->work_type == WORK_PMINUS1 || w->work_type == WORK_PFACTOR || w->work_type == WORK_ECM || w->pct_complete > 0.85))
+		    (w->work_type == WORK_PMINUS1 || w->work_type == WORK_PFACTOR || w->work_type == WORK_ECM ||
+		     w->work_type == WORK_PPLUS1 || w->pct_complete > 0.85))
 			first_work_unit_interruptable = FALSE;
 
 /* Adjust our time estimate */
@@ -6025,12 +6203,15 @@ retry:
 				pkt.work_type = PRIMENET_WORK_TYPE_FACTOR;
 			if (w->work_type == WORK_PMINUS1)
 				pkt.work_type = PRIMENET_WORK_TYPE_PMINUS1;
+			if (w->work_type == WORK_PPLUS1)
+				pkt.work_type = PRIMENET_WORK_TYPE_PPLUS1;
 			if (w->work_type == WORK_PFACTOR)
 				pkt.work_type = PRIMENET_WORK_TYPE_PFACTOR;
+			if (w->work_type == WORK_PPLUS1)
+				pkt.work_type = PRIMENET_WORK_TYPE_PPLUS1;
 			if (w->work_type == WORK_ECM)
 				pkt.work_type = PRIMENET_WORK_TYPE_ECM;
-			if (w->work_type == WORK_TEST ||
-			    w->work_type == WORK_ADVANCEDTEST)
+			if (w->work_type == WORK_TEST || w->work_type == WORK_ADVANCEDTEST)
 				pkt.work_type = PRIMENET_WORK_TYPE_FIRST_LL;
 			if (w->work_type == WORK_DBLCHK)
 				pkt.work_type = PRIMENET_WORK_TYPE_DBLCHK;
@@ -6078,8 +6259,7 @@ retry:
 			strcpy (pkt2.assignment_uid, w->assignment_uid);
 			strcpy (pkt2.stage, w->stage);
 			pkt2.pct_complete = w->pct_complete * 100.0;
-			// Cert work is priority work that should complete within a half a day
-			pkt2.end_date = (unsigned long) ((w->work_type == WORK_CERT) ? 43200.0 : est);
+			pkt2.end_date = (unsigned long) est;
 			pkt2.next_update = (uint32_t) (DAYS_BETWEEN_CHECKINS * 86400.0);
 			pkt2.fftlen = w->fftlen;
 			LOCKED_WORK_UNIT = w;
@@ -6124,7 +6304,7 @@ retry:
 			pkt1.get_cert_work = IniGetInt (LOCALINI_FILE, "CertDailyCPULimit", 10); // Helps server decide cert exponent size
 			if (pkt1.get_cert_work <= 0) pkt1.get_cert_work = 1;
 			pkt1.min_exp = IniGetInt (LOCALINI_FILE, "CertMinExponent", can_get_small_cert_work ? 0 : 50000000);
-			pkt1.max_exp = IniGetInt (LOCALINI_FILE, "CertMaxExponent", NUM_CPUS / NUM_WORKER_THREADS < 4 ? 200000000 : 0);
+			pkt1.max_exp = IniGetInt (LOCALINI_FILE, "CertMaxExponent", HW_NUM_CORES / NUM_WORKER_THREADS < 4 ? 200000000 : 0);
 			LOCKED_WORK_UNIT = NULL;
 			rc = sendMessage (PRIMENET_GET_ASSIGNMENT, &pkt1);
 			// Ignore errors, we expect this work to only be available sometimes
@@ -6164,7 +6344,7 @@ retry:
 			// My dream machine CPUs from that era can do 110,000 squarings of 97.3M in 1/100th of a day.
 			daily_MB_limit_remaining -= (float) w.n / (float) 8388608.0;	// Expected MB to download
 			daily_CPU_quota_used = (float) w.cert_squarings / (float) 110000.0;	// Adjust for num_squarings 
-			daily_CPU_quota_used *= (float) pow (2.1, _log2 ((float) w.n / (float) 97300000.0));	// Adjust (roughly) for FFT timing difference
+			daily_CPU_quota_used *= (float) pow (2.1, log2 ((float) w.n / (float) 97300000.0));	// Adjust (roughly) for FFT timing difference
 			daily_CPU_limit_remaining -= daily_CPU_quota_used;
 
 			// Save the updated quotas
@@ -6255,6 +6435,15 @@ retry:
 			w.k = pkt1.k;
 			w.b = pkt1.b;
 			w.c = pkt1.c;
+			w.B1 = pkt1.B1;
+			w.B2 = pkt1.B2;
+			break;
+		case PRIMENET_WORK_TYPE_PPLUS1:		/* Not presently supported by the server */
+			w.work_type = WORK_PPLUS1;
+			w.k = pkt1.k;
+			w.b = pkt1.b;
+			w.c = pkt1.c;
+			w.nth_run = pkt1.nth_run;
 			w.B1 = pkt1.B1;
 			w.B2 = pkt1.B2;
 			break;
@@ -6463,7 +6652,7 @@ error_exit:
 	}
 
 /* If an invalid work preference error is generated (can happen if user */
-/* hand edits the prime.ini file) then set the work preference to zero */
+/* hand edits the prime.txt file) then set the work preference to zero */
 /* (get work that makes the most sense) and resend the program options. */
 /* As usual, reget the work preference from the ini file just in case */
 /* the in-memory copy was inexplicably corrupted. */
@@ -6713,11 +6902,11 @@ void timed_events_scheduler (void *arg)
 				break;
 			case TE_WORK_QUEUE_CHECK:	/* Check for CERT work (and regular work) event */
 				// Make more powerful computers check for CERT work more frequently (their fair share)
-				cert_freq = (float) (NUM_CPUS >= 20 ? 3.0 :		/* 20+ cores = 3 hours */
-						     NUM_CPUS >= 12 ? 4.0 :		/* 12-19 cores = 4 hours */
-						     NUM_CPUS >= 7 ? 6.0 :		/* 7-11 cores = 6 hours */
-						     NUM_CPUS >= 3 ? 8.0 :		/* 3-6 cores = 8 hours */
-						     NUM_CPUS >= 2 ? 12.0 : 24.0);	/* 2 cores = 12 hours, 1 core = 24 hours */
+				cert_freq = (float) (HW_NUM_CORES >= 20 ? 3.0 :		/* 20+ cores = 3 hours */
+						     HW_NUM_CORES >= 12 ? 4.0 :		/* 12-19 cores = 4 hours */
+						     HW_NUM_CORES >= 7 ? 6.0 :		/* 7-11 cores = 6 hours */
+						     HW_NUM_CORES >= 3 ? 8.0 :		/* 3-6 cores = 8 hours */
+						     HW_NUM_CORES >= 2 ? 12.0 : 24.0);	/* 2 cores = 12 hours, 1 core = 24 hours */
 				// Serious CERT volunteers check every half hour
 				if (IniGetInt (LOCALINI_FILE, "CertDailyCPULimit", 10) >= 50) cert_freq = 0.5;
 				// Let user pick their own CERT frequency (in hours).  Minimum is 15 minutes.

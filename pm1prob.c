@@ -1,6 +1,8 @@
 /* Copied with permission from https://github.com/preda/gpuowl/pm1 on 2020-08-11 */
 /* Code courtesy of Mihai Preda */
+/* Modified to work on non-Mersennes and P+1 factoring (variable takeAwaybits) */
 
+#include "common.h"
 #include "pm1prob.h"
 
 // Table of values of Dickman's "rho" function for argument from 2 in steps of 1/20.
@@ -111,18 +113,17 @@ double G(double a, double b) { return F(a) + integral(a, b, a, &G_helper_functio
 double miu_helper_function (double t, double miu_a) { return rho(t) / (miu_a - t); }
 double miu(double a, double b) { return rho(a) + integral(a - b, a - 1, a, &miu_helper_function); }
 
-// Returns the probability of PM1(B1,B2) success for a Mersenne 2^exponent -1 already TF'ed to factoredUpTo.
-double pm1prob(unsigned exponent, int isMersenne, unsigned factoredUpTo, double B1, double B2) {
-  // Mersenne factors have special form 2*k*p+1 for M(p)
-  // so sustract log2(exponent) + 1 to obtain the magnitude of the "k" part.
-  double takeAwayBits = isMersenne ? log2(exponent) + 1 : 0;
+// Returns the probability of PM1(B1,B2) success for a finding a smooth factor using B1, B2 and already TFed to factoredUpTo.
+// Caller must account for any smoothness bits one gets for free.  For example, Mersenne have special form 2*k*p+1 for M(p)
+// so set takeAwayBits to log2(exponent) + 1 to obtain the magnitude of the "k" part.
+double pm1prob(double takeAwayBits, unsigned factoredUpTo, double B1, double B2) {
 
   // We split the bit-range starting from "factoredUpTo" up in slices each SLICE_WIDTH bits wide.
   const double SLICE_WIDTH = 0.25;
 
   // The middle point of the slice is (2^n + 2^(n+SLICE_WIDTH))/2,
   // so log2(middle) is n + log2(1 + 2^SLICE_WIDTH) - 1.
-  const double MIDDLE_SHIFT = _log2(1 + exp2(SLICE_WIDTH)) - 1;
+  const double MIDDLE_SHIFT = log2(1 + exp2(SLICE_WIDTH)) - 1;
   
   // The bit-size of a representative factor from the current slice.
   double bitsFactor = factoredUpTo + MIDDLE_SHIFT - takeAwayBits;

@@ -1,9 +1,18 @@
-/* Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved */
+/* Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved */
+
+#ifndef _COMMONC_H
+#define _COMMONC_H
+
+/* This is used by C and C++ code.  If used in a C++ program, don't let the C++ compiler mangle names. */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Constants */
 
-#define VERSION		"30.3"
-#define BUILD_NUM	"6"
+#define VERSION		"30.7"
+#define BUILD_NUM	"9"
 /* The list of assigned OS ports follows: */
 /* Win9x (prime95) #1 */
 /* Linux (mprime)  #2 */
@@ -128,13 +137,14 @@ extern char V4_USERID[15];
 extern char V4_USERPWD[9];
 extern char V4_USERNAME[80];
 
-extern char INI_FILE[80];		/* Name of the prime INI file */
-extern char LOCALINI_FILE[80];		/* Name of the local INI file */
-extern char WORKTODO_FILE[80];		/* Name of the work-to-do INI file */
-extern char RESFILE[80];		/* Name of the results file */
-extern char RESFILEBENCH[80];		/* Name of the results.bench file */
-extern char SPOOL_FILE[80];		/* Name of the spool file */
-extern char LOGFILE[80];		/* Name of the server log file */
+extern char INI_FILE[260];		/* Name of the prime INI file */
+extern char LOCALINI_FILE[260];		/* Name of the local INI file */
+extern char WORKTODO_FILE[260];		/* Name of the work-to-do INI file */
+extern char RESFILE[260];		/* Name of the results file */
+extern char RESFILEBENCH[260];		/* Name of the results.bench file */
+extern char SPOOL_FILE[260];		/* Name of the spool file */
+extern char LOGFILE[260];		/* Name of the server log file */
+extern int NO_GUI;			/* True if there is no graphical user interface */
 
 extern char USERID[21];			/* User's ID */
 extern char COMPID[21];			/* Computer name */
@@ -217,16 +227,13 @@ extern int THROTTLE_PCT;		/* Percent CPU time prog should run */
 
 extern int STARTUP_IN_PROGRESS;		/* TRUE if startup dialogs are up */
 
-extern unsigned long NUM_CPUS;		/* Number of CPUs/Cores in computer */
-
 extern int LAUNCH_TYPE;			/* Type of worker threads launched */
 extern unsigned int WORKER_THREADS_ACTIVE;/* Num worker threads running */
 extern int WORKER_THREADS_STOPPING;	/* TRUE iff worker threads stopping */
 
 extern unsigned int WORKTODO_COUNT;	/* Count of valid work lines */
 
-extern int GIMPS_QUIT;			/* TRUE if we just successfully */
-					/* quit the GIMPS project */
+extern int GIMPS_QUIT;			/* TRUE if we just successfully quit the GIMPS project */
 
 extern gwthread COMMUNICATION_THREAD;	/* Handle for comm thread.  Set when comm thread is active. */
 extern gwthread UPLOAD_THREAD;		/* Handle for proof file upload thread */
@@ -247,10 +254,24 @@ extern uint32_t CPU_NUM_L4_CACHES;	/* Number of L4 caches as determined by hwloc
 extern int	CPU_L2_CACHE_INCLUSIVE;	/* 1 if inclusive, 0 if exclusive, -1 if not known */
 extern int	CPU_L3_CACHE_INCLUSIVE;	/* 1 if inclusive, 0 if exclusive, -1 if not known */
 extern int	CPU_L4_CACHE_INCLUSIVE;	/* 1 if inclusive, 0 if exclusive, -1 if not known */
-extern unsigned int NUM_NUMA_NODES;	/* Number of NUMA nodes in the computer */
-extern unsigned int NUM_THREADING_NODES;/* Number of nodes where it might be beneficial to keep a worker's threads in the same node */
 extern int OS_CAN_SET_AFFINITY;		/* hwloc supports setting CPU affinity (known exception is Apple) */
 void topology_print_children (hwloc_obj_t obj, int);
+
+/* New in 30.7, HW_ globals to describe the underlying hardware.  Earlier versions of prime95 did not deal well with asymmetric cores/threads/caches. */
+
+extern uint32_t HW_NUM_CORES;		/* Total number of cores (physical processors) available */
+extern uint32_t HW_NUM_THREADS;		/* Total number of threads (logical processors) available */
+extern uint32_t HW_NUM_COMPUTE_CORES;	/* Number of high-performance cores that a program like ours should use (i.e. not AlderLake efficiency cores) */
+extern uint32_t HW_NUM_THREADING_NODES;	/* Total number of nodes where it should be beneficial to assign a worker's cores within the same node */
+extern uint32_t HW_NUM_COMPUTE_THREADING_NODES;	/* Same as HW_NUM_THREADING_NODES but only counting nodes governing compute cores */
+extern uint32_t HW_NUM_NUMA_NODES;	/* Total number of NUMA nodes in the computer */
+
+struct hw_core_info {
+	uint16_t num_threads;		/* Number of threads (logical processors) running on this physical processor */
+	uint16_t ranking;		/* For now, only two values are supported for Alder Lake.  1=compute, 0=efficiency. */
+};
+extern struct hw_core_info *HW_CORES;	/* Information on every core */
+
 
 /* Common routines */
 
@@ -265,8 +286,9 @@ int start_sieve (int thread_num, uint64_t start, void **returned_si);		// Defaul
 int start_sieve_with_limit (int thread_num, uint64_t start, uint32_t max_elimination_factor, void **returned_si);
 uint64_t sieve (void *si);
 void end_sieve (void *si);
-uint64_t modinv (uint64_t x, uint64_t f);
-int relatively_prime (unsigned long, unsigned long);
+uint64_t _intgcd (uint64_t, uint64_t);
+uint64_t modinv (uint64_t, uint64_t);
+int relatively_prime (uint64_t, uint64_t);
 
 void sorted_add_unique (int *, int *, int);
 int is_number_in_list (int, const char *);
@@ -325,7 +347,8 @@ int OutOfMemory (int);
 #define WORK_ADVANCEDTEST	3
 #define WORK_ECM		4
 #define WORK_PMINUS1		5
-#define WORK_PFACTOR		6
+#define WORK_PPLUS1		6
+#define WORK_PFACTOR		7
 #define WORK_PRP		10
 #define WORK_CERT		11
 #define WORK_NONE		100	/* Comment line in worktodo.ini */
@@ -339,15 +362,14 @@ struct work_unit {		/* One line from the worktodo file */
 	unsigned long b;	/* B in k*b^n+c */
 	unsigned long n;	/* N in k*b^n+c */
 	signed long c;		/* C in k*b^n+c */
-	unsigned long minimum_fftlen;/* Minimum FFT length to use.  Primarily */
-				/* used for implementing soft FFT */
-				/* crossovers.  Zero means default fftlen */
+	unsigned long minimum_fftlen;/* Minimum FFT length to use.  Zero means default fftlen. */
 	double	sieve_depth;	/* How far it has been trial factored */
 	double	factor_to;	/* How far we should trial factor to */
 	int	pminus1ed;	/* TRUE if has been P-1 factored */
-	double	B1;		/* ECM and P-1 - Stage 1 bound */
-	double	B2_start;	/* ECM and P-1 - Stage #2 start */
-	double	B2;		/* ECM and P-1 - Stage #2 end */
+	double	B1;		/* ECM, P-1, P+1 - Stage 1 bound */
+	double	B2;		/* ECM, P-1, P+1 - Stage 2 bound */
+	double	B2_start;	/* P-1 - Stage 2 start */
+	int	nth_run;	/* P+1 - 1 for start 2/7, 2 for start 6/5, 3+ for random start */
 	unsigned int curves_to_do; /* ECM - curves to try */
 	double	curve;		/* ECM - Specific curve to test (debug tool) */
 	double	tests_saved;	/* Pfactor - primality tests saved if a factor is found */
@@ -355,22 +377,18 @@ struct work_unit {		/* One line from the worktodo file */
 	int	prp_residue_type; /* PRP residue to output -- see primenet.h */
 	int	prp_dblchk;	/* True if this is a doublecheck of a previous PRP */
 	int	cert_squarings; /* Number of squarings required for PRP proof certification */
-	char	*known_factors;	/* ECM, P-1, PRP - list of known factors */
-	char	*comment;	/* Comment line in worktodo.ini */
+	char	*known_factors;	/* ECM, P-1, P+1, PRP - list of known factors */
+	char	*comment;	/* Comment line in worktodo.txt */
 		/* Runtime variables */
 	struct work_unit *next; /* Next in doubly-linked list */
 	struct work_unit *prev; /* Previous in doubly-linked list */
 	int	in_use_count;	/* Count of threads accessing this work unit */
-	int	high_memory_usage;/* Set if we are using a lot of memory */
-				/* If user changes the available memory */
-				/* settings, then we should stop and */
-				/* restart our computations */
+	int	high_memory_usage;/* Set if we are using a lot of memory.  If user changes the available memory */
+				/* settings, then we should stop and restart our computations. */
 	char	stage[10];	/* Test stage (e.g. TF,P-1,LL) */
-	double	pct_complete;	/* Percent complete (misnomer as value is */
-				/* between 0.0 and 1.0) */
+	double	pct_complete;	/* Percent complete (misnomer as value is between 0.0 and 1.0) */
 	unsigned long fftlen;	/* FFT length in use */
-	int	ra_failed;	/* Set when register assignment fails, tells */
-				/* us not to try registering it again. */
+	int	ra_failed;	/* Set when register assignment fails, tells us not to try registering it again. */
 };
 struct work_unit_array {	/* All the lines for one worker thread */
 	struct work_unit *first; /* First work unit */
@@ -406,8 +424,8 @@ void tempFileName (struct work_unit *, char *);
 int fileExists (const char *);
 void DirPlusFilename (char *, const char *);
 
-int read_array (int fd, char *buf, unsigned long len, unsigned long *sum);
-int write_array (int fd, const char *buf, unsigned long len, unsigned long *sum);
+int read_array (int fd, char *buf, size_t len, unsigned long *sum);
+int write_array (int fd, const char *buf, size_t len, unsigned long *sum);
 int read_gwnum (int fd, gwhandle *gwdata, gwnum g, unsigned long *sum);
 int write_gwnum (int fd, gwhandle *gwdata, gwnum g, unsigned long *sum);
 int read_short (int fd, short *val);
@@ -415,10 +433,14 @@ int read_long (int fd, unsigned long *val, unsigned long *sum);
 int write_long (int fd, unsigned long val, unsigned long *sum);
 int read_slong (int fd, long *val, unsigned long *sum);
 int write_slong (int fd, long val, unsigned long *sum);
-int read_longlong (int fd, uint64_t *val, unsigned long *sum);
-int write_longlong (int fd, uint64_t val, unsigned long *sum);
+int read_int (int fd, int *val, unsigned long *sum);
+int write_int (int fd, int val, unsigned long *sum);
 int read_double (int fd, double *val, unsigned long *sum);
 int write_double (int fd, double dbl, unsigned long *sum);
+int read_uint32 (int fd, uint32_t *val, unsigned long *sum);
+int write_uint32 (int fd, uint32_t val, unsigned long *sum);
+int read_uint64 (int fd, uint64_t *val, unsigned long *sum);
+int write_uint64 (int fd, uint64_t val, unsigned long *sum);
 int read_magicnum (int fd, unsigned long magicnum);
 int read_header (int fd, unsigned long *version, struct work_unit *w, unsigned long *sum);
 int write_header (int fd, unsigned long magicnum, unsigned long version, struct work_unit *w);
@@ -465,6 +487,7 @@ int ProofFileNames (char filenames[50][255]);
 void ProofUpload (char *);
 int ProofGetData (char *, void *, int, char *);
 char getDirectorySeparator ();
+void mallocFreeForOS ();
 
 
 /******************************************************************************
@@ -510,3 +533,9 @@ time_t timed_event_fire_time (
 #define TE_THROTTLE_FREQ	 5	/* Throttle every 5 sec. */
 #define TE_ROLLING_AVERAGE_FREQ	 12*60*60 /* Adjust rolling every 12 hr. */
 #define TE_BENCH_FREQ		 21*60*60 /* Generate auto-benchmark data every 21 hrs. */
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

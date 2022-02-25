@@ -1,5 +1,7 @@
 // StopDlg.h : header file
 //
+//  Copyright 1995-2021 Mersenne Research, Inc. All rights reserved.
+//
 
 /////////////////////////////////////////////////////////////////////////////
 // CStopDlg dialog
@@ -13,10 +15,10 @@ public:
 // Dialog Data
 	//{{AFX_DATA(CStopDlg)
 	enum { IDD = IDD_WORKER_STOP };
-	CStatic	c_thread_text;
-	CEdit	c_thread;
-	UINT	m_thread;
-	BOOL	m_all_threads;
+	CStatic	c_worker_text;
+	CEdit	c_worker;
+	UINT	m_worker;
+	BOOL	m_all_workers;
 	//}}AFX_DATA
 
 

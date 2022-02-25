@@ -1,6 +1,6 @@
 // BenchmarkDlg.cpp : implementation file
 //
-// Copyright 2017 Mersenne Research, Inc.  All rights reserved
+// Copyright 2017-2021 Mersenne Research, Inc.  All rights reserved
 //
 
 #include "stdafx.h"
@@ -78,11 +78,11 @@ void CBenchmarkDlg::DoDataExchange(CDataExchange* pDX)
 	c_errchk.EnableWindow (m_bench_type != 2);
 	c_all_complex.EnableWindow (m_bench_type != 2);
 	c_limit_FFT_sizes.EnableWindow (m_minFFT != m_maxFFT && ((m_bench_type == 0 && !m_all_FFT_impl) || m_bench_type == 1));
-	c_bench_cores_text.EnableWindow (NUM_CPUS > 1);
-	c_bench_cores.EnableWindow (NUM_CPUS > 1);
-	c_hyperthreading.EnableWindow (CPU_HYPERTHREADS > 1);
-	c_bench_workers_text.EnableWindow (m_bench_type == 0 && (NUM_CPUS > 1 || m_hyperthreading));
-	c_bench_workers.EnableWindow (m_bench_type == 0 && (NUM_CPUS > 1 || m_hyperthreading));
+	c_bench_cores_text.EnableWindow (HW_NUM_CORES > 1);
+	c_bench_cores.EnableWindow (HW_NUM_CORES > 1);
+	c_hyperthreading.EnableWindow (HW_NUM_CORES != HW_NUM_THREADS);
+	c_bench_workers_text.EnableWindow (m_bench_type == 0 && (HW_NUM_CORES > 1 || m_hyperthreading));
+	c_bench_workers.EnableWindow (m_bench_type == 0 && (HW_NUM_CORES > 1 || m_hyperthreading));
 	c_all_FFT_impl.EnableWindow (m_bench_type == 0);
 	c_bench_time_text.EnableWindow (m_bench_type == 0);
 	c_bench_time.EnableWindow (m_bench_type == 0);

@@ -9,7 +9,7 @@ CPPFLAGS = -I.. -I../qd -O2 -march=i586 -malign-double
 
 AR = ar
 
-HAIKUOBJS = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o ecmstag1.o
+HAIKUOBJS = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o radix.o ecmstag1.o
 
 LIB = gwnum.a
 

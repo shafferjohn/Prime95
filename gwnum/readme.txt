@@ -6,8 +6,8 @@ Welcome to the gwnum library.
 	do this yourself or let gwinit do it for you (it will call the
 	guessCpuType and guessCpuSpeed routines).
 
-	Next, study gwnum.h for a list of functions.  Also, study 
-	commonb.c or ecm.c for examples of how to use the gwnum library.
+	Next, study gwnum.h and tutorial.txt for a list of functions and how
+	to best use them.
 
 -> how to compile / how to port
 
@@ -21,7 +21,7 @@ Windows:
 		make -f makemw64
 	to build the MinGW-w64 64-bit libraries.
 
-Linux:
+Linux 32-bit:
 	The assembly code object files have already been converted to ELF format using
 	Agner Fog's objconv on a Windows machine.
 
@@ -37,21 +37,31 @@ Linux 64-bit:
 
 	"make -f make64" is used to compile the necessary C and C++ source files on the
 	Linux machine and to finish building the gwnum.a library.
-	
+
 	A C application using gwnum must link with:
 		gwnum.a gwnum.ld -lpthread -lstdc++
 
-FreeBSD:
+FreeBSD 32-bit:
 	The assembly code object files have already been converted to ELF format using
 	Agner Fog's objconv on a Windows machine.
 
-	"make -f make.bsd" is used to compile the necessary C and C++ source files
+	"make -f makebsd" is used to compile the necessary C and C++ source files
 	and to finish building the gwnum.a library
 
 	A C application must link with:
 		-lcompat gwnum.a gwnum.ld -lpthread -lstdc++
 
-Mac OS X:
+FreeBSD 64-bit:
+	The assembly code object files have already been converted to ELF format using
+	Agner Fog's objconv on a Windows machine.
+
+	"make -f makebsd64" is used to compile the necessary C and C++ source files
+	and to finish building the gwnum.a library
+
+	A C application must link with:
+		-lcompat gwnum.a gwnum.ld -lpthread -lstdc++
+
+Mac OS X (Intel CPUs only):
 	The Mac OS X build procedure is different than linux (because universal
 	binaries require both the 32-bit and 64-bit libraries).  The assembly code object
 	files have already been converted to Mach-O format using Agner Fog's
@@ -63,7 +73,7 @@ Mac OS X:
 	You may also need to add multutil.o to the linker command line.
 	For reasons unknown, the linker has trouble pulling it out of gwnum.a
 
-Haiku:
+Haiku (probably no longer works):
 	The assembly code object files have already been converted to ELF format using
 	Agner Fog's objconv on a Windows machine.
 
@@ -75,7 +85,7 @@ Haiku:
 
 -> Legal stuff
 
-Copyright (c) 1996-2017, Mersenne Research, Inc.  All rights reserved. 
+Copyright (c) 1996-2021, Mersenne Research, Inc.  All rights reserved. 
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are 
@@ -98,5 +108,5 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
-  
+
 

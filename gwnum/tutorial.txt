@@ -1,0 +1,953 @@
+Overview
+--------
+
+This tutorial and optimization guide describes the gwnum library -- what the library does, how to use it, and all the gory details to maximize performance.
+
+The gwnum library allows you to perform modular arithmetic (multiply and add) on very large numbers at great speed on Intel processors.
+The important parts of the library are written in Intel assembly code for maximum performance.
+
+Help is available at mersenneforum.org.  Either post a question or PM user prime95 for help.
+
+
+Setup and termination
+---------------------
+
+The library maintains its state in a C structure called a gwhandle.  This handle is passed to every gwlibrary routine.
+The routines gwinit and gwsetup are used to initialize the library.  This example initializes the library to do modular
+arithmetic on 2*3^1000000-1:
+
+	gwhandle gwdata;
+	gwinit (&gwdata);
+	gwsetup (&gwdata, 2, 3, 1000000, -1);
+
+The gwsetup routine's four input arguments describe the modulus as k*b^n+c.  It is the special form of the these numbers that allow
+great optimizations in doing modular arithmetic.  k is limited to 51 bits, b is limited to about 19 bits, c is limited to 23 bits.
+There is a setup routine (not described in this document) that allows specifying any number as the modulus -- but, multiplications
+are three times slower.  Any k*b^n+c that cannot be handled are automatically converted to this three times slower method.
+Depending on the Intel CPU, numbers up to 1.1 billion bits can be handled.
+
+The gwinit routine automatically detects your Intel hardware (see cpuid.h).  Ordinarily, this is not something you need to be aware of.
+However, sometimes it is useful to override the detected hardware.  For example, one of the early Xeon processors that supported
+the AVX-512 instruction set was slower using these instructions.  This shows how to disable using the AVX-512 instructions:
+
+	gwhandle gwdata;
+	gwinit (&gwdata);
+	if (end_user_wants_to_disable_avx512) gwdata.cpu_flags &= ~CPU_AVX512F;
+	gwsetup (&gwdata, 2, 3, 1000000, -1);
+
+The library supports multi-threading when the modulus is large, where "large" depends on the Intel CPU.  This begins as early as 130000 bits.
+Multi-threading does not scale well until the modulus gets very large, maybe 1 or 2 million bits.  There are optional callback routines
+(not described in this document) that allows one to do things like set thread priority and affinity.  This simple example sets up the gwnum
+library to use 4 threads during computations:
+
+	gwhandle gwdata;
+	gwinit (&gwdata);
+	gwset_num_threads (&gwdata, 4);
+	gwsetup (&gwdata, 2, 3, 1000000, -1);
+
+There are macros/routines available to query the result of the gwsetup.  This is very useful when reporting bugs:
+
+	char	buf[512];
+	gwfft_description (&gwdata, buf);
+	printf ("gwsetup initalized to use this FFT: %s\n", buf);
+
+Termination is easy:
+
+	gwdone (&gwdata);
+
+
+Allocating, initiaizing, and freeing
+------------------------------------
+
+Before you can to use the library to do arithmetic, one must allocate and initialize numbers.  These numbers are stored in a "gwnum".
+This example allocates a gwnum for later use:
+
+	gwnum	x;
+	x = gwalloc (&gwdata);
+	if (x == NULL) goto memory_allocation_error;
+
+Gwnums are initialized using dbltogw or one of several variants of binarytogw.  This example initializes the gwnum x with 5.
+
+	dbltogw (&gwdata, 5.0, x);
+
+Once your modular arithmetic is complete, use gwtobinary to examine the results in C code, then free the gwnum.
+
+	uint32_t bigarray[50000];	// Holds a 1.5 million bit result
+	uint32_t bigarraylen;
+	gwtobinary (gwdata, x, bigarray, &bigarraylen);
+	gwfree (&gwdata, x);
+
+Basic operations
+----------------
+
+The only arithmetic operations supported are multiplication, addition, and subtraction.  The routines that perform these operations take a gwhandle,
+source argument(s), a destination argument, and usually an options argument.  The destination argument always comes after the source arguments.
+Examples (do not worry about the GWMUL_ and GWADD_ options in the examples -- these will be discussed later):
+
+	gwmul3 (&gwdata, x, y, z, GWMUL_PRESERVE_S1, GWMUL_PRESERVE_S2); // Calculate z = x * y
+	gwadd3o (&gwdata, a, b, c, GWADD_FORCE_NORMALIZE);               // Calculate c = a + b
+	gwsub3o (&gwdata, a, b, c, GWADD_FORCE_NORMALIZE);               // Calculate c = a - b
+
+Copying a gwnum is also handy.
+
+	gwcopy (&gwdata, s, t);                                          // Copy gwnum s to t
+
+This is all you need to know to start writing code that uses the gwnum library!
+The rest of this document is dedicated to maximizing the efficiency of code that uses the library.
+To do that we'll need to understand what is going on under the hood.
+
+FFTs
+----
+
+FFTs, or Fast Fourier Transforms, are the magic behind the fastest multiplication algorithms.  At its core, the gwnum library
+contains optimized FFTs for a variety of FFT sizes.  Numbers are divided into small chunks (about 20-bits each).  A one million
+bit number requires 50,000 chunks and gwsetup initializes the library to use the first FFT size larger than 50,000.
+
+To multiply two gwnums a and b, we compute FFT(a) and FFT(b).  Then we do a "point-wise" multiplication, that is we multiply
+each chunk in FFT(a) by the corresponding chunk in FFT(b) -- this produces FFT(a*b).  Then we do an "inverse" FFT.
+The final step, which I call "normalization", involves carry propagation to once again make sure each chunk is as small as
+possible (again about 20 bits).
+
+This leads to our first important optimization.  Suppose we want to calculate a*b and a*c.  Looking at the description of the
+multiplication algorithm, we can compute FFT(a) only once.  There are multiple ways to do this using the gwnum library, the first
+involves using the gwfft routine:
+
+	gwfft (&gwdata, a, fft_of_a);                    // fft_of_a = FFT(a)
+	gwmul3 (&gwdata, fft_of_a, b, res1, 0);          // res1 = a * b
+	gwmul3 (&gwdata, fft_of_a, c, res2, 0);          // res2 = a * c
+
+The second is almost identical, but takes advantage of the fact that doing an FFT "in-place" is a little faster.
+
+	gwfft (&gwdata, a, a);                           // a = FFT(a)
+	gwmul3 (&gwdata, a, b, res1, 0);                 // res1 = a * b
+	gwmul3 (&gwdata, a, c, res2, 0);                 // res2 = a * c
+
+The third (and best) method involves using the options argument in gwmul3 calls.
+
+	gwmul3 (&gwdata, a, b, res1, GWMUL_FFT_S1);      // res1 = a * b, a = FFT(a)
+	gwmul3 (&gwdata, a, c, res2, 0);                 // res2 = a * c
+
+In the second and third examples, we see that the gwnum library must remember whether gwnum variable "a" has been FFTed.
+In most cases, you won't need to know the FFT state of a gwnum variable.  However, as we discuss more advanced optimizations
+you'll find that understanding and managing the FFT state of your gwnum variables will be important.  The FFT_STATE(a) macro
+returns the FFT state of a gwnum.  Hopefully, the macro will rarely be needed.
+
+The above also leads to a discussion of how gwmul3 works.  gwmul3 takes two source arguments called S1 and S2 and one destination argument.
+The gwmul3 implementation is free to replace S1, or S2, or both, or neither with its FFT.  It is desirable to give gwmul3 as much freedom
+and hints as possible in handling the S1 and S2 arguments.  Here are the gwmul3 options regarding handling S1 and S2:
+	GWMUL_FFT_S1		// Hint that FFT(S1) will be needed later.  In practice, S1 is always replaced by FFT(S1)
+	GWMUL_FFT_S2		// Hint that FFT(S2) will be needed later.  In practice, S2 is always replaced by FFT(S2)
+	GWMUL_PRESERVE_S1	// Modification of the first argument is not allowed.  Do not use this unless there is a good reason.
+	GWMUL_PRESERVE_S2	// Modification of the second argument is not allowed.  Do not use this unless there is a good reason.
+
+Finally, it is possible to undo an FFT.  The gwunfft routine does this.  Ideally, you should never use gwunfft as it you doing work to
+get a value you already had at one point in the past.
+
+At the end of this document is the source code to a crude program that times various gwnum operations.  Sprinkled throughout this document,
+I'll include the output of this program run either single-threaded or multi-threaded on a 2016 quad-core Intel CPU.  Here is the
+data confirming that gwfft where source and destination are the same is much faster:
+
+	gwfft s == d with startnextfft: 8874.640000, or 0.25 * baseline
+	gwfft s != d with startnextfft: 17733.620000, or 0.50 * baseline
+
+
+Reducing memory bandwidth
+-------------------------
+
+It is often the case that the memory subsystem cannot provide data fast enough to keep modern multi-core CPUs fully occupied.  That is,
+memory bandwidth is a bottleneck.  In such cases, reducing how often gwnum data is read and written can be very beneficial.
+
+Sometimes one needs to calculate both a+b and a-b.  One can do this:
+	gwadd3o (&gwdata, a, b, res1, options);              // res1 = a + b
+	gwsub3o (&gwdata, a, b, res2, options);              // res2 = a - b
+or you can use the gwaddsub routine:
+	gwaddsub4o (&gwdata, a, b, res1, res2, options);     // res1 = a + b, res2 = a - b
+Why is this faster?  gwadd3o reads a, reads b, writes res1.  gwsub3o is similar for a total of 4 reads and 2 writes.
+gwaddsub4o reads a, reads b, writes res1 and res2 for a total of 2 reads and 2 writes -- reducing memory bandwidth requirements.
+
+The next and perhaps most important optimization can reduce memory bandwidth requirements for all multiplications!  First we need
+to understand a a bit how FFTs are implemented.  Small FFTs where the data is likely to fit in the L2 cache are called single-pass FFTs.
+Data is read from memory and remains in the L2 cache while it is processed then the results are written back to memory -- one read and
+one write.  Larger FFTs are done in two passes.  In pass 1, data is read in big blocks that will fit in the L2/L3 caches, operated on
+and written back to memory.  This gets about half of the FFT done.  In pass 2 the process repeats.  Two reads and two writes are required
+to complete the FFT.
+
+Now consider a two-pass squaring of a not-FFTed gwnum.  We must perform a FFT, pointwise-squaring, inverse-FFT, and normalization.
+The first half-FFT requires one read/write.  The second half-FFT, point-wise squaring, and first half-inverse-FFT can all be done
+in one read/write.  Finally, the second half-inverse-FFT and normalization are done in one read/write.  A total of 3 read/writes.
+We note that after the normalization we could do a first half-FFT on the squared result while the data is in the L2/L3 caches.
+Thus, the GWMUL_STARTNEXTFFT option was created.  If you know, the result of a multiplication will be FFTed sometime in the future,
+we can start the FFT early and save one read/write.  An example using gwsquare2 which is a shortcut for gwmul3 where the two sources
+are identical:
+	gwsquare2 (&gwdata, a, a, GWMUL_STARTNEXTFFT);         // a = a^2, partially FFT a
+	gwsquare2 (&gwdata, a, a, GWMUL_STARTNEXTFFT);         // a = a^2, partially FFT a
+	gwsquare2 (&gwdata, a, a, 0);                          // a = a^2
+Compared to:
+	gwsquare2 (&gwdata, a, a, 0);                          // a = a^2
+	gwsquare2 (&gwdata, a, a, 0);                          // a = a^2
+	gwsquare2 (&gwdata, a, a, 0);                          // a = a^2
+The two code snipets produce the same result.  The optimized code uses 3+2+2 read writes.  The unoptimized code uses 3+3+3 read/writes.
+The timing output from the code at the end of this document:
+	gwsquare with startnextfft, no error checking: 35548.060000, or 1.0 * new baseline
+	gwsquare no startnextfft, no error checking: 43254.100000, or 1.22 * baseline
+
+IMPORTANT NOTE: We now have three FFT states for a gwnum:  NOT FFTed, PARTIALLY FFTed, FULLY FFTed.
+
+Finally, gwmul3 can occassionally save a read by using the GWMUL_FFT_S1 or GWMUL_FFT_S2 option.  This is because the assembly code
+is capable of writing the FFT results to one destination and the multiplication result to another.  In the last section we noted that:
+	gwfft (&gwdata, a, a);
+	gwmul3 (&gwdata, a, b, res1, 0);
+was inferior to:
+	gwmul3 (&gwdata, a, b, res1, GWMUL_FFT_S1);
+Suppose b is already fully FFTed and we are using a two-pass FFT, the former does 5 reads and 4 writes:
+	gwfft:  read(a), write(half-FFT), read(half-FFT), write(fft(a))
+	gwmul3: read(a), read(b), write(half-inverse-FFT), read(half-inverse-FFT), write(res1)
+while the latter does 4 reads and 4 writes:
+	gwmul3: read(a), write(half-FFT), read(half-FFT), write(fft(a)), read(b), write(half-inverse-FFT), read(half-inverse-FFT), write(res1)
+
+
+Roundoff error
+--------------
+
+Counter-intuitively, FFTs use floating point arithmetic even though the our main goal is integer multiplication.  Floating point values
+are not exact.  Each floating point operation introduces a little bit of error.  Normalization after a multiplication removes the accumulated
+little errors by rounding each FFT data value back to an integer.
+
+All is well and good if the FFT data value is close to an integer like 10.01 or 18.97.  However, we are much less certain that
+values such as 9.45 should be turned into integer 9 or 10.  And the value 9.5 we have a 50% chance of guessing the correct integer.
+The absolute value of "(FFT_data_value) - round (FFT_data_value)" is called the roundoff error and is somewhere between 0 and 0.5.
+The gwnum library can keep track of the maximum round off error it encounters during normalization.
+
+	gwerror_checking (&gwdata, 1);             // Turn on roundoff error checking
+	x = gw_get_maxerr (&gwdata);               // Get the maximum round off error seen since maxerr was last cleared
+	gw_clear_maxerr (&gwdata);                 // Reset the value of maximum round off error seen
+
+The number of bits packed into each FFT word are the primary culprit the size of the roundoff error.  For example, comparing 9 million bit
+numbers in an FFT size of 512K (18 bits per FFT word) to 9.5 million bit numbers in an FFT size of 512K (19 bits per FFT word), we expect the
+latter to have four times the round off error.  You don't really need to know this.  Just be aware that you can, and probably should, monitor
+the round off error when operating near the maximum capability of an FFT size.  And, if round of errors are excessive (this is a matter of
+personal preference, but I find somewhere around 0.4 or 0.43 a bit unnerving) consider selecting a larger FFT size.  Useful routines
+for this include:
+
+	gwnear_fft_limit (&gwdata, 0.5);          // Returns TRUE if operating within 0.5% of the FFT's maximum capabilites
+	gwset_safety_margin (&gwdata, 0.05);      // Prior to gwsetup, play it safe by reducing the maximum allowable bits per FFT word by 0.05
+	gwset_larger_fftlen_count (&gwdata, 1);   // Prior to gwsetup, force selection of the next larger FFT size
+
+In summary, gwsetup should always select an appropriate FFT size.  Forcing use of a larger FFT size should not be necessary.  Monitoring
+the maximum round off error is prudent.  Roundoff errors of 0.5 can indicate a bug in your code (or the gwnum library).  Noting which library
+routine resulted in a round off of 0.5 can be a great aid in finding bugs.
+
+Pathological data.  The gwsetup FFT size selection code assumes the FFT data will essentially look like random numbers.  Alas, this is not
+always the case.  For example, a Fermat PRP test computes 3^(multi-million-bit-number) with lots of squarings and mul-by-3.  Depending on the
+modulus and FFT size, the first 20 or 30 squarings before the modulus "kicks in" can result in some pathological data cases and round off
+error exceeding 0.5.  Use the gwmul3_carefully routine to avoid this problem.  gwmul3_carefully is a much slower implementation of gwmul3.
+In my case, I use gwmul3_carefully for the first 30 squarings (and just to be safe the last 30).   An alternative is to use:
+	gwset_carefully_count (&gwdata, 30);     // Convert the next 30 gwmul3 calls into gwmul3_carefully
+
+
+Unnormalized adds
+-----------------
+
+We have not yet discussed possible optimizations for adds and subtracts.  As you can imagine, adding or subtracting two gwnums requires
+a normalization to once again reduce the FFT data to the minimum bits per FFT word.  But what if you are not working on a modulus near the
+maximum capability for an FFT size?  For example, if our modulus is 18 bits per FFT word and the FFT size is capable of handling 19 bits
+per FFT word, then we could do an add or subtract without normalizing as addition or subtraction increases each FFT word by at most one bit.
+
+From the timings program at the end of this document, we see that a single-threaded unnormalized add is about 20% faster:
+	gwadd3quick: 8515.500000, or 0.24 * baseline
+	gwadd3: 10265.600000, or 0.29 * baseline
+And since AVX normalized add is not multi-threaded, the four-thread unnormalized add is over 3 times faster:
+	gwadd3quick: 2981.060000, or 0.33 * baseline
+	gwadd3: 10094.160000, or 1.10 * baseline
+
+The first paragraph over-simplified the theory behind when we can use unnormalized adds.  Reading and understanding these details is optional.
+Feel free to skip ahead to the next paragraph.  Lets define EXTRA_BITS as the number of extra bits available in FFT output words before gwsquare
+operations could start running into excessive round off errors.  The number of extra bits in an FFT output word is twice the number of extra bits
+in an FFT input word.
+	- First we compared round off errors from squaring vs. multiplying two different numbers.  Squaring generates much worse round-off errors.
+	  Doing a multiplication instead of a squaring saves 0.527 FFT output bits.
+	- Next we compared round off error calculating (a * b) vs. (unnormalized a + b) * c.  The unnormalized add consumed 0.509 FFT output bits.
+	- Next we compared doing another unnormalized add: (a+b)*c vs. (a+b+c)*d.  The second unnormalized add consumed 0.288 FFT output bits.
+	- Next we compared doing another unnormalized add: The third unnormalized add consumed 0.218 FFT output bits.
+	
+The take away from the above is that it is always safe to do one unnormalized add prior to a multiplication!   Doing an unnormalized add before a
+squaring operation or more than one unnormalized add prior to a multiply operation *may* be safe depending on whether we are operating near the
+maximum capabilities of our FFT size.  Furthermore, it is complicated to figure out if an unnormalized add will be safe.  The gwadd routines
+need to know how you plan to use the result of the add (squaring or multiplication) and how many unnormalized adds have taken place.  You must
+provide the former information, the gwnum library will keep track of the latter.
+
+VERY IMPORTANT:
+	Unnormalized adds are allowed on partially and fully FFTed data.  Use the GWMUL_STARTNEXTFFT option in creating the add inputs.
+	Normalized adds are not allowed on partially or fully FFTed data.  GWMUL_STARTNEXTFFT and gwfft cannot be used in creating the add inputs.
+
+
+More memory bandwidth savings
+-----------------------------
+
+There are 4 "combo" add / mul routines that can save memory read / writes in some circumstances.  The first pair, gwaddmul4 and gwsubmul4,
+add or subtract two gwnums, then multiply by a third.  The first two sources will be FFTed and thus it is preferred but not required that
+the first two sources are already fully FFTed.  The savings, if any, depend on the FFT state of the inputs.
+
+                                                                // The non-combo implementation
+	gwadd3o (&gwdata, a, b, tmp, add_options);              // tmp = a + b
+	gwmul3 (&gwdata, tmp, c, res, mul_options);             // res = tmp * c
+
+                                                                // The combo implementation
+	gwaddmul4 (&gwdata, a, b, c, res, mul_options);         // res = (a + b) * c
+
+If a,b are NOT FFTed, the combo implementation actually costs one read/write.  If a,b are PARTIALLY FFTed, the combo implementation
+uses the same number of read/writes.  In both cases, the combo implementation fully FFTs a and b as a by-product which could sway you into
+using the combo version.  If a,b are FULLY FFTed, the combo version saves one read/write.
+
+Output from the timings code at the end of this document show decent savings:
+	gwaddmul4 with startnextfft: 40806.980000, or 1.15 * baseline
+	emulated gwaddmul4 with startnextfft: 46180.100000, or 1.30 * baseline
+
+The second pair of combo routines, gwmuladd4 and gwmulsub4, not only can save a read/write they can save a normalized add.  These routines
+multiply two gwnums and add or subtract a third gwnum producing a normalized result.  The third source will be FFTed and thus it is preferred
+but not required that the third source is already fully FFTed.
+
+                                                                // The non-combo implementation
+	gwmul3 (&gwdata, a, b, tmp, mul_options);               // tmp = a * b
+	gwadd3o (&gwdata, tmp, c, res, add_options);            // res = tmp + c
+
+                                                                // The combo implementation
+	gwmuladd4 (&gwdata, a, b, c, res, mul_options);         // res = (a * b) + c
+
+The savings here are harder to calculate.  This is partly because the above two implementations are not quite identical.  For example, if c is
+partially or fully FFTed then gwadd3o is illegal if the add_options would result in a normalized add.  Doing an unnormalized add could affect
+whether future gwadd3o operations would require a normalization.  Further complications are because some moduli (primarily k != 1 in k*b^n+c)
+require reading a pre-calculated gwnum holding FFT(1).  If c is not FFTed, the combo version costs one or two reads and one write.  If c is
+partially FFTed, the combo version costs zero or one reads and zero writes.  If c is fully FFTed, the combo version saves zero or one reads
+and one write.  As with gwaddmul, the fact that c is fully FFTed as a by-product may sway your decision toward using the combo version.
+
+Given the above, as a general rule of thumb, always use the combo version if c is already fully FFTed.  If c is partially FFTed, use the
+combo version if having a fully FFTed c will be useful in the future.
+
+A final optimization is available when using gwmuladd4 and gwmulsub4.  If the third argument will be used in more than one gwmuladd4 and gwmulsub4,
+then you will benefit by pre-multiplying the third argument by the aforementioned FFT(1).  The gwfft_for_fma routine does this.  Example:
+
+	gwfft_for_fma (&gwdata, c, c);                          // c = FFT(c) * FFT(1)
+	gwmuladd4 (&gwdata, a1, b1, c, x1, mul_options);        // x1 = a1 * b1 + c
+	gwmuladd4 (&gwdata, a2, b2, c, x2, mul_options);        // x2 = a2 * b2 + c
+
+NOTE:	We have our fourth FFT state, namely FFTed_FOR_FMA.  Once a gwnum has been FFTed for FMA it can only be used as the third source argument
+	to gwmuladd4 and gwmulsub4.
+
+
+Simplified GWADD options
+------------------------
+
+We are now ready to discuss the basic options to gwadd.
+
+As we concluded in the section on unnormalized adds, the gwnum library needs to know  how the result of an add or subtract will be used.
+There are three primary options for this:
+	GWADD_SQUARE_INPUT          Result will eventually be input to gwsquare2
+	GWADD_MUL_INPUT             Result will eventually be input to gwmul3, one of first two args of gwmuladd4, or third argument of gwaddmul4
+	GWADD_ADD_INPUT             Result will eventually be input to one of the first two arguments of gwaddmul4
+Some examples:
+	gwadd3o (&gwdata, a, b, c, GWADD_SQUARE_INPUT);
+	gwmul3 (&gwdata, c, c, res1, mul_options);
+	gwmuladd4 (&gwdata, c, c, y, res2, mul_options);
+
+	gwadd3o (&gwdata, a, b, c, GWADD_MUL_INPUT);
+	gwmul3 (&gwdata, c, x, res1, mul_options);
+	gwmul3 (&gwdata, x, c, res2, mul_options);
+	gwmuladd4 (&gwdata, c, x, y, res3, mul_options);
+	gwmuladd4 (&gwdata, x, c, y, res4, mul_options);
+	gwaddmul4 (&gwdata, x, y, c, res5, mul_options);
+
+	gwadd3o (&gwdata, a, b, c, GWADD_ADD_INPUT);
+	gwaddmul4 (&gwdata, c, x, y, res, mul_options);
+
+When using the options above, the gwnum library assumes all other input arguments gwmul3, gwaddmul4, gwmuladd4 are fully normalized (that's why
+these are called the simplified GWADD options).  If this assumption is incorrect, use the GWADD_MANY_INPUTS option.  Example:
+
+	gwadd3o (&gwdata, a, b, c, GWADD_MANY_INPUTS);
+	gwadd3o (&gwdata, d, e, f, GWADD_MANY_INPUTS);
+	gwmul3 (&gwdata, c, f, res1, mul_options);
+	gwaddmul4 (&gwdata, c, x, f, res1, mul_options);
+
+There are two alternatives to the above four options:
+	GWADD_DELAY_NORMALIZE - This forces a fast unnormalized add.
+	GWADD_FORCE_NORMALIZE - This forces a slower normalized add.
+
+The ideal time to use GWADD_DELAY_NORMALIZE is during a series of add operations.  Only the last add in the series could require normalization.
+For example:
+	gwadd3o (&gwdata, a, b, c, GWADD_DELAY_NORMALIZE);
+	gwadd3o (&gwdata, c, d, c, GWADD_DELAY_NORMALIZE);
+	gwadd3o (&gwdata, c, e, c, GWADD_SQUARE_INPUT);
+	gwmul3 (&gwdata, c, c, res1, mul_options);
+Another case where it is safe to use GWADD_DELAY_NORMALIZE is when the result will be the third argument to gwmuladd4 or gwmulsub4.  Example:
+	gwadd3o (&gwdata, a, b, c, GWADD_DELAY_NORMALIZE);
+	gwadd3o (&gwdata, c, d, c, GWADD_DELAY_NORMALIZE);
+	gwmulsub4 (&gwdata, x, y, c, res1, mul_options);
+
+There are two more rarely need options.
+	GWADD_NON_RANDOM_DATA     Two add inputs are correlated (like adding number to itself) which has much worse impact on roundoff
+	GWADD_GUARANTEED_OK       Do not normalize the result.  Treat result like a fully normalized number.
+Examples:
+	gwadd3o (&gwdata, a, a, c, GWADD_NON_RANDOM_DATA | GWADD_SQUARE_INPUT);
+	gwmul3 (&gwdata, c, c, res1, mul_options);
+
+	dbltogw (&gwdata, 4.0, a);
+	gwadd3o (&gwdata, a, b, c, GWADD_GUARANTEED_OK);
+
+What are the downsides to using simplified GWADD options?
+1)  Incorrect results:  GWADD_MANY_INPUTS makes a crude guess that not very many gwadds will be done prior to a multiplication operation.  If this
+guess is incorrect, gwadd may not normalize a result that should be normalized.  In such cases, using GWADD_FORCE_NORMALIZE or the advanced
+GWADD_ options is required.
+2)  Missed optimization opportunities.  It may be difficult to know if a gwadd operation will be do a normalized or unnormalized add.  In such cases,
+one cannot use the important GWMUL_STARTNEXTFFT option in creating the inputs to a gwadd operation.
+
+Downside #2 leads to the question, which gwadd operations are guaranteed to do an unnormalized add?  The answer is that only one unnormalized add
+as input to a multiply (not a squaring) is guaranteed safe.  Thus, this example will work:
+
+	gwmul3 (&gwdata, a, b, addarg1, GWMUL_STARTNEXTFFT);
+	gwmul3 (&gwdata, c, d, addarg2, GWMUL_STARTNEXTFFT);
+	gwmul3 (&gwdata, e, f, mularg1, GWMUL_STARTNEXTFFT);
+	gwadd3o (&gwdata, addarg1, addarg2, mularg2, GWADD_DELAY_NORMALIZE);
+	gwmul3 (&gwdata, mularg1, mularg2, res, mul_options);
+
+
+Advanced GWADD options
+----------------------
+
+To solve the downsides of simplified GWADD options, we introduce a GWMUL option macro and two (although one would suffice) GWADD option macros:
+
+	GWMUL_STARTNEXTFFT_IF(b)             This macros takes a boolean and if TRUE returns GWMUL_STARTNEXTFFT
+	GWADD_NORMALIZE_IF(b)                This macros takes a boolean and GWADD_DELAY_NORMALIZE or GWADD_FORCE_NORMALIZE as appropriate
+	GWADD_DELAYNORM_IF(b)                This macros takes a boolean and GWADD_DELAY_NORMALIZE or GWADD_FORCE_NORMALIZE as appropriate
+
+We also created several new macros that return a boolean to be used with the macros above.  These macros need to know how many adds go into
+the creation of each argument of gwsquare2, gwmul3, gwaddmul4, gwsubmul4, gwmuladd4, or gwmulsub4.
+
+	square_safe(h,numadds1)                    Returns TRUE if gwsquare2 is safe with the specified number of unnormalized adds in the source argument
+	mul_safe(h,numadds1,numadds2)              Returns TRUE if gwmul3 is safe with the specified number of unnormalized adds in the two source arguments
+	addmul_safe(h,numadds1,numadds2,numadds3)  Returns TRUE if gwaddmul4 is safe with the specified number of unnormalized adds in the three source arguments
+	muladd_safe(h,numadds1,numadds2,numadds3)     Returns TRUE if gwmuladd4 is safe with the specified number of unnormalized adds in the three source arguments
+	squareadd_safe(h,numadds1,numadds2,numadds3)  Returns TRUE if gwmuladd4 is safe with the specified number of unnormalized adds in the three source arguments
+
+Note that there are two possible macros for gwmuladd4. If the first two source arguments are different use muladd_safe, otherwise use squareadd_safe.
+Also note that in muladd_safe and squareadd_safe, the third unnormalized add count is ignored.  The third source argument to gwmuladd4 and gwmulsub4
+is safe with an almost unlimited number of unnormalized adds.
+
+The simplest example using the advanced GWADD options:
+
+	gwmul3 (&gwdata, a, b, addarg1, GWMUL_STARTNEXTFFT_IF(square_safe(&gwdata, 1));
+	gwmul3 (&gwdata, c, d, addarg2, GWMUL_STARTNEXTFFT_IF(square_safe(&gwdata, 1));
+	gwadd3o (&gwdata, addarg1, addarg2, mularg, GWADD_NORMALIZE_IF(!square_safe(&gwdata, 1)));
+	gwsquare2 (&gwdata, mularg, res, mul_options);
+
+Here one add is used in creating the argument to gwsquare2.  We have no way of knowing ahead of time if this add will require normalization.
+Rather than never using the important GWMUL_STARTNEXTFFT option in creating the inputs to gwadd3o, we use the GWMUL_STARTNEXTFFT_IF macro
+which will set the GWMUL_STARTNEXTFFT option only if squaring a gwnum that has one unnormalized add is safe.
+
+Here is a more complicated example from real-world code:
+
+	t3_addmul_safe = addmul_safe (&gwdata,0,1,1);  /* t3 will be used in the second and third argument to gwaddmul4 (first arg is normalized) */
+	gwsquare2 (&gwdata, in->x, t1, GWMUL_STARTNEXTFFT_IF(t3_addmul_safe));                  /* t1 = x^2 */
+	gwsquare2 (&gwdata, in->z, t2, GWMUL_STARTNEXTFFT_IF(t3_addmul_safe));                  /* t2 = z^2 */
+	gwsub3o (&gwdata, t1, t2, t3, GWADD_NORMALIZE_IF(!t3_addmul_safe));                     /* t3 = t1 - t2 */
+	gwmul3 (&gwdata, t2, some_normalized_variable, t4, GWMUL_FFT_S1 | GWMUL_STARTNEXTFFT);  /* t4 = t2 * Ad4 */
+	gwaddmul4 (&gwdata, t2, t3, t4, out->x, mul_options);                                   /* outx = (t2 + t3) * t4 */
+	gwaddmul4 (&gwdata, t4, t3, t3, out->z, mul_options);                                   /* outz = (t4 + t3) * t3 */
+
+In the above, we see that the last line uses t3 in the second and third arguments of an addmul.  T3 is the result of a gwsub3o operation.
+gwsub3o will not normalize the result if addmul_safe (&gwdata,0,1,1) returns TRUE.  If gwsub3o will not normalize t3, then the inputs t1 and t2
+to gwsub3o can be partially FFTed.  We see this optimization in the first two gwsquare2 calls.  Finally, note that the gwmul3 that produces t4
+uses GWMUL_FFT_S1 because FFT(t2) will be needed in the first gwaddmul4, and it uses GWMUL_STARTNEXTFFT because FFT(t4) will be needed by both
+gwaddmul4s and t4 is not used as an input to any gwadd operations.
+
+Note that in the example above, the gwsub3o line:
+	gwsub3o (&gwdata, t1, t2, t3, GWADD_NORMALIZE_IF(!t3_addmul_safe));                     /* t3 = t1 - t2 */
+could be written as:
+	gwsub3o (&gwdata, t1, t2, t3, GWADD_DELAYNORM_IF(t3_addmul_safe));                      /* t3 = t1 - t2 */
+This is strictly a matter of personal preference based on what you think is more readable and how likely you are to forget the not operator (!).
+
+Finally, there are cases where you may not know the number of unnormalized adds that were used in creating a gwnum variable.  Perhaps you
+are writing a routine that takes a gwnum variable of unknown origin as input, or your code has several different code paths that making such
+a calculation impossible.  The unnorms(x) macro returns the number of unnormalized adds that were executed in creating gwnum variable x.
+An example for a routine that has two gwnum variables a and b as input:
+
+	gwmul3 (&gwdata, x1, y1, addarg1, GWMUL_STARTNEXTFFT_IF(mul_safe(&gwdata, 1, unnorms(a) + unnorms(b) + 1));
+	gwmul3 (&gwdata, x2, y2, addarg2, GWMUL_STARTNEXTFFT_IF(mul_safe(&gwdata, 1, unnorms(a) + unnorms(b) + 1));
+	gwadd3o (&gwdata, addarg1, addarg2, mularg1, GWADD_DELAYNORM_IF(mul_safe(&gwdata, 1, unnorms(a) + unnorms(b) + 1)));
+	gwadd3o (&gwdata, a, b, mularg2, GWADD_DELAYNORM_IF(mul_safe(&gwdata, 1, unnorms(a) + unnorms(b) + 1)));
+	gwmul3 (&gwdata, mularg1, mularg2, res, mul_options);
+
+Just when you think it cannot get any more complicated, consider the example above.  Perhaps the final gwmul3 would be safe if only one
+of the gwmul3 sources is normalized.  In the example, either both or neither source arg is normalized.  Here's how to normalize only
+the second source argument in the final gwmul3 when necessary.
+
+	mularg2_safe = mul_safe (&gwdata, 1, unnorms(a) + unnorms(b) + 1);
+	mularg1_safe = mul_safe (&gwdata, 1, 0);
+	gwmul3 (&gwdata, x1, y1, addarg1, GWMUL_STARTNEXTFFT_IF(mularg1_safe));
+	gwmul3 (&gwdata, x2, y2, addarg2, GWMUL_STARTNEXTFFT_IF(mularg1_safe));
+	gwadd3o (&gwdata, addarg1, addarg2, mularg1, GWADD_DELAYNORM_IF(mularg1_safe));
+	gwadd3o (&gwdata, a, b, mularg2, GWADD_DELAYNORM_IF(mularg2_safe));
+	gwmul3 (&gwdata, mularg1, mularg2, res, mul_options);
+
+We set mularg2_safe using the same mul_safe arguments as in the original example.  In setting mularg1_safe, we use zero for the mularg2's
+unnormalized add count because we know that mularg2 will be normalized if necessary which clears the unnormalized add count for mularg2.
+The astute reader will note that mul_safe (&gwdata, 1, 0) is always TRUE.  
+
+
+Yet another combo routine!
+--------------------------
+
+If calculating (a*b)+(c*d), the simple approach is to calculate (a*b) and (c*d) and add the result.  Roughly, these operations:
+	FFT(a)
+	FFT(b)
+	FFT(a*b) = point-wise multiplication of FFT(a) and FFT(b)
+	tmp1 = inverse FFT
+	FFT(c)
+	FFT(d)
+	FFT(c*d) = point-wise multiplication of FFT(c) and FFT(d)
+	tmp2 = inverse FFT
+	result = tmp1 + tmp2
+
+We've seen that some operations after an unnormalized add can be safe.  Thus, we can re-arrange the order of operations to save an inverse FFT:
+	FFT(a)
+	FFT(b)
+	FFT(a*b) = point-wise multiplication of FFT(a) and FFT(b)
+	FFT(c)
+	FFT(d)
+	FFT(c*d) = point-wise multiplication of FFT(c) and FFT(d)
+	FFT(res) = FFT(a*b) + FFT(c*d)
+	res = inverse FFT
+Even better, several reads and writes are saved because the addition takes place while FFT data is already in CPU registers.
+Futhermore, the result is fully normalized whereas in the first method the result is unnormalized.
+
+The two new routines are:
+	gwmulmuladd5 (gwdata, s1, s2, s3, s4, dest, mul_options);	/* Calculate (s1*s2)+(s3*s4) */
+	gwmulmulsub5 (gwdata, s1, s2, s3, s4, dest, mul_options);	/* Calculate (s1*s2)-(s3*s4) */
+And the companion safety routines are:
+	mulmuladd_safe(h,adds1,adds2,adds3,adds4)
+	squaremuladd_safe(h,adds1,adds2,adds3,adds4)
+	mulsquareadd_safe(h,adds1,adds2,adds3,adds4)
+	squaresquareadd_safe(h,adds1,adds2,adds3,adds4)
+
+The safety routines need to know if either or both of the multiplications in a mulmuladd operation is, in fact, a squaring.  Squaring has
+a significant impact on the round off error.  A mulmuladd operation is always safe if all four sources are normalized.  That is,
+mulmuladd_safe(h,0,0,0,0) always returns TRUE.
+
+
+Miscellaneous optimizations
+---------------------------
+
+The multiply routines (gwsquare2, gwmul3, gwaddmul and gwmuladd) are all capable of adding a small constant to the result at no cost (well, no cost
+if the modulus k*b^n+c has abs(c) == 1).  Here is an example:
+
+	gwsetaddin (&gwdata, 3);
+	gwmul3 (&gwdata, a, b, c, GWMUL_ADDINCONST);    // c = a * b + 3, c is normalized
+
+The multiply routines are also capable of multiplying the final result by a small constant at very little cost.  Here is an example:
+
+	gwinit (&gwdata);
+	gwset_maxmulbyconst (&gwdata, 5);               // gwsetup needs to know the maximum mulbyconst you will ever use (if it is more than 3)
+	gwsetup (&gwdata, k, b, n, c);
+	gwsetmulbyconst (&gwdata, 5);
+	gwmul3 (&gwdata, a, b, c, GWMUL_MULBYCONST);    // c = a * b * 5, c is normalized
+
+You can add a small constant to a gwnum that has not been FFTed:
+
+	gwsmalladd (&gwdata, 89, a);                    // a = a + 89
+
+You can multiply a gwnum that has not been FFTed by a small constant:
+
+	gwsmallmul (&gwdata, 89, a);                    // a = a * 89
+
+
+Other miscellaneous stuff
+-------------------------
+
+If you want to allocate as many gwnums as possible in a fixed amount of memory, you'll need to know how much fixed data is allocated by gwsetup
+and how much memory is consumed by each gwnum allocated:
+
+	gwmemused                 Returns amount of memory consumed by gwsetup.  In essence overhead.
+	gwnum_size                Size of each gwnum allocated
+	gwfma_will_alloc_a_gwnum  If you will use gwmuladd4 or gwmulsub4, returns TRUE if a behind-the-scenes gwnum will be allocated
+
+A handy macro to swap to gwnums at no cost is available.  This can sometimes save a much more expensive gwcopy.
+
+	gwswap (a, b);            Swap a and b.
+
+The gwnum library includes a general purpose bignum library called "giants" originally written by the late Richard Crandall at Perfectly Scientific, Inc.
+You are free to use this, but it is not very efficient nor is it maintained by anyone.  More modern bignum libraries like GMP are much better as long as
+you can live with the different license terms.
+
+
+Sample timing code
+------------------
+
+As promised, the C code that benchmarks various gwnum operations.  It is hardly a thing of beauty and uses several deprecated routines:
+
+// time_gwnum.cpp : This file contains the 'main' function. Program execution begins and ends there.
+//
+
+#include "stdlib.h"
+#include "stdio.h"
+#include "common.h"
+#include "cpuid.h"
+#include "gwnum.h"
+
+#define THREADS		1
+#define NO_AVX512	0
+#define NO_FMA3		0
+#define NO_AVX		0
+#define	ITERS		50
+#define	SLOWITERS	(ITERS/10)
+
+int main()
+{
+	gwhandle gwdata;
+	gwnum	x, y, z, tmp;
+	int	i, retcode;
+	double	t, baseline_t;
+	char	buf[512];
+
+	printf ("Timings for M100000001, threads = %d\n", THREADS);
+
+	gwinit (&gwdata);
+	if (NO_AVX512) gwdata.cpu_flags &= ~CPU_AVX512F;
+	if (NO_FMA3) gwdata.cpu_flags &= ~CPU_FMA3;
+	if (NO_AVX) gwdata.cpu_flags &= ~CPU_AVX;
+	gwset_num_threads (&gwdata, THREADS);
+	retcode = gwsetup(&gwdata, 1.0, 2, 100000001, -1);
+	if (retcode) {
+		printf ("gwsetup failed: %d\n", retcode);
+		exit (1);
+	}
+	gwfft_description (&gwdata, buf);
+	printf ("FFT: %s\n", buf);
+	gwdata.EXTRA_BITS = 1.0;
+
+	x = gwalloc (&gwdata);
+	y = gwalloc (&gwdata);
+	z = gwalloc (&gwdata);
+	tmp = gwalloc (&gwdata);
+	gw_random_number (&gwdata, x);
+	gw_random_number (&gwdata, y);
+	gw_random_number (&gwdata, z);
+
+	// Generate a base line, squaring with post fft, no error checking
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 1);
+	for (i = 0; i < 50; i++) gwsquare (&gwdata, x);	// Put x in partial-FFTed state, warm up the processor
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwsquare (&gwdata, x);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("Base line gwsquare with startnextfft, no error checking: %f, or 1.0 * new baseline\n", t);
+	baseline_t = t;
+
+	// squaring with post fft, error checking
+	gwsetnormroutine (&gwdata, 0, 1, 0);	// Error checking on
+	gwstartnextfft (&gwdata, 1);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwsquare (&gwdata, x);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwsquare with startnextfft, error checking: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwfftmul with post fft, no error checking
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 1);
+	gwfft (&gwdata, y, y);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwfftmul (&gwdata, y, x);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwfftmul with startnextfft, no error checking: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwfftfftmul with post fft, no error checking
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 1);
+	gwfft (&gwdata, z, z);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwfftfftmul (&gwdata, y, z, x);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwfftfftmul with startnextfft, no error checking: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwsquare with post fft, mul-by-const, no error checking
+	gwsetnormroutine (&gwdata, 0, 0, 1);	// Error checking off, mul-by-const
+	gwstartnextfft (&gwdata, 1);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwsquare (&gwdata, x);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwsquare with startnextfft, mul-by-const, no error checking: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwfft with post fft, s == d
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 1);
+	t = 0.0;
+	for (i = 0; i < ITERS; i++) {
+		gwcopy (&gwdata, x, y);
+		t -= getHighResTimer ();
+		gwfft (&gwdata, y, y);
+		t += getHighResTimer();
+	}
+	t = t / ITERS; printf ("gwfft s == d with startnextfft: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwfft with post fft
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 1);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwfft (&gwdata, x, y);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwfft s != d with startnextfft: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// emulated gwaddmul4
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 1);
+	gwfft (&gwdata, x, x);
+	gwfft (&gwdata, y, y);
+	gwsquare (&gwdata, z);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwfftadd3 (&gwdata, x, y, tmp);
+		gwmul3 (&gwdata, tmp, z, z, 0);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("emulated gwaddmul4 with startnextfft: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwaddmul4
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 1);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwaddmul4 (&gwdata, x, y, z, z, 0);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwaddmul4 with startnextfft: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwcopy
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwcopy (&gwdata, x, y);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwcopy: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwsquare no post fft, no error checking
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 0);
+	gwsquare (&gwdata, x);
+	gwcopy (&gwdata, x, y);
+	gwcopy (&gwdata, x, z);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwsquare (&gwdata, x);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwsquare no startnextfft, no error checking: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwfftmul no post fft, no error checking
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 0);
+	gwfft (&gwdata, y, y);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwfftmul (&gwdata, y, x);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwfftmul no startnextfft, no error checking: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwfftfftmul no post fft, no error checking
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 0);
+	gwfft (&gwdata, z, z);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwfftfftmul (&gwdata, y, z, x);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwfftfftmul no startnextfft, no error checking: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwfft, s == d
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 0);
+	t = 0.0;
+	for (i = 0; i < ITERS; i++) {
+		gwcopy (&gwdata, x, y);
+		t -= getHighResTimer ();
+		gwfft (&gwdata, y, y);
+		t += getHighResTimer();
+	}
+	t = t / ITERS; printf ("gwfft s == d no startnextfft: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwfft s != d
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 0);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwfft (&gwdata, x, y);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwfft s != d no startnextfft: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// emulated gwaddmul4
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 0);
+	gwfft (&gwdata, x, x);
+	gwfft (&gwdata, y, y);
+	gwsquare (&gwdata, z);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwfftadd3 (&gwdata, x, y, tmp);
+		gwmul3 (&gwdata, tmp, z, z, 0);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("emulated gwaddmul4 no startnextfft: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwaddmul4
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 0);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwaddmul4 (&gwdata, x, y, z, z, 0);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwaddmul4 no startnextfft: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwadd3quick
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 0);
+	gwsquare (&gwdata, x);
+	gwsquare (&gwdata, y);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwadd3quick (&gwdata, x, y, z);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwadd3quick: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwadd3
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 0);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwadd3 (&gwdata, x, y, z);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwadd3: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwsquare_carefully
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 0);
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwsquare_carefully (&gwdata, x);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("gwsquare_carefully: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwtobinary
+	{ uint32_t *array, arraylen;
+	  arraylen = divide_rounding_up (100000001, 32);
+	  array = (uint32_t *) malloc (arraylen * sizeof (uint32_t));
+	  gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	  gwstartnextfft (&gwdata, 0);
+	  gwsquare (&gwdata, x);
+	  t = getHighResTimer ();
+	  for (i = 0; i < SLOWITERS; i++) {
+		gwtobinary (&gwdata, x, array, arraylen);
+	  }
+	  t = (getHighResTimer() - t) / SLOWITERS; printf ("gwtobinary: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// gwtobinary64
+	  gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	  gwstartnextfft (&gwdata, 0);
+	  gwsquare (&gwdata, x);
+	  t = getHighResTimer ();
+	  for (i = 0; i < SLOWITERS; i++) {
+		gwtobinary64 (&gwdata, x, (uint64_t *) array, arraylen / 2);
+	  }
+	  t = (getHighResTimer() - t) / SLOWITERS; printf ("gwtobinary64: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// binarytogw
+	  gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	  gwstartnextfft (&gwdata, 0);
+	  t = getHighResTimer ();
+	  for (i = 0; i < SLOWITERS; i++) {
+		binarytogw (&gwdata, array, arraylen, x);
+	  }
+	  t = (getHighResTimer() - t) / SLOWITERS; printf ("binarytogw: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// binarytogw64
+	  gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	  gwstartnextfft (&gwdata, 0);
+	  t = getHighResTimer ();
+	  for (i = 0; i < SLOWITERS; i++) {
+		binary64togw (&gwdata, (uint64_t *) array, arraylen / 2, x);
+	  }
+	  t = (getHighResTimer() - t) / SLOWITERS; printf ("binary64togw: %f, or %0.2f * baseline\n", t, t / baseline_t);
+	  free (array);
+	}
+
+	// gwinit
+	t = 0.0;
+	for (i = 0; i < SLOWITERS; i++) {
+		gwdone (&gwdata);
+		t -= getHighResTimer ();
+		gwinit (&gwdata);
+		if (NO_AVX512) gwdata.cpu_flags &= ~CPU_AVX512F;
+		if (NO_FMA3) gwdata.cpu_flags &= ~CPU_FMA3;
+		if (NO_AVX) gwdata.cpu_flags &= ~CPU_AVX;
+		retcode = gwsetup(&gwdata, 1.0, 2, 100000001, -1);
+		t += getHighResTimer();
+	}
+	t = t / SLOWITERS; printf ("gwinit: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+
+	// Base 3 numbers
+
+	
+	// gwinit
+	gwdone (&gwdata);
+	gwinit (&gwdata);
+	if (NO_AVX512) gwdata.cpu_flags &= ~CPU_AVX512F;
+	if (NO_FMA3) gwdata.cpu_flags &= ~CPU_FMA3;
+	if (NO_AVX) gwdata.cpu_flags &= ~CPU_AVX;
+	gwset_num_threads (&gwdata, THREADS);
+	retcode = gwsetup(&gwdata, 1.0, 3, 63092975, -1);
+	gwfft_description (&gwdata, buf);
+	printf ("FFT: %s\n", buf);
+	gwdata.EXTRA_BITS = 1.0;
+	x = gwalloc (&gwdata);
+	y = gwalloc (&gwdata);
+	z = gwalloc (&gwdata);
+	tmp = gwalloc (&gwdata);
+	gw_random_number (&gwdata, x);
+	gwcopy (&gwdata, x, y); gwsquare (&gwdata, y);
+	gwcopy (&gwdata, y, z); gwsquare (&gwdata, z);
+
+	// Generate a base line, squaring with post fft, no error checking
+	gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	gwstartnextfft (&gwdata, 1);
+	for (i = 0; i < 10; i++) gwsquare (&gwdata, x);	// Put x in partial-FFTed state, warm up the processor
+	t = getHighResTimer ();
+	for (i = 0; i < ITERS; i++) {
+		gwsquare (&gwdata, x);
+	}
+	t = (getHighResTimer() - t) / ITERS; printf ("Base line gwsquare base-3 with startnextfft, no error checking: %f, or 1.0 * new baseline\n", t);
+	baseline_t = t;
+
+	// gwtobinary
+	{ uint32_t *array, arraylen;
+	  arraylen = divide_rounding_up (100000001, 32);
+	  array = (uint32_t *) malloc (arraylen * sizeof (uint32_t));
+	  gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	  gwstartnextfft (&gwdata, 0);
+	  gwsquare (&gwdata, x);
+	  t = getHighResTimer ();
+	  for (i = 0; i < SLOWITERS; i++) {
+		gwtobinary (&gwdata, x, array, arraylen);
+	  }
+	  t = (getHighResTimer() - t) / SLOWITERS; printf ("gwtobinary base-3: %f, or %0.2f * baseline\n", t, t / baseline_t);
+
+	// binarytogw
+	  gwsetnormroutine (&gwdata, 0, 0, 0);	// Error checking off
+	  gwstartnextfft (&gwdata, 0);
+	  t = getHighResTimer ();
+	  for (i = 0; i < SLOWITERS; i++) {
+		binarytogw (&gwdata, array, arraylen, x);
+	  }
+	  t = (getHighResTimer() - t) / SLOWITERS; printf ("binarytogw base-3: %f, or %0.2f * baseline\n", t, t / baseline_t);
+	  free (array);
+	}
+
+}
+

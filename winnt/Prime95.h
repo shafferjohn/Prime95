@@ -5,11 +5,7 @@
 #define X86_64
 #endif
 
-#include <time.h>
-#include <hwloc.h>
-#include <gmp.h>
 //#define SERVER_TESTING
-#define NO_GUI		1
 #include "common.h"
 #include "cpuid.h"
 #include "gwnum.h"

@@ -11,10 +11,8 @@
 # Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl --disable-opencl
 #
 #  Ugh, different linux variants require different makefiles.
-#  The current makefile is for CentOS 6.  We prefer to link against
-#  older Linux versions because linking on the latest, greatest version
-#  will create an mprime executable that will not run on older
-#  Linux versions because of glibc incompatibilites.
+#  The current makefile is for CentOS 7.  We prefer to link against older Linux versions because linking on the latest, greatest version
+#  creates an mprime executable that will not run on older Linux versions because of glibc incompatibilites.
 #
 #  Some linux versions require some of the variations below:
 #	"export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig"
@@ -23,17 +21,17 @@
 #	LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld -lm -lpthread -Wl,-Bstatic $(shell pkg-config --static --libs libhwloc) -Wl,-Bstatic $(shell pkg-config --static --libs libcurl) -lstdc++ -Wl,-Bdynamic -ldl
 
 CC = gcc
-CFLAGS = -I.. -I../gwnum -Wno-unused-result -march=i486 -malign-double -O2
+CFLAGS = -I.. -I../gwnum -I/usr/local/include -std=gnu99 -Wno-unused-result -march=i486 -malign-double -O2 -DPORT=2
 
 CPP = g++
-CPPFLAGS = -I.. -I../gwnum -Wno-unused-result -march=i486 -malign-double -O2
+CPPFLAGS = -I.. -I../gwnum -I../../boost_1_76_0 -Wno-unused-result -march=i486 -malign-double -std=c++11 -O2 -DPORT=2
 
 LFLAGS = -Wl,-M -Wl,-L/usr/local/lib
-LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -lz -lxml2 -ldl -lgmp
-#LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -ldl -lgmp
+#LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -lz -lxml2 -ldl -lgmp
+LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -ldl -lgmp
 
 FACTOROBJ = factor32.o
-LINUXOBJS = prime.o menu.o
+LINUXOBJS = prime.o menu.o cJSON.o ecm.o pair.o pm1prob.o
 EXE      = mprime
 
 #########################################################################
@@ -48,6 +46,18 @@ security:
 
 clean:
 	rm -f $(EXE) $(EXE2) $(LINUXOBJS)
+
+cJSON.o:
+	$(CPP) $(CPPFLAGS) -c ../cJSON.c
+
+ecm.o:
+	$(CPP) $(CPPFLAGS) -c ../ecm.cpp
+
+pair.o:
+	$(CPP) $(CPPFLAGS) -c ../pair.cpp
+
+pm1prob.o:
+	$(CPP) $(CPPFLAGS) -c ../pm1prob.c
 
 .c.o:
 	$(CC) $(CFLAGS) -c $<

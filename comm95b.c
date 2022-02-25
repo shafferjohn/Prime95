@@ -5,7 +5,7 @@
  * Comm95b contains information used only during execution
  * Comm95c contains information used during setup and execution
  *
- * Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
+ * Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
  *
  */ 
 
@@ -350,3 +350,9 @@ double get_load_average (void)
 {
 	return (-1.0);
 }
+
+/* Tell malloc to free memory back to the OS */
+
+void mallocFreeForOS () {
+}
+

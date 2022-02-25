@@ -2,6 +2,8 @@
 // Microsoft Visual C++ generated include file.
 // Used by Prime95.rc
 //
+// Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
+//
 #define IDH_PRIMENET                    11
 #define IDH_WORKER_THREADS              12
 #define IDH_VACATION                    13
@@ -98,8 +100,8 @@
 #define IDC_NUM_CURVES                  1012
 #define IDC_TIMEFFT                     1012
 #define IDC_ARCHIVE_DIR_TEXT            1012
-#define IDC_THREAD                      1013
-#define IDC_THREAD_TEXT                 1014
+#define IDC_WORKER			1013
+#define IDC_WORKER_TEXT			1014
 #define IDC_USERID                      1015
 #define IDC_P4                          1015
 #define IDC_P5                          1016
@@ -133,7 +135,7 @@
 #define IDC_NOW                         1036
 #define IDC_HYPER_LL                    1037
 #define IDC_HYPER_TF                    1038
-#define IDC_THREADNUM_TEXT              1040
+#define IDC_WORKERNUM_TEXT              1040
 #define IDC_NUMCPUS_TEXT                1041
 #define IDC_DAY_MEMORY_TEXT             1042
 #define IDC_DAY_MEMORY                  1043

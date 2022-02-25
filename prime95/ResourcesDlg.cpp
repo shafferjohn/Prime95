@@ -1,5 +1,7 @@
 // ResourcesDlg.cpp : implementation file
 //
+// Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
+//
 
 #include "stdafx.h"
 #include "Prime95.h"
@@ -11,15 +13,20 @@
 static char THIS_FILE[] = __FILE__;
 #endif
 
+#define round_to_tenth(a)	((round((a) * 10.0)) / 10.0)
+
 /////////////////////////////////////////////////////////////////////////////
 // CResourcesDlg dialog
-
 
 CResourcesDlg::CResourcesDlg(CWnd* pParent /*=NULL*/)
 	: CDialog(CResourcesDlg::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CResourcesDlg)
 	m_disk = 0.0;
+	m_day_memory = 0.0;
+	m_night_memory = 0.0;
+	m_start_time = _T("");
+	m_end_time = _T("");
 	m_upload_bandwidth = 0.0;
 	m_upload_start = _T("");
 	m_upload_end = _T("");
@@ -35,6 +42,12 @@ void CResourcesDlg::DoDataExchange(CDataExchange* pDX)
 	//{{AFX_DATA_MAP(CResourcesDlg)
 	DDX_Text(pDX, IDC_DISK, m_disk);
 	DDV_MinMaxFloat(pDX, m_disk, (float) 0.0, (float) 1000.0);
+	DDX_Text(pDX, IDC_START_TIME, m_start_time);
+	DDX_Text(pDX, IDC_END_TIME, m_end_time);
+	DDX_Text(pDX, IDC_DAY_MEMORY, m_day_memory);
+	DDV_MinMaxFloat(pDX, m_day_memory, 0.0, (float) round_to_tenth (0.9 * physical_memory () / 1024.0));
+	DDX_Text(pDX, IDC_NIGHT_MEMORY, m_night_memory);
+	DDV_MinMaxFloat(pDX, m_night_memory, 0.0, (float) round_to_tenth (0.9 * physical_memory () / 1024.0));
 	DDX_Text(pDX, IDC_UPLOAD_BANDWIDTH, m_upload_bandwidth);
 	DDV_MinMaxFloat(pDX, m_upload_bandwidth, (float) 0.05, (float) 10000.0);
 	DDX_Text(pDX, IDC_UPLOAD_START, m_upload_start);
@@ -66,15 +79,12 @@ BEGIN_MESSAGE_MAP(CResourcesDlg, CDialog)
 END_MESSAGE_MAP()
 
 
-#define round_to_tenth(a)	((round((a) * 10.0)) / 10.0)
-
 /////////////////////////////////////////////////////////////////////////////
 // CResourcesDlg message handlers
 
 void CResourcesDlg::OnAdvanced()
 {
 	CResourcesAdvancedDlg dlg;
-	unsigned int day_memory, night_memory, day_start_time, day_end_time;
 	char	buf[512];
 
 	UpdateData ();		// Get the values from the dialog box (specifically, update m_download_mb)
@@ -82,13 +92,6 @@ void CResourcesDlg::OnAdvanced()
 	dlg.m_temp_dir = buf;
 	IniGetString (LOCALINI_FILE, "ProofArchiveDir", buf, sizeof (buf), NULL);
 	dlg.m_archive_dir = buf;
-	read_memory_settings (&day_memory, &night_memory, &day_start_time, &day_end_time);
-	dlg.m_day_memory = (float) round_to_tenth (day_memory / 1024.0);
-	dlg.m_night_memory = (float) round_to_tenth (night_memory / 1024.0);
-	minutesToStr (day_start_time, buf);
-	dlg.m_start_time = buf;
-	minutesToStr (day_end_time, buf);
-	dlg.m_end_time = buf;
 	dlg.m_emergency_mem = (float) round_to_tenth (IniGetInt (LOCALINI_FILE, "MaxEmergencyMemory", 1024) / 1024.0);
 	dlg.m_priority = PRIORITY;
 	dlg.m_cert_cpu = IniGetInt (LOCALINI_FILE, "CertDailyCPULimit", 10);
@@ -97,7 +100,6 @@ void CResourcesDlg::OnAdvanced()
 	dlg.m_can_upload = m_can_upload;
 	dlg.m_can_download = (m_download_mb != 0);
 	if (dlg.DoModal () == IDOK) {
-		unsigned int new_day_start_time, new_day_end_time;
 		int	restart = FALSE;
 
 		IniWriteString (LOCALINI_FILE, "ProofResiduesDir", (const char *) dlg.m_temp_dir);
@@ -105,16 +107,6 @@ void CResourcesDlg::OnAdvanced()
 
 /* Save the new memory settings */
 
-		new_day_start_time = strToMinutes ((const char *) dlg.m_start_time);
-		new_day_end_time = strToMinutes ((const char *) dlg.m_end_time);
-		if (day_memory != (int) (dlg.m_day_memory * 1024.0)  ||
-		    night_memory != (int) (dlg.m_night_memory * 1024.0) ||
-		    day_start_time != new_day_start_time ||
-		    day_end_time != new_day_end_time) {
-			write_memory_settings ((int) (dlg.m_day_memory * 1024.0), (int) (dlg.m_night_memory * 1024.0), new_day_start_time, new_day_end_time);
-			mem_settings_have_changed ();
-			spoolMessage (PRIMENET_PROGRAM_OPTIONS, NULL);
-		}
 		IniWriteInt (LOCALINI_FILE, "MaxEmergencyMemory", (long) (dlg.m_emergency_mem * 1024.0));
 
 /* If user changed the priority of worker threads, then change the INI file. */
@@ -160,10 +152,6 @@ CResourcesAdvancedDlg::CResourcesAdvancedDlg(CWnd* pParent /*=NULL*/)
 	//{{AFX_DATA_INIT(CResourcesAdvancedDlg)
 	m_temp_dir = _T("");
 	m_archive_dir = _T("");
-	m_day_memory = 0.0;
-	m_night_memory = 0.0;
-	m_start_time = _T("");
-	m_end_time = _T("");
 	m_emergency_mem = 0.0;
 	m_priority = 0;
 	m_cert_cpu = 0;
@@ -178,7 +166,7 @@ CResourcesAdvancedDlg::CResourcesAdvancedDlg(CWnd* pParent /*=NULL*/)
 void CResourcesAdvancedDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialog::DoDataExchange(pDX);
-	float	max_emergency_mem = (float) (0.25 * physical_memory () / 1024.0);
+	float	max_emergency_mem = (float) round_to_tenth (0.25 * physical_memory () / 1024.0);
 	if (max_emergency_mem < 1.0) max_emergency_mem = 1.0;
 
 	//{{AFX_DATA_MAP(PrimenetDlg)
@@ -187,12 +175,6 @@ void CResourcesAdvancedDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_ARCHIVE_DIR_TEXT, c_archive_dir_text);
 	DDX_Control(pDX, IDC_ARCHIVE_DIR, c_archive_dir);
 	DDX_Text(pDX, IDC_ARCHIVE_DIR, m_archive_dir);
-	DDX_Text(pDX, IDC_START_TIME, m_start_time);
-	DDX_Text(pDX, IDC_END_TIME, m_end_time);
-	DDX_Text(pDX, IDC_DAY_MEMORY, m_day_memory);
-	DDV_MinMaxFloat(pDX, m_day_memory, 0.0, (float) (0.9 * physical_memory () / 1024.0));
-	DDX_Text(pDX, IDC_NIGHT_MEMORY, m_night_memory);
-	DDV_MinMaxFloat(pDX, m_night_memory, 0.0, (float) (0.9 * physical_memory () / 1024.0));
 	DDX_Text(pDX, IDC_EMERGENCY_MEM, m_emergency_mem);
 	DDV_MinMaxFloat(pDX, m_emergency_mem, 0.0, max_emergency_mem);
 	DDX_Text(pDX, IDC_PRIORITY, m_priority);
@@ -210,8 +192,8 @@ void CResourcesAdvancedDlg::DoDataExchange(CDataExchange* pDX)
 	c_archive_dir.EnableWindow (m_can_upload);
 	c_cert_cpu_text.EnableWindow (m_can_download);
 	c_cert_cpu.EnableWindow (m_can_download);
-	c_hyper_tf.EnableWindow (CPU_HYPERTHREADS > 1);
-	c_hyper_ll.EnableWindow (CPU_HYPERTHREADS > 1);
+	c_hyper_tf.EnableWindow (HW_NUM_CORES != HW_NUM_THREADS);
+	c_hyper_ll.EnableWindow (HW_NUM_CORES != HW_NUM_THREADS);
 }
 
 

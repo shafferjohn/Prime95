@@ -4,7 +4,7 @@
 // THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 // PARTICULAR PURPOSE.
 //
-// Copyright (c) 1997-2020 Mersenne Research, Inc. All Rights Reserved.
+// Copyright (c) 1997-2021 Mersenne Research, Inc. All Rights Reserved.
 //
 */
 
@@ -101,6 +101,8 @@ struct primenetUpdateComputerInfo {
 #define PRIMENET_WP_PRP_DBLCHK		151	/* PRP double checks */
 #define PRIMENET_WP_PRP_WORLD_RECORD	152	/* PRP test of world record Mersennes */
 #define PRIMENET_WP_PRP_100M		153	/* PRP test of 100M digit Mersennes */
+#define PRIMENET_WP_PRP_NO_PMINUS1	154	/* PRP test that if possible also needs P-1 */
+#define PRIMENET_WP_PRP_DC_PROOF	155	/* PRP double-check where a proof will be produced */
 #define PRIMENET_WP_PRP_COFACTOR	160	/* PRP test of Mersenne cofactors */
 #define PRIMENET_WP_PRP_COFACTOR_DBLCHK	161	/* PRP double check of Mersenne cofactors */
 
@@ -143,6 +145,7 @@ struct primenetProgramOptions {
 #define PRIMENET_WORK_TYPE_PMINUS1	3
 #define PRIMENET_WORK_TYPE_PFACTOR	4
 #define PRIMENET_WORK_TYPE_ECM		5
+#define PRIMENET_WORK_TYPE_PPLUS1	6		/* Not yet supported by the server */
 #define PRIMENET_WORK_TYPE_FIRST_LL	100
 #define PRIMENET_WORK_TYPE_DBLCHK	101
 #define PRIMENET_WORK_TYPE_PRP		150
@@ -180,6 +183,7 @@ struct primenetGetAssignment {
 	uint32_t prp_residue_type;	/* PRP residue type to return in a PRP double-check */
 	uint32_t prp_dblchk;		/* True is this is a PRP double-check */
 	uint32_t num_squarings;		/* Certification number of squarings */
+	uint32_t nth_run;		/* P+1 nth run:  1=2/7, 2=6/5, 3=random */
 	char	known_factors[2000];	/* List of known factors */
 };
 
@@ -240,8 +244,10 @@ struct primenetAssignmentProgress {
 #define PRIMENET_AR_P1_FACTOR	2	/* P-1, factor found */
 #define PRIMENET_AR_ECM_FACTOR	3	/* ECM, factor found */
 #define PRIMENET_AR_TF_NOFACTOR	4	/* Trial Factoring no factor found */
-#define PRIMENET_AR_P1_NOFACTOR	5	/* P-1 Factoring no factor found */
-#define PRIMENET_AR_ECM_NOFACTOR 6	/* ECM Factoring no factor found */
+#define PRIMENET_AR_P1_NOFACTOR	5	/* P-1 factoring no factor found */
+#define PRIMENET_AR_ECM_NOFACTOR 6	/* ECM factoring no factor found */
+#define PRIMENET_AR_PP1_FACTOR	7	/* P+1, factor found */
+#define PRIMENET_AR_PP1_NOFACTOR 8	/* P+1 factoring no factor found */
 #define PRIMENET_AR_LL_RESULT	100	/* LL result, not prime */
 #define PRIMENET_AR_LL_PRIME	101	/* LL result, Mersenne prime */
 #define PRIMENET_AR_PRP_RESULT	150	/* PRP result, not prime */
@@ -289,6 +295,9 @@ struct primenetAssignmentResult {
 	uint32_t prp_residue_type;	/* PRP Residue type */
 	uint32_t proof_power;		/* Zero if no proof, else power used in proof */
 	char	JSONmessage[2000];	/* JSON message.  If not empty, this text is sent rather than the 201-byte message. */
+	uint32_t pp1_numerator;		/* P+1 starting numerator */
+	uint32_t pp1_denominator;	/* P+1 starting denominator */
+/* ADD NEW FIELDS HERE -- ELSE SPOOL FILES WILL BE CORRUPTED WHEN UPGRADING */
 
 	/* Returned by the server */
 

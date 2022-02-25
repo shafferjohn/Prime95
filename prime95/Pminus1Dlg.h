@@ -1,5 +1,7 @@
 // Pminus1Dlg.h : header file
 //
+//  Copyright 2000-2021 Mersenne Research, Inc. All rights reserved.
+//
 
 /////////////////////////////////////////////////////////////////////////////
 // CPminus1Dlg dialog
@@ -13,9 +15,9 @@ public:
 // Dialog Data
 	//{{AFX_DATA(CPminus1Dlg)
 	enum { IDD = IDD_PMINUS1 };
-	CStatic	c_thread_text;
-	CEdit	c_thread;
-	UINT	m_thread;
+	CStatic	c_worker_text;
+	CEdit	c_worker;
+	UINT	m_worker;
 	double	m_k;
 	UINT	m_b;
 	UINT	m_n;

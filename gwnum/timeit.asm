@@ -1,4 +1,4 @@
-; Copyright 1995-2018 Mersenne Research, Inc.  All rights reserved
+; Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -717,6 +717,9 @@ lab:	mov	rbx, 0			;; Offset for some avx macros (s.b. non-zero for with_mult mac
 	mov	rbp, 524288+256		;; Offset for mulf avx macros
 	mov	eax, outer_iters
 	mov	ecx, odd_iters
+	IFDEF X86_64
+	mov	r8, 0			;; yr4 and yr8 macros use this for optional distance between the two destination registers
+	ENDIF
 	mov	SRCARG, rdi		;; Save work buf addr
 av0a:	mov	rdi, SRCARG		;; Reload work buf addr (sincos data)
 	lea	rsi, [rdi+262144+4096+64] ;; Source & dest ptr
@@ -895,8 +898,8 @@ ENDIF
 avx512mac MACRO	memused, memarea, rdi_incr, ops:vararg
 	LOCAL	avx512label
 	avx512label CATSTR <av512case>,%avx512_case_num
-	avx512_case_num = avx512_case_num + 1
 	avx512mac1 avx512label, memused, memarea, rdi_incr, ops
+	avx512_case_num = avx512_case_num + 1
 	ENDM
 avx512mac1 MACRO lab, memused, memarea, rdi_incr, ops:vararg
 	LOCAL	av00, av0a, av0b
@@ -912,8 +915,13 @@ lab:	mov	rbx, 0			;; Offset for some avx macros (s.b. non-zero for with_mult mac
 	mov	rbp, 524288+256		;; Offset for mulf avx macros
 	mov	r12, norm_grp_mults
 	mov	r13, r12
+	IF (avx512_case_num GE 108 AND avx512_case_num LT 116)
 	mov	r8, 128			;; d1reg for "rsc" macros
 	mov	r9, 384			;; d3reg for "rsc" macros
+	ELSE
+	mov	r8, 0			;; zr64 macros use this for optional distance between the two destination registers
+	mov	r9, 0			;; unused by any macro
+	ENDIF
 	mov	eax, outer_iters
 	mov	ecx, odd_iters
 	mov	SRCARG, rdi		;; Save work buf addr
@@ -1499,6 +1507,29 @@ INCLUDE ymult.mac
 INCLUDE yr4.mac
 INCLUDE ynormal.mac
 
+IFDEF X86_64
+EXTRNP	ycomplex_mult_opcode1
+EXTRNP	ycomplex_mult_opcode2
+EXTRNP	ycomplex_mult_opcode3
+EXTRNP	ycomplex_mult_opcode4
+EXTRNP	ycomplex_mult_opcode5
+EXTRNP	ycomplex_mult_opcode6
+EXTRNP	ycomplex_mulf_opcode1
+EXTRNP	ycomplex_mulf_opcode2
+EXTRNP	ycomplex_mulf_opcode3
+EXTRNP	ycomplex_mulf_opcode4
+EXTRNP	ycomplex_mulf_opcode5
+EXTRNP	ycomplex_mulf_opcode6
+EXTRN	y8complex_mult_opcode1:PROC
+EXTRN	y8complex_mult_opcode2:PROC
+EXTRN	y8complex_mult_opcode3:PROC
+EXTRN	y8complex_mult_opcode4:PROC
+EXTRN	y8complex_mulf_opcode1:PROC
+EXTRN	y8complex_mulf_opcode2:PROC
+EXTRN	y8complex_mulf_opcode3:PROC
+EXTRN	y8complex_mulf_opcode4:PROC
+ENDIF
+
 ; This code reads/writes 64MB (1M cache lines) in contiguous blocks.  Timings are done
 ; on 4 memory sizes.  4KB will operate on the L1 cache only, 128KB will operate on the
 ; L2 cache only, 1MB will operate on the L3 cache and 32MB will operate on main memory.
@@ -1903,6 +1934,10 @@ INCLUDE zonepass.mac
 INCLUDE zr4.mac
 INCLUDE znormal.mac
 INCLUDE znormal_zpad.mac
+
+EXTRN zcomplex_square_opcode:PROC
+EXTRN zcomplex_mult_opcode:PROC
+EXTRN zcomplex_mulf_opcode:PROC
 
 FMApenalty_test1 MACRO		;; Test if latency is really 4 clocks, ideal macro timing is 4 clocks
 	zfmaddpd	zmm0, zmm0, zmm0, zmm0

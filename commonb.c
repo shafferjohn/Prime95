@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2020 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
 |
 | This file contains routines and global variables that are common for
 | all operating systems the program has been ported to.  It is included
@@ -9,6 +9,8 @@
 | Commonb contains information used only during execution
 | Commonc contains information used during setup and execution
 +---------------------------------------------------------------------*/
+
+#include "ecm.h"
 
 /* Globals for error messages */
 
@@ -32,7 +34,7 @@ static const char ERROK[] = "Disregard last error.  Result is reproducible and t
 static const char READFILEERR[] = "Error reading intermediate file: %s\n";
 static const char WRITEFILEERR[] = "Error writing intermediate file: %s\n";
 static const char ALTSAVE_MSG[] = "Trying backup intermediate file: %s\n";
-static const char ALLSAVEBAD_MSG[] = "All intermediate files bad.  Temporarily abandoning work unit.\n";
+const char ALLSAVEBAD_MSG[] = "All intermediate files bad.  Temporarily abandoning work unit.\n";
 
 /* PauseWhileRunning globals */
 
@@ -132,61 +134,25 @@ gwevent MEM_WAIT_OR_STOP[MAX_NUM_WORKER_THREADS] = {0};
 
 /* Globals for memory manager */
 
-#define DEFAULT_MEM_USAGE 24	/* 24MB default */
+#define DEFAULT_MEM_USAGE 48	/* 48MB default */
 unsigned long AVAIL_MEM = 0;	/* Memory available now */
 unsigned long MAX_MEM = 0;	/* Max memory available */
-unsigned long AVAIL_MEM_PER_WORKER[MAX_NUM_WORKER_THREADS] = {0};
-				/* Maximum memory each worker can use */
-unsigned long MAX_HIGH_MEM_WORKERS =  0; /* Maximum number of workers */
-				/* allowed to use lots of memory */
-#define MEM_USAGE_NOT_SET 0x1	/* The mem_in_use value is just a guess */
-				/* as the work unit for the thread has not */
-				/* started yet or is restarting. */
-#define MEM_RESTARTING	0x2	/* The mem_in_use value will be changing */
-				/* soon as the thread is being restarted */
-				/* because it was using too much memory. */
-#define MEM_WILL_BE_VARIABLE_USAGE 0x4
-				/* The current work unit will be a */
-				/* variable memory user.  We just don't */
-				/* know how much it will use yet. */
-#define	MEM_VARIABLE_USAGE 0x8	/* The current work unit is using a */
-				/* lot of memory now and if needed could */
-				/* use less if restarted. */
-#define MEM_WAITING	0x10	/* Set if thread is waiting for another thread */
-				/* to stop before returning from set_memory_usage */
-char	MEM_FLAGS[MAX_NUM_WORKER_THREADS] = {0};
-				/* Flags indicating which threads will be */
-				/* affected by a change in memory settings. */
-unsigned int MEM_IN_USE[MAX_NUM_WORKER_THREADS] = {0};
-				/* Array containing memory in use by each */
-				/* worker thread */
+unsigned long AVAIL_MEM_PER_WORKER[MAX_NUM_WORKER_THREADS] = {0};	/* Maximum memory each worker can use */
+unsigned long MAX_HIGH_MEM_WORKERS =  0;				/* Maximum number of workers allowed to use lots of memory */
+char	MEM_FLAGS[MAX_NUM_WORKER_THREADS] = {0};			/* Flags indicating which threads will be affected by a change in memory settings. */
+unsigned int MEM_IN_USE[MAX_NUM_WORKER_THREADS] = {0};			/* Array containing memory in use by each worker thread */
 
-#define MEM_RESTART_LOWMEM_ENDS 0x1
-				/* Worker needs to restart when */
-				/* the LowMemWhileRunning program ends. */
-#define MEM_RESTART_MAX_MEM_AVAILABLE 0x2
-				/* Worker needs to restart when available memory */
-				/* equals maximum memory.  This happens when */
-				/* stage 2 is delayed until max memory is available. */
-#define MEM_RESTART_MAX_MEM_CHANGE 0x4
-				/* Current work unit needs to restart if */
-				/* max mem changes.  P-1 may choose different */
-				/* bounds because of the change */
-#define MEM_RESTART_TOO_MANY_HIGHMEM 0x8
-				/* Worker needs to restart because */
-				/* MAX_HIGH_MEM_WORKERS exceeded. */
-#define MEM_RESTART_MORE_AVAIL 0x10 /* One of the worker's work units did not */
-				/* have enough memory to run.  If memory */
-				/* becomes available restart the worker. */
-#define MEM_RESTART_IF_MORE 0x20 /* The current work unit could use more memory */
-				/* and should be restarted if more becomes */
-				/* available. */
+#define MEM_RESTART_LOWMEM_ENDS 0x1		/* Worker needs to restart when the LowMemWhileRunning program ends. */
+#define MEM_RESTART_MAX_MEM_AVAILABLE 0x2	/* Worker needs to restart when available memory equals maximum memory.  This happens when */
+						/* stage 2 is delayed until max memory is available. */
+#define MEM_RESTART_MAX_MEM_CHANGE 0x4		/* Current work unit needs to restart if max mem changes.  P-1 may choose different bounds because of the change */
+#define MEM_RESTART_TOO_MANY_HIGHMEM 0x8	/* Worker needs to restart because MAX_HIGH_MEM_WORKERS exceeded. */
+#define MEM_RESTART_MORE_AVAIL 0x10		/* One of the worker's work units did not have enough memory to run.  If memory becomes available restart the worker. */
+#define MEM_RESTART_IF_MORE 0x20		/* The current work unit could use more memory and should be restarted if more becomes available. */
 
 char	MEM_RESTART_FLAGS[MAX_NUM_WORKER_THREADS] = {0};
 unsigned int MEM_RESTART_MIN_AMOUNT[MAX_NUM_WORKER_THREADS] = {0};
-unsigned int MEM_RESTART_DESIRED_AMOUNT[MAX_NUM_WORKER_THREADS] = {0};
-				/* Only restart if this amount of memory  */
-				/* is available */
+unsigned int MEM_RESTART_DESIRED_AMOUNT[MAX_NUM_WORKER_THREADS] = {0};	/* Only restart if this amount of memory is available */
 unsigned int MEM_RESTART_IF_MORE_AMOUNT[MAX_NUM_WORKER_THREADS] = {0};
 
 int	MEM_MUTEX_INITIALIZED = FALSE;
@@ -228,6 +194,14 @@ void start_timer (
 	}
 }
 
+void start_timer_from_zero (
+	double	*timers,
+	int	i)
+{
+	clear_timer (timers, i);
+	start_timer (timers, i);
+}
+
 void end_timer (
 	double	*timers,
 	int	i)
@@ -264,11 +238,6 @@ double timer_value (
 	else
 		return (timers[i] / 1000000.0);
 }
-
-#define TIMER_NL	0x1
-#define TIMER_CLR	0x2
-#define TIMER_OPT_CLR	0x4
-#define TIMER_MS	0x8
 
 void print_timer (
 	double	*timers,
@@ -330,10 +299,109 @@ void print_timer (
 /*    Routines dealing with thread priority and affinity      */
 /**************************************************************/
 
+/* The hwloc library numbers cores from 0 to HW_NUM_CORES-1.  But we do not necessarily assign cores in that order. */
+/* With the introduction of Alder Lake, we first assign compute/performance cores.  Then assign efficiency cores. */
+/* This routine maps "prime95 core numbers" into "hwloc core numbers", returning the index into the HW_CORES array (this array index */
+/* is the same as the hwloc library's core number).  This routine allows us to apply different ranking criteria for future architectures. */
+uint32_t get_ranked_core (		/* Return hwloc core number (index into HW_CORES array) */
+	uint32_t core_num)		/* A "prime95 core number".  Zero for the first core, one for the second core, ... */
+{
+	uint32_t i, num_performance_cores, num_efficiency_cores;
+	core_num++;			// Need a one-based core_num in this routine
+	ASSERTG (core_num <= HW_NUM_CORES);
+	num_performance_cores = 0;
+	num_efficiency_cores = 0;
+	for (i = 0; i < HW_NUM_CORES; i++) {
+		if (HW_CORES[i].ranking >= 1) num_performance_cores++; else num_efficiency_cores++;
+		if (core_num <= HW_NUM_COMPUTE_CORES && core_num == num_performance_cores) return (i);
+		if (core_num > HW_NUM_COMPUTE_CORES && core_num - HW_NUM_COMPUTE_CORES == num_efficiency_cores) return (i);
+	}
+	ASSERTG (0);
+	return (0);
+}
+
+/* Return the number of threads gwnum will need to use to when running on several possibly hyperthreaded cores */
+uint32_t get_ranked_num_threads (
+	uint32_t base_core_num,		/* A "prime95 core number".  Zero for the first core, one for the second core, ... */
+	uint32_t num_cores,		/* Number of cores the gwnum FFT should use */
+	bool	hyperthreading)		/* TRUE if the gwnum FFT should use hyperthreading if available on each core */
+{
+	if (!hyperthreading) return (num_cores);
+	uint32_t num_threads = 0;
+	for (uint32_t core = base_core_num; core < (int) HW_NUM_CORES && core < base_core_num + num_cores; core++)
+		num_threads += HW_CORES[get_ranked_core(core)].num_threads;
+	return (num_threads);
+}
+
+/* Return the number of threads gwnum will need to use when a worker is running on several possibly hyperthreaded cores */
+uint32_t get_worker_num_threads (
+	uint32_t worker_num,		/* Worker number (zero based) */
+	bool	hyperthreading)		/* TRUE if the gwnum FFT should use hyperthreading if available on each core */
+{
+	// No hyperthreading is the easy case - one thread per cores to use.
+	if (!hyperthreading) return (CORES_PER_TEST[worker_num]);
+
+	// Mimic the code in SetPriority for SET_PRIORITY_NORMAL_WORK.  We want to total up the hyperthreads available on the
+	// core(s) this worker will be assigned to.  
+
+	// The first case is the user defined affinity assignments which we hope no one is using.  This is a comma separated
+	// list of affinity settings for each thread.
+	char	section_name[32];
+	const char *p;
+	sprintf (section_name, "Worker #%d", worker_num + 1);
+	p = IniSectionGetStringRaw (LOCALINI_FILE, section_name, "Affinity");
+	if (p != NULL) return (countCommas (p) + 1);
+
+	// Second case is the special SET_PRIORITY_NORMAL_WORK code where num workers = num cores
+	if (NUM_WORKER_THREADS == HW_NUM_COMPUTE_CORES || NUM_WORKER_THREADS == HW_NUM_CORES) return (get_ranked_num_threads (worker_num, 1, hyperthreading));
+
+	// Third case is to duplicate the SET_PRIORITY_NORMAL_WORK code to get the prime95 base core number using the total number of cores to use
+	uint32_t worker_core_count, cores_used_by_lower_workers, base_core_num;
+	worker_core_count = cores_used_by_lower_workers = 0;
+	for (uint32_t i = 0; i < NUM_WORKER_THREADS; i++) {
+		worker_core_count += CORES_PER_TEST[i];
+		if (i < worker_num) cores_used_by_lower_workers += CORES_PER_TEST[i];
+	}
+	if (worker_core_count < HW_NUM_COMPUTE_CORES && HW_NUM_COMPUTE_CORES == HW_NUM_CORES) base_core_num = cores_used_by_lower_workers + 1;
+	else if (worker_core_count <= HW_NUM_CORES) base_core_num = cores_used_by_lower_workers;
+	else base_core_num = cores_used_by_lower_workers % HW_NUM_CORES;
+	// Now return the sum of threads available in these core(s)
+	return (get_ranked_num_threads (base_core_num, CORES_PER_TEST[worker_num], hyperthreading));
+}
+
+/* Return the number of cores in the specified threading node */
+uint32_t get_cores_in_threading_node (
+	uint32_t node_num)		/* Threading node number (zero-based) */
+{
+//NOTE:  This needs beefing up to handle new asymmetric architectures
+	if (node_num < HW_NUM_COMPUTE_THREADING_NODES) return (HW_NUM_COMPUTE_CORES / HW_NUM_COMPUTE_THREADING_NODES);
+	return ((HW_NUM_CORES - HW_NUM_COMPUTE_CORES) / (HW_NUM_THREADING_NODES - HW_NUM_COMPUTE_THREADING_NODES));
+}
+
+/* Internal routine to map base prime95 core number + aux_thread_num into the hwloc core number to set affinity to */
+uint32_t map_aux_to_core (
+	uint32_t base_core_num,		/* A "prime95 core number".  Zero for the first core, one for the second core, ... */
+	uint32_t aux_thread_num,	/* Zero for main thread, one or more for helper threads */
+	bool	hyperthreading)		/* TRUE if the gwnum FFT is using hyperthreading */
+{
+	ASSERTG (base_core_num < (int) HW_NUM_CORES);
+	// Without hyperthreading.  Aux-thread-num is same as core # since we are running one thread per core.  Map to hwloc core numbering.
+	if (!hyperthreading) return (get_ranked_core (base_core_num + aux_thread_num));
+	// With hyperthreading.  Use every thread on each core.  Map to hwloc core numbering.
+	uint32_t total_threads = 0;
+	uint32_t hwloc_core = 0;
+	for (int core = base_core_num; ; core++) {
+		if (core == (int) HW_NUM_CORES) core = 0;		// Shouldn't happen unless user has oversubscribed the CPU's core count.  Wrap around.
+		hwloc_core = get_ranked_core (core);
+		total_threads += HW_CORES[hwloc_core].num_threads;
+		if (aux_thread_num < total_threads) break;
+	}
+	return (hwloc_core);
+}
+
 /* Set thread priority and affinity correctly.  Most screen savers run at priority 4. */
-/* Most application's run at priority 9 when in foreground, 7 when in */
-/* background.  In selecting the proper thread priority I've assumed the */
-/* program usually runs in the background. */ 
+/* Most Windows application's run at priority 9 when in foreground, 7 when in background. */
+/* In selecting the proper thread priority I've assumed the program usually runs in the background. */ 
 
 void SetPriority (
 	struct PriorityInfo *info)
@@ -372,39 +440,35 @@ void SetPriority (
 
 	case SET_PRIORITY_TIME:
 		bind_type = 0;				// Set affinity to one specific core
-		core = info->aux_thread_num / info->time_hyperthreads;
+		// Timing without hyperthreading.  Aux-thread-num is same as core # since we are running one thread per core
+		// Timing with hyperthreading.  Use every thread on each core.
+		core = map_aux_to_core (0, info->aux_thread_num, info->time_hyperthreading);
+		break;
+
+/* Benchmarking -- similar to Advanced/Time.  Set affinity to appropriate core. */
+
+	case SET_PRIORITY_BENCHMARKING:
+		bind_type = 0;				// Set affinity to one specific core
+		// Benchmarking without hyperthreading.  Aux-thread-num is same as core # since we are running one thread per core
+		// Benchmarking with hyperthreading.  Use every thread on each core.
+		core = map_aux_to_core (info->bench_base_core_num, info->aux_thread_num, info->bench_hyperthreading);
 		break;
 
 /* Busy loop on specified CPU core. */
 
 	case SET_PRIORITY_BUSY_LOOP:
 		bind_type = 0;				// Set affinity to one specific core
-		core = info->busy_loop_cpu;
+		core = get_ranked_core (info->busy_loop_core);
 		break;
 
-/* Torture test affinity.  If we're running the same number of torture */
-/* tests as CPUs if the system then set affinity.  Otherwise, let the */
-/* threads run on any CPU. */
+/* Torture test affinity.  Set affinity (including all auxiliary threads) to the core being tortured. */
 
 	case SET_PRIORITY_TORTURE:
-		if (info->torture_num_workers * info->torture_threads_per_test == NUM_CPUS * CPU_HYPERTHREADS) {
-			bind_type = 0;				// Set affinity to one specific core
-			core = (info->worker_num * info->torture_threads_per_test + info->aux_thread_num) / CPU_HYPERTHREADS;
-		} else if (info->torture_num_workers * info->torture_threads_per_test == NUM_CPUS) {
-			bind_type = 0;				// Set affinity to one specific core
-			core = (info->worker_num * info->torture_threads_per_test + info->aux_thread_num);
-		} else
-			return;					// Run on any core
-		break;
-
-/* Benchmarking.  Set affinity to appropriate core. */
-
-	case SET_PRIORITY_BENCHMARKING:
 		bind_type = 0;				// Set affinity to one specific core
-		core = info->bench_base_cpu_num + info->aux_thread_num / info->bench_hyperthreads;
+		core = get_ranked_core (info->torture_core_num);
 		break;
 
-/* If user has given an explicit list of logical CPUs to set affinity to, then use that list. */
+/* If user has given an explicit list of logical CPU cores to set affinity to, then use that list. */
 /* Hopefully, there is no real need to ever use this feature. */
 
 	case SET_PRIORITY_NORMAL_WORK:
@@ -420,65 +484,54 @@ void SetPriority (
 			}
 		}
 
-/* If number of workers equals number of physical cpus then run each */
-/* worker on its own physical CPU.  Run auxiliary threads on the same */
-/* physical CPU.  This might be advantageous on hyperthreaded CPUs.  User */
-/* should be careful to not run more auxiliary threads than available */
-/* logical CPUs created by hyperthreading. */ 
+/* If number of workers equals number of physical cores then run each worker on its own physical core.  Run auxiliary threads on the same */
+/* physical core.  This might be advantageous on hyperthreaded CPUs.  User should be careful to not run more auxiliary threads than available */
+/* logical cores created by hyperthreading.  In essence, we are overriding the settings in CORES_TO_USE and using just one core.  This is not */
+/* intuitive to the user and perhaps we should delete this code! */
 
-		if (NUM_WORKER_THREADS == NUM_CPUS) {
+		if (NUM_WORKER_THREADS == HW_NUM_COMPUTE_CORES || NUM_WORKER_THREADS == HW_NUM_CORES) {
 			bind_type = 0;				// Set affinity to a specific physical CPU core
-			core = info->worker_num;
+			core = get_ranked_core (info->worker_num);
 			break;
 		}
 
-/* If number of workers equals number of logical cpus then run each */
-/* worker on its own logical CPU.  If the user is also running */
-/* auxiliary threads, then the user has made a really bad decision and a */
-/* performance hit will occur running on the same logical CPU. */
+/* Calculate the total num worker cores to be used.  We will base our affinity decisions on this value. */
 
-		if (NUM_WORKER_THREADS == NUM_CPUS * CPU_HYPERTHREADS) {
-			bind_type = 0;				// Set affinity to a specific physical CPU core
-			core = info->worker_num / CPU_HYPERTHREADS;
+		uint32_t worker_core_count, cores_used_by_lower_workers;
+		worker_core_count = cores_used_by_lower_workers = 0;
+		for (uint32_t i = 0; i < NUM_WORKER_THREADS; i++) {
+			worker_core_count += CORES_PER_TEST[i];
+			if (i < info->worker_num) cores_used_by_lower_workers += CORES_PER_TEST[i];
+		}
+
+/* If total num worker cores < num compute cores we will give each worker its own CPU.  There is some weak anecdotal */
+/* evidence that CPU 0 is reserved for interrupt processing on some OSes and architectures without efficiency cores, */
+/* so we leave CPU #0 unused (hoping hwloc assigns CPU numbers the same way the OS does). */
+
+		if (worker_core_count < HW_NUM_COMPUTE_CORES && HW_NUM_COMPUTE_CORES == HW_NUM_CORES) {
+			bind_type = 0;			// Set affinity to a specific physical CPU core
+			// Map prime95 core number and auxiliary thread number to hwloc core number
+			core = map_aux_to_core (cores_used_by_lower_workers + 1, info->aux_thread_num, info->normal_work_hyperthreading);
 			break;
 		}
 
-/* If total num CPUs == num_cpus, then there is an easy path forward */
-/* Example: a quad-core with worker 1 using 2 CPUs, and workers 2 & 3 each use 1 CPU --- no problem. */
+/* If total num worker cores <= num cores, then there is an easy path forward.  Assign cores in ascending order.  This will assigne efficiency cores last. */
 
-		{
-			int	i, worker_core_count, cores_used_by_lower_workers;
-			worker_core_count = cores_used_by_lower_workers = 0;
-			for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
-				worker_core_count += CORES_PER_TEST[i];
-				if (i < info->worker_num) cores_used_by_lower_workers += CORES_PER_TEST[i];
-			}
-
-			if (worker_core_count == NUM_CPUS) {
-				bind_type = 0;			// Set affinity to a specific physical CPU core
-				core = cores_used_by_lower_workers + info->aux_thread_num / info->normal_work_hyperthreads;
-				break;
-			}
-
-/* If total num cores < num_cpus we will give each thread its own CPU.  There is some anecdotal */
-/* evidence that CPU 0 is reserved for interrupt processing (on some OSes), so we leave CPU #0 unused */
-/* (hoping hwloc assigns CPU numbers the same way the OS does). */
-
-			if (worker_core_count < (int) NUM_CPUS) {
-				bind_type = 0;			// Set affinity to a specific physical CPU core
-				core = cores_used_by_lower_workers + info->aux_thread_num / info->normal_work_hyperthreads + 1;
-				break;
-			}
-
-/* If total num cores is between num_cpus is greater than num_cpus, then what to do? */
-/* Our default policy is to throw our hands up in despair and simply run on any CPU. */
-
-			return;
+		if (worker_core_count <= HW_NUM_CORES) {
+			bind_type = 0;			// Set affinity to a specific physical CPU core
+			// Map prime95 core number and auxiliary thread number to hwloc core number
+			core = map_aux_to_core (cores_used_by_lower_workers, info->aux_thread_num, info->normal_work_hyperthreading);
+			break;
 		}
 
-/* No good rule found for setting affinity.  Simply run on any CPU. */
+/* Total num worker cores is greater than num cores.  What to do? */
+/* Perhaps our default policy should be to throw our hands up in despair and simply run on any CPU core. */
+/* Instead, we "wrap around" and start assigning to compute cores again.  This lets the user create one worker per thread -- assuming the */
+/* compute cores rather than the efficiency cores are the ones likely to support hyperthreading. */
 
-		return;
+		bind_type = 0;			// Set affinity to a specific physical CPU core
+		core = map_aux_to_core (cores_used_by_lower_workers % HW_NUM_CORES, info->aux_thread_num, info->normal_work_hyperthreading);
+		break;
 	}
 
 /* Parse affinity settings specified in the INI file. */
@@ -490,12 +543,12 @@ void SetPriority (
 /*	[3,5-7],(4,6)	Run main worker thread on logical CPUs #3, #5, #6, & #7, run aux thread on logical CPUs #4 & #6 */
 
 	if (bind_type == 2) {		// Find the subset of the logical CPU string for this auxillary thread
-		int	i;
-		char	*p, *start, end_char;
+		uint32_t i;
+		const char *p;
 		for (i = 0, p = logical_CPU_string; i <= info->aux_thread_num && *p; i++) {
 			while (isspace (*p)) p++;
-			start = p;
-			end_char = 0;
+			const char *start = p;
+			char end_char = 0;
 			if (*p == '{') end_char = '}';
 			if (*p == '(') end_char = ')';
 			if (*p == '[') end_char = ']';
@@ -506,15 +559,13 @@ void SetPriority (
 					OutputStr (info->worker_num, buf);
 					return;
 				}
-				truncated_strcpy_with_len (logical_CPU_substring, sizeof (logical_CPU_substring),
-							   start + 1, (int) (p - start - 1));
+				truncated_strcpy_with_len (logical_CPU_substring, sizeof (logical_CPU_substring), start + 1, (int) (p - start - 1));
 				if (strchr (p, ',') != NULL) p = strchr (p, ',') + 1;
 				else p = p + strlen(p);
 			} else {
 				p = strchr (start, ',');
 				if (p != NULL) {
-					truncated_strcpy_with_len (logical_CPU_substring, sizeof (logical_CPU_substring),
-								   start, (int) (p - start));
+					truncated_strcpy_with_len (logical_CPU_substring, sizeof (logical_CPU_substring), start, (int) (p - start));
 					p++;
 				} else {
 					truncated_strcpy (logical_CPU_substring, sizeof (logical_CPU_substring), start);
@@ -526,21 +577,15 @@ void SetPriority (
 
 /* Output an informative message */
 
-	if (NUM_CPUS > 1 && info->verbose_flag) {
-		if (info->aux_hyperthread)
-			sprintf (buf, "Setting affinity to run prefetching hyperthread on ");
-		else if (info->aux_thread_num == 0)
-			strcpy (buf, "Setting affinity to run worker on ");
-		else
-			sprintf (buf, "Setting affinity to run helper thread %d on ", info->aux_thread_num);
-		if (bind_type == 0)
-			sprintf (buf+strlen(buf), "CPU core #%d\n", core+1);
+	if (HW_NUM_CORES > 1 && info->verbosity >= 1) {
+		if (info->aux_hyperthread) sprintf (buf, "Setting affinity to run prefetching hyperthread on ");
+		else if (info->aux_thread_num == 0) strcpy (buf, "Setting affinity to run worker on ");
+		else sprintf (buf, "Setting affinity to run helper thread %d on ", info->aux_thread_num);
+		if (bind_type == 0) sprintf (buf+strlen(buf), "CPU core #%d\n", core+1);
 #ifdef BIND_TYPE_1_USED
-		else if (bind_type == 1)
-			sprintf (buf+strlen(buf), "logical CPU #%d (zero-based)\n", logical_CPU);
+		else if (bind_type == 1) sprintf (buf+strlen(buf), "logical CPU #%d (zero-based)\n", logical_CPU);
 #endif
-		else
-			sprintf (buf+strlen(buf), "logical CPUs %s (zero-based)\n", logical_CPU_substring);
+		else sprintf (buf+strlen(buf), "logical CPUs %s (zero-based)\n", logical_CPU_substring);
 		OutputStr (info->worker_num, buf);
 	}
 
@@ -559,7 +604,7 @@ void SetPriority (
 		}
 		obj = hwloc_get_obj_by_type (hwloc_topology, HWLOC_OBJ_CORE, core);			/* Get proper core */
 		if (obj == NULL) obj = hwloc_get_obj_by_type (hwloc_topology, HWLOC_OBJ_PU, core);	/* Get proper core */
-		if (obj) {
+		if (obj != NULL) {
 			if (hwloc_set_cpubind (hwloc_topology, obj->cpuset, HWLOC_CPUBIND_THREAD)) { /* Bind thread to all logical CPUs in the core */
 				char	str[80];
 				int	error = errno;
@@ -567,12 +612,16 @@ void SetPriority (
 				sprintf (buf, "Error setting affinity to cpuset %s: %s\n", str, strerror (error));
 				OutputStr (info->worker_num, buf);
 			}
-			else if (info->verbose_flag >= 2) {
+			else if (info->verbosity >= 2) {
 				char	str[80];
 				hwloc_bitmap_snprintf (str, sizeof (str), obj->cpuset);
 				sprintf (buf, "Affinity set to cpuset %s\n", str);
 				OutputStr (info->worker_num, buf);
 			}
+		}
+		else {					// This shouldn't happen
+			sprintf (buf, "Error getting hwloc object for core #%d.  Affinity not set.\n", core+1);
+			OutputStr (info->worker_num, buf);
 		}
 	}
 
@@ -597,7 +646,7 @@ void SetPriority (
 				sprintf (buf, "Error setting affinity to cpuset %s: %s\n", str, strerror (error));
 				OutputStr (info->worker_num, buf);
 			}
-			else if (info->verbose_flag >= 2) {
+			else if (info->verbosity >= 2) {
 				char	str[80];
 				hwloc_bitmap_snprintf (str, sizeof (str), obj->cpuset);
 				sprintf (buf, "Affinity set to cpuset %s\n", str);
@@ -635,7 +684,7 @@ void SetPriority (
 			sprintf (buf, "Error setting affinity to cpuset %s: %s\n", str, strerror (error));
 			OutputStr (info->worker_num, buf);
 		}
-		else if (info->verbose_flag >= 2) {
+		else if (info->verbosity >= 2) {
 			char	str[80];
 			hwloc_bitmap_snprintf (str, sizeof (str), cpuset);
 			sprintf (buf, "Affinity set to cpuset %s\n", str);
@@ -649,19 +698,18 @@ void SetPriority (
 
 void SetAuxThreadPriority (int aux_thread_num, int action, void *data)
 {
-	struct PriorityInfo sp_info;
 
 /* Handle thread start and hyperthread start action.  Set the thread priority. */
 
 	if (action == 0 || action == 10) {
+		struct PriorityInfo sp_info;
 		memcpy (&sp_info, data, sizeof (struct PriorityInfo));
 		sp_info.aux_thread_num = aux_thread_num;
 		sp_info.aux_hyperthread = (action == 10);
 		SetPriority (&sp_info);
 	}
 
-/* Handle thread terminate and hyperthread terminate action.  Remove thread handle from list */
-/* of active worker threads. */
+/* Handle thread terminate and hyperthread terminate action.  Remove thread handle from list of active worker threads. */
 
 	if (action == 1 || action == 11) {
 		registerThreadTermination ();
@@ -1074,19 +1122,15 @@ void read_mem_info (void)
 		p = p + 6;
 	}
 
-/* Get the maximum number of workers that can use lots of memory */
-/* Default is AVAIL_MEM / 200MB rounded off. */
+/* Get the maximum number of workers that can use lots of memory.  Default is AVAIL_MEM / 1GB rounded off. */
 
-	MAX_HIGH_MEM_WORKERS = IniGetTimedInt (LOCALINI_FILE, "MaxHighMemWorkers",
-					       (AVAIL_MEM + 100) / 200, &seconds);
-	if (seconds && (seconds_until_reread == 0 || seconds < seconds_until_reread))
-		seconds_until_reread = seconds;
+	MAX_HIGH_MEM_WORKERS = IniGetTimedInt (LOCALINI_FILE, "MaxHighMemWorkers", (AVAIL_MEM + 500) / 1000, &seconds);
+	if (seconds && (seconds_until_reread == 0 || seconds < seconds_until_reread)) seconds_until_reread = seconds;
 	if (MAX_HIGH_MEM_WORKERS < 1) MAX_HIGH_MEM_WORKERS = 1;
 
 /* Add the event that fires when the memory settings expire. */
 
-	if (seconds_until_reread)
-		add_timed_event (TE_MEM_CHANGE, seconds_until_reread);
+	if (seconds_until_reread) add_timed_event (TE_MEM_CHANGE, seconds_until_reread);
 
 /* Unlock */
 
@@ -1119,8 +1163,7 @@ void clear_memory_restart_flags (
 	MEM_RESTART_FLAGS[thread_num] = 0;
 }
 
-/* Set thread to default memory usage.  For now, this is 24MB -- roughly */
-/* the amount of memory used by LL test using a 2.5M FFT. */
+/* Set thread to default memory usage.  For now, this is 48MB -- roughly the amount of memory used by LL test using a 5M FFT. */
 
 void set_default_memory_usage (
 	int	thread_num)
@@ -1281,13 +1324,11 @@ int set_memory_usage (
 			worst_thread = i;
 	}
 
-/* If we have allocated more than the maximum allowable, then stop a */
-/* thread to free up some memory.  We also make sure we are using significantly */
-/* more memory than we should be so that minor fluctuations in memory */
-/* usage by the fixed threads do not cause needless restarts.  The 32MB */
-/* threshold is arbitrary. */
+/* If we have allocated more than the maximum allowable, then stop a thread to free up some memory.  We also make sure we are using */
+/* significantly more memory than we should be so that minor fluctuations in memory usage by the fixed threads do not cause needless restarts. */
+/* The 64MB threshold is arbitrary. */
 
-	if (mem_usage > AVAIL_MEM + 32) {
+	if (mem_usage > AVAIL_MEM + 64) {
 
 /* If the current thread is the worst thread (should only happen if there has */
 /* been a wild change in other thread's memory usage between the call to */
@@ -1312,14 +1353,14 @@ int set_memory_usage (
 /* Wait for the stop to take effect so that we don't briefly over-allocate memory. */
 
 			MEM_FLAGS[thread_num] |= MEM_WAITING;
-			gwmutex_unlock (&MEM_MUTEX);
 			gwevent_init (&MEM_WAIT_OR_STOP[thread_num]);
 			gwevent_reset (&MEM_WAIT_OR_STOP[thread_num]);
 			MEM_WAIT_OR_STOP_INITIALIZED[thread_num] = 1;
+			gwmutex_unlock (&MEM_MUTEX);
 			gwevent_wait (&MEM_WAIT_OR_STOP[thread_num], 20);
+			gwmutex_lock (&MEM_MUTEX);
 			MEM_WAIT_OR_STOP_INITIALIZED[thread_num] = 0;
 			gwevent_destroy (&MEM_WAIT_OR_STOP[thread_num]);
-			gwmutex_lock (&MEM_MUTEX);
 			MEM_FLAGS[thread_num] &= ~MEM_WAITING;
 		}
 	}
@@ -1371,7 +1412,6 @@ int set_memory_usage (
 			if (are_threads_using_lots_of_memory (i)) continue;
 			stop_worker_for_mem_changed (i);
 			all_threads_set = FALSE;
-			break;
 		}
 	}
 
@@ -1452,12 +1492,8 @@ unsigned long max_mem (
 
 int avail_mem (
 	int	thread_num,
-	unsigned long minimum_memory,	/* If this much memory (in MB) */
-					/* can be returned without restarting other */
-					/* workers, then do so */
-	unsigned long desired_memory,	/* If this much memory (in MB) */
-					/* can be returned without restarting other */
-					/* workers, then do so */
+	unsigned long minimum_memory,	/* If this much memory (in MB) can be returned without restarting other workers, then do so */
+	unsigned long desired_memory,	/* If this much memory (in MB) can be returned without restarting other workers, then do so */
 	unsigned int *memory)		/* Returned available memory, in MB */
 {
 	int	i, fixed_threads[MAX_NUM_WORKER_THREADS];
@@ -1470,19 +1506,15 @@ int avail_mem (
 		return (STOP_NOT_ENOUGH_MEM);
 	}
 
-/* Check if we are only supposed to run high memory workers when the maximum */
-/* amount memory is available. */
+/* Check if we are only supposed to run high memory workers when the maximum amount memory is available. */
 
-	if (IniGetInt (INI_FILE, "OnlyRunStage2WithMaxMemory", 0) &&
-	    AVAIL_MEM != MAX_MEM) {
+	if (IniGetInt (INI_FILE, "OnlyRunStage2WithMaxMemory", 0) && AVAIL_MEM != MAX_MEM) {
 		OutputStr (thread_num, "Waiting for maximum available memory to run stage 2.\n");
 		MEM_RESTART_FLAGS[thread_num] |= MEM_RESTART_MAX_MEM_AVAILABLE;
 		return (STOP_NOT_ENOUGH_MEM);
 	}
 
-/* Check if we must wait for more memory to become available.  This */
-/* happens when we reach the maximum allowable number of threads using a lot */
-/* of memory. */
+/* Check if we must wait for more memory to become available.  This happens when we reach the maximum allowable number of threads using a lot of memory. */
 
 	if (are_threads_using_lots_of_memory (thread_num)) {
 		OutputStr (thread_num, "Exceeded limit on number of workers that can use lots of memory.\n");
@@ -1509,16 +1541,16 @@ int avail_mem (
 
 	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
 		if (i == thread_num) continue;
-		if (MEM_FLAGS[i] & MEM_USAGE_NOT_SET ||
-		    MEM_FLAGS[i] & MEM_RESTARTING) {
-			gwmutex_unlock (&MEM_MUTEX);
+		if (MEM_FLAGS[i] & MEM_USAGE_NOT_SET || MEM_FLAGS[i] & MEM_RESTARTING) {
 			gwevent_init (&MEM_WAIT_OR_STOP[thread_num]);
 			gwevent_reset (&MEM_WAIT_OR_STOP[thread_num]);
 			MEM_WAIT_OR_STOP_INITIALIZED[thread_num] = 1;
-			gwevent_wait (&MEM_WAIT_OR_STOP[thread_num], 20 + thread_num);
+			gwmutex_unlock (&MEM_MUTEX);
+			gwevent_wait (&MEM_WAIT_OR_STOP[thread_num], 5 + thread_num);
+			gwmutex_lock (&MEM_MUTEX);
 			MEM_WAIT_OR_STOP_INITIALIZED[thread_num] = 0;
 			gwevent_destroy (&MEM_WAIT_OR_STOP[thread_num]);
-			gwmutex_lock (&MEM_MUTEX);
+			break;
 		}
 	}
 
@@ -2434,7 +2466,7 @@ void checkLoadAverage (void)
 		double	threads_per_worker;
 		int	workers_to_stop;
 
-		threads_per_worker = (double) NUM_CPUS / (double) NUM_WORKER_THREADS;
+		threads_per_worker = (double) HW_NUM_CORES / (double) NUM_WORKER_THREADS;
 		if (threads_per_worker < 1.0) threads_per_worker = 1.0;
 		workers_to_stop = (int) ((load - HI_LOAD) / threads_per_worker);
 		if (workers_to_stop < 1) workers_to_stop = 1;
@@ -2644,9 +2676,8 @@ void calc_output_frequencies (
 	if (!scaled_freq) {
 		*output_frequency = 1.0;
 	} else {
-		*output_frequency = gwmap_to_timing (1.0, 2, 50000000, -1) /
-				    gwmap_to_timing (gwdata->k, gwdata->b, gwdata->n, gwdata->c);
-		if (gwget_num_threads (gwdata) > 1 && NUM_WORKER_THREADS < NUM_CPUS)
+		*output_frequency = gwmap_to_timing (1.0, 2, 50000000, -1) / gwmap_to_timing (gwdata->k, gwdata->b, gwdata->n, gwdata->c);
+		if (gwget_num_threads (gwdata) > 1 && NUM_WORKER_THREADS < HW_NUM_CORES)
 			*output_frequency /= 1.8 * (gwget_num_threads (gwdata) - 1);
 		/* For prettier output (outputs likely to be a multiple of a power of 10), round the */
 		/* output frequency to the nearest (10,15,20,25,30,40,...90) times a power of ten */
@@ -2726,10 +2757,8 @@ void create_worker_windows (
 
 	for (tnum = 0; tnum < num_threads; tnum++) {
 		create_window (tnum);
-		if (NUM_CPUS * CPU_HYPERTHREADS > 1)
-			sprintf (buf, "Worker #%d", tnum+1);
-		else
-			strcpy (buf, "Worker");
+		if (HW_NUM_THREADS > 1) sprintf (buf, "Worker #%d", tnum+1);
+		else strcpy (buf, "Worker");
 		base_title (tnum, buf);
 	}
 }
@@ -2737,10 +2766,8 @@ void create_worker_windows (
 /* Launch the worker threads to process work units */
 
 int LaunchWorkerThreads (
-	int	thread_num,		/* Specific worker to launch or */
-					/* special value ALL_WORKERS */
-	int	wait_flag)		/* TRUE if we wait for workers to */
-					/* end before returning. */
+	int	thread_num,		/* Specific worker to launch or special value ALL_WORKERS */
+	int	wait_flag)		/* TRUE if we wait for workers to end before returning. */
 {
 	struct LaunchData *ld;
 	gwthread thread_handle;
@@ -2777,8 +2804,7 @@ int LaunchWorkerThreads (
 
 int LaunchTortureTest (
 	unsigned long num_threads,	/* Number of torture tests to run */
-	int	wait_flag)		/* TRUE if we wait for workers to */
-					/* end before returning. */
+	int	wait_flag)		/* TRUE if we wait for workers to end before returning. */
 {
 	struct LaunchData *ld;
 	gwthread thread_handle;
@@ -2800,7 +2826,8 @@ int LaunchTortureTest (
 /* Launch a thread to do a benchmark */
 
 int LaunchBench (
-	int	bench_type)		/* 0 = Throughput, 1 = FFT timings, 2 = Trial factoring */
+	int	bench_type,		/* 0 = Throughput, 1 = FFT timings, 2 = Trial factoring */
+	int	wait_flag)		/* TRUE if we wait for workers to end before returning. */
 {
 	struct LaunchData *ld;
 	gwthread thread_handle;
@@ -2812,7 +2839,11 @@ int LaunchBench (
 	LAUNCH_TYPE = LD_BENCH;
 	create_worker_windows (1);
 	ld->num_to_mark_active = 1;
-	gwthread_create (&thread_handle, &Launcher, ld);
+	if (wait_flag) {
+		gwthread_create_waitable (&thread_handle, &Launcher, ld);
+		gwthread_wait_for_exit (&thread_handle);
+	} else
+		gwthread_create (&thread_handle, &Launcher, ld);
 	return (0);
 }
 
@@ -3130,8 +3161,8 @@ int primeContinue (
 	memset (&sp_info, 0, sizeof (sp_info));
 	sp_info.type = SET_PRIORITY_NORMAL_WORK;
 	sp_info.worker_num = thread_num;
-	sp_info.verbose_flag = IniGetInt (INI_FILE, "AffinityVerbosity", 1);
-	sp_info.normal_work_hyperthreads = 1;
+	sp_info.verbosity = IniGetInt (INI_FILE, "AffinityVerbosity", 1);
+	sp_info.normal_work_hyperthreading = FALSE;
 	SetPriority (&sp_info);
 
 /* Loop until the ESC key is hit or the entire work-to-do INI file */
@@ -3168,13 +3199,13 @@ int primeContinue (
 	    for (w = NULL; ; ) {
 
 /* Reset sp_info structure in case a previous work_unit changed these settings.  */
-/* This actually happened when a TF job set normal_work_hyperthreads, and a */
+/* This actually happened when a TF job set normal_work_hyperthreading, and a */
 /* subsequent LL job inappropriately started using hyperthreading. */
 
 		sp_info.type = SET_PRIORITY_NORMAL_WORK;
 		sp_info.worker_num = thread_num;
-		sp_info.verbose_flag = IniGetInt (INI_FILE, "AffinityVerbosity", 1);
-		sp_info.normal_work_hyperthreads = 1;
+		sp_info.verbosity = IniGetInt (INI_FILE, "AffinityVerbosity", 1);
+		sp_info.normal_work_hyperthreading = FALSE;
 		sp_info.aux_thread_num = 0;
 
 /* Read the line from the work file, break when out of lines */
@@ -3214,10 +3245,16 @@ int primeContinue (
 			stop_reason = ecm (thread_num, &sp_info, w);
 		}
 
-/* See if this is an P-1 factoring line */
+/* See if this is a P-1 factoring line */
 
 		if (w->work_type == WORK_PMINUS1 && pass == 2) {
 			stop_reason = pminus1 (thread_num, &sp_info, w);
+		}
+
+/* See if this is a P+1 factoring line */
+
+		if (w->work_type == WORK_PPLUS1 && pass == 2) {
+			stop_reason = pplus1 (thread_num, &sp_info, w);
 		}
 
 /* Run a PRP test */
@@ -3489,20 +3526,6 @@ void uniquifySaveFile (
 	}
 }
 
-/* Data structure used in reading save files and their backups as well as */
-/* renaming bad save files. */
-
-typedef struct read_save_file_state {
-	int	thread_num;
-	int	read_attempt;
-	int	a_save_file_existed;
-	int	a_non_bad_save_file_existed;
-	int	num_original_bad_files;
-	int	num_save_files_renamed;
-	char	base_filename[80];
-	char	current_filename[80];
-} readSaveFileState;
-
 /* Prepare for reading save files */
 
 void readSaveFileStateInit (
@@ -3658,15 +3681,6 @@ void saveFileBad (
 	rename (state->current_filename, filename);
 	state->num_save_files_renamed++;
 }
-
-/* Data structure used in writing save files and their backups */
-
-typedef struct write_save_file_state {
-	char	base_filename[80];
-	int	num_ordinary_save_files;
-	int	num_special_save_files;		/* Example: Number of save files to keep that passed the Jacobi error check */
-	uint64_t special;			/* Bit array for which ordinary save files are special */
-} writeSaveFileState;
 
 /* Prepare for writing save files */
 
@@ -5310,8 +5324,8 @@ begin:	factor_found = 0;
 
 /* Setup the factoring code */
 
-	if (HYPERTHREAD_TF) sp_info->normal_work_hyperthreads = IniGetInt (LOCALINI_FILE, "HyperthreadTFcount", CPU_HYPERTHREADS);
-	facdata.num_threads = CORES_PER_TEST[thread_num] * sp_info->normal_work_hyperthreads;
+	if (HYPERTHREAD_TF) sp_info->normal_work_hyperthreading = TRUE;
+	facdata.num_threads = get_worker_num_threads (thread_num, HYPERTHREAD_TF);
 	facdata.sp_info = sp_info;
 	stop_reason = factorSetup (thread_num, p, &facdata);
 	if (stop_reason) {
@@ -5438,7 +5452,7 @@ begin:	factor_found = 0;
 /* chosen the difficulty in trial factoring M100000000 to 2^64 as the */
 /* point where it is worthwhile to report results one bit at a time. */
 
-	report_bits = (unsigned long) (64.0 + _log2 ((double) p / 100000000.0));
+	report_bits = (unsigned long) (64.0 + log2 ((double) p / 100000000.0));
 	if (report_bits >= test_bits) report_bits = test_bits;
 
 /* Loop testing larger and larger factors until we've tested to the */
@@ -5671,7 +5685,7 @@ begin:	factor_found = 0;
 
 /* We used to continue factoring to find a smaller factor in a later pass. */
 /* We'll continue to do this if the found factor is really small (less than */
-/* 2^56) or if the user sets FindSmallestFactor in prime.ini. */
+/* 2^56) or if the user sets FindSmallestFactor in prime.txt. */
 
 		find_smaller_factor = (end_bits <= (unsigned int) IniGetInt (INI_FILE, "FindSmallestFactor", 56));
 
@@ -5736,8 +5750,7 @@ begin:	factor_found = 0;
 nextpass:	;
 	    }
 
-/* If we've found a factor then we need to send an assignment done */
-/* message if we continued to look for a smaller factor. */
+/* If we've found a factor then we need to send an assignment done message if we continued to look for a smaller factor. */
 
 	    if (factor_found) {
 		if (w->assignment_uid[0] && find_smaller_factor) {
@@ -5749,7 +5762,7 @@ nextpass:	;
 			pkt.done = TRUE;
 			spoolMessage (PRIMENET_ASSIGNMENT_RESULT, &pkt);
 		}
-		break;
+		if (!find_smaller_factor) break;
 	    }
 
 /* Output a no factor found message */
@@ -6014,7 +6027,7 @@ int writeLLSaveFile (
 	closeWriteSaveFile (write_save_file_state, fd);
 	return (TRUE);
 
-/* An error occured.  Delete the current file. */
+/* An error occurred.  Delete the current file. */
 
 err:	deleteWriteSaveFile (write_save_file_state, fd);
 	return (FALSE);
@@ -6692,15 +6705,12 @@ begin:	gwinit (&lldata.gwdata);
 	if (IniGetInt (LOCALINI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&lldata.gwdata);
 	if (IniGetInt (INI_FILE, "HyperthreadPrefetch", 0)) gwset_hyperthread_prefetch (&lldata.gwdata);
 	gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
-	if (HYPERTHREAD_LL) {
-		sp_info->normal_work_hyperthreads = IniGetInt (LOCALINI_FILE, "HyperthreadLLcount", CPU_HYPERTHREADS);
-		gwset_will_hyperthread (&lldata.gwdata, sp_info->normal_work_hyperthreads);
-	}
-	gwset_bench_cores (&lldata.gwdata, NUM_CPUS);
+	if (HYPERTHREAD_LL) sp_info->normal_work_hyperthreading = TRUE, gwset_will_hyperthread (&lldata.gwdata, 2);
+	gwset_bench_cores (&lldata.gwdata, HW_NUM_CORES);
 	gwset_bench_workers (&lldata.gwdata, NUM_WORKER_THREADS);
 	if (ERRCHK) gwset_will_error_check (&lldata.gwdata);
 	else gwset_will_error_check_near_limit (&lldata.gwdata);
-	gwset_num_threads (&lldata.gwdata, CORES_PER_TEST[thread_num] * sp_info->normal_work_hyperthreads);
+	gwset_num_threads (&lldata.gwdata, get_worker_num_threads (thread_num, HYPERTHREAD_LL));
 	gwset_thread_callback (&lldata.gwdata, SetAuxThreadPriority);
 	gwset_thread_callback_data (&lldata.gwdata, sp_info);
 	stop_reason = lucasSetup (thread_num, p, w->minimum_fftlen, &lldata);
@@ -7319,7 +7329,7 @@ begin:	gwinit (&lldata.gwdata);
 
 	return (STOP_WORK_UNIT_COMPLETE);
 
-/* An error occured, output a message saying we are restarting, sleep, */
+/* An error occurred, output a message saying we are restarting, sleep, */
 /* then try restarting at last save point. */
 
 restart:if (sleep5) OutputBoth (thread_num, ERRMSG2);
@@ -7346,22 +7356,22 @@ restart:if (sleep5) OutputBoth (thread_num, ERRMSG2);
 /* Torture test code */
 /*********************/
 
-static const char TORTURE1[] = "Beginning a continuous self-test on your computer.\n";
+static const char TORTURE1[] = "Beginning a continuous torture test on your computer.\n";
 #if defined (__linux__) || defined (__FreeBSD__) || defined (__EMX__)
 static const char TORTURE2[] = "Please read stress.txt.  Hit ^C to end this test.\n";
 #else
 static const char TORTURE2[] = "Please read stress.txt.  Choose Test/Stop to end this test.\n";
 #endif
-static const char SELF1[] = "Test %i, %i Lucas-Lehmer %siterations of M%ld using %s.\n";
+static const char SELF1[] = "Test %i%s, %i Lucas-Lehmer %siterations of M%ld using %s.\n";
 static const char SELFFAIL[] = "FATAL ERROR: Final result was %08lX, expected: %08lX.\n";
 static const char SELFFAIL1[] = "ERROR: ILLEGAL SUMOUT\n";
 static const char SELFFAIL2[] = "FATAL ERROR: Resulting sum was %.16g, expected: %.16g\n";
 static const char SELFFAIL3[] = "FATAL ERROR: Rounding was %.10g, expected less than 0.4\n";
 static const char SELFFAIL4[] = "Possible hardware failure, consult readme.txt file, restarting test.\n";
-static const char SELFFAIL5[] = "Hardware failure detected, consult stress.txt file.\n";
+static const char SELFFAIL5[] = "Hardware failure detected running %lu%s FFT size, consult stress.txt file.\n";
 static const char SELFFAIL6[] = "Maximum number of warnings exceeded.\n";
 
-static const char SELFPASS[] = "Self-test %i%s passed!\n";
+static const char SELFPASS[] = "Self-test %i%s%s passed!\n";
 //static const char SelfTestIniMask[] = "SelfTest%iPassed";
 
 struct self_test_info {
@@ -7699,35 +7709,37 @@ int selfTestInternal (
 	int	thread_num,
 	struct PriorityInfo *sp_info,
 	unsigned long fftlen,
-	int	is_small,	/* TRUE if FFT data will fit in L2/L3/L4 caches */
-	unsigned int test_time,	/* Number of minutes to self-test */
-	int	*torture_index,	/* Index into self test data array */
-	unsigned int memory,	/* MB of memory the torture test can use */
-	void	*bigbuf,	/* Memory block for the torture test */
+	int	num_threads,		/* Number of threads the FFT should use */
+	int	is_small,		/* TRUE if FFT data will fit in L2/L3/L4 caches */
+	unsigned int test_time,		/* Number of minutes to self-test */
+	int	*torture_index,		/* Index into self test data array */
+	unsigned int memory,		/* MB of memory the torture test can use */
+	void	*bigbuf,		/* Memory block for the torture test */
 	const struct self_test_info *test_data, /* Self test data */
 	unsigned int test_data_count,
-	int	disabled_cpu_flags, /* Which CPU instructions we should not use */	      
-	int	*completed,	/* Returned count of tests completed */
-	int	*errors,	/* Returned count of self test errors */
-	int	*warnings)	/* Returned count of self test warnings */
+	int	disabled_cpu_flags,	/* Which CPU instructions we should not use */
+	int	*completed,		/* Returned count of tests completed */
+	int	*errors,		/* Returned count of self test errors */
+	int	*warnings)		/* Returned count of self test warnings */
 {
+	int	num_hyperthreads;
 	llhandle lldata;
 	unsigned long k, limit;
 	unsigned int i, iter;
-	char	buf[256];
+	char	buf[256], addl_msg[80];
 //	char	iniName[32];
 	time_t	start_time, current_time;
-	int	num_threads_per_test, alternate_in_place, in_place, stop_reason;
+	int	alternate_in_place, in_place, stop_reason;
 
-/* Set the title */
+/* Set the title and additional message text if hyperthreading */
 
-	title (thread_num, "Self-Test");
+	title (thread_num, "Torture Test");
+	addl_msg[0] = 0;
+	num_hyperthreads = get_ranked_num_threads (sp_info->torture_core_num, 1, sp_info->torture_hyperthreading);
+	if (num_hyperthreads > 1 && num_threads == 1) sprintf (addl_msg, " (thread %d of %d)", sp_info->torture_thread_num, num_hyperthreads);
 
-/* Decide how many threads the torture test can use (an undoc.txt feature).  This should only be needed for QA purposes */
-/* as the user can probably create more stress by running one torture test window for each CPU logical or physical core. */
 /* Get flag indicating if we should alternate use-lots-of-mem with run-in-place. */
 
-	num_threads_per_test = IniGetInt (INI_FILE, "TortureThreadsPerTest", 1);
 	alternate_in_place = IniGetInt (INI_FILE, "TortureAlternateInPlace", 1);
 
 /* Determine the range from which we'll choose an exponent to test. */
@@ -7738,13 +7750,11 @@ int selfTestInternal (
 
 	time (&start_time);
 
-/* Start in the self test data array where we left off the last time */
-/* torture test executed this FFT length. */
+/* Start in the self test data array where we left off the last time torture test executed this FFT length. */
 
 	i = (torture_index == NULL) ? 0 : *torture_index;
 
-/* Loop testing various exponents from self test data array until */
-/* time runs out */
+/* Loop testing various exponents from self test data array until time runs out */
 
 	for (iter = 1; ; iter++) {
 		char	fft_desc[200];
@@ -7768,8 +7778,7 @@ int selfTestInternal (
 /* The SSE2 carry propagation code gets into trouble if there are too */
 /* few bits per FFT word!  Thus, we'll require at least 8 bits per */
 /* word here.  Now that the number of iterations changes for each FFT */
-/* length I'm raising the requirement to 10 bits to keep timings roughly */
-/* equal. */
+/* length I'm raising the requirement to 10 bits to keep timings roughly equal. */
 
 			if (p / fftlen < 10) continue;
 
@@ -7794,7 +7803,7 @@ int selfTestInternal (
 		lldata.gwdata.cpu_flags &= ~disabled_cpu_flags;
 		gwclear_use_benchmarks (&lldata.gwdata);
 		gwset_sum_inputs_checking (&lldata.gwdata, iter & 1);
-		gwset_num_threads (&lldata.gwdata, num_threads_per_test);
+		gwset_num_threads (&lldata.gwdata, num_threads);
 		gwset_thread_callback (&lldata.gwdata, SetAuxThreadPriority);
 		gwset_thread_callback_data (&lldata.gwdata, sp_info);
 		lldata.gwdata.GW_BIGBUF = (char *) bigbuf;
@@ -7818,7 +7827,7 @@ int selfTestInternal (
 /* Output start message */
 
 		gwfft_description (&lldata.gwdata, fft_desc);
-		sprintf (buf, SELF1, iter, ll_iters, in_place ? "in-place " : "", p, fft_desc);
+		sprintf (buf, SELF1, iter, addl_msg, ll_iters, in_place ? "in-place " : "", p, fft_desc);
 		OutputStr (thread_num, buf);
 
 /* Allocate gwnums to eat up the available memory */
@@ -7842,8 +7851,10 @@ int selfTestInternal (
 restart_test:	dbltogw (&lldata.gwdata, 4.0, lldata.lldata);
 		g = lldata.lldata;
 
-/* Do Lucas-Lehmer iterations */
+/* Do Lucas-Lehmer iterations with error checking */
 
+		gwerror_checking (&lldata.gwdata, 1);
+		gwsetaddin (&lldata.gwdata, -2);
 		for (k = 0; k < ll_iters; k++) {
 			gwnum	prev;
 
@@ -7852,15 +7863,11 @@ restart_test:	dbltogw (&lldata.gwdata, 4.0, lldata.lldata);
 			prev = g;
 			if (num_gwnums > 1) g = gwarray[k % num_gwnums];
 
-/* One Lucas-Lehmer test with error checking */
+/* One Lucas-Lehmer iteration with error checking */
 
-			gwsetnormroutine (&lldata.gwdata, 0, 1, 0);
-			gwstartnextfft (&lldata.gwdata, k != ll_iters - 1);
-			gwsetaddin (&lldata.gwdata, -2);
-			gwsquare2 (&lldata.gwdata, prev, g);
+			gwsquare2 (&lldata.gwdata, prev, g, GWMUL_STARTNEXTFFT_IF(k != ll_iters - 1) | GWMUL_ADDINCONST);
 
-/* If the sum of the output values is an error (such as infinity) */
-/* then raise an error. */
+/* If the sum of the output values is an error (such as infinity) then raise an error. */
 
 			if (gw_test_illegal_sumout (&lldata.gwdata)) {
 				OutputBoth (thread_num, SELFFAIL1);
@@ -7882,7 +7889,8 @@ restart_test:	dbltogw (&lldata.gwdata, 4.0, lldata.lldata);
 			if (gw_test_mismatched_sums (&lldata.gwdata)) {
 				sprintf (buf, SELFFAIL2, gwsumout (&lldata.gwdata, g), gwsuminp (&lldata.gwdata, g));
 				OutputBoth (thread_num, buf);
-				OutputBoth (thread_num, SELFFAIL5);
+				sprintf (buf, SELFFAIL5, (fftlen % 1024 == 0) ? fftlen >> 10 : fftlen, (fftlen % 1024 == 0) ? "K" : "");
+				OutputBoth (thread_num, buf);
 				flashWindowAndBeep ();
 				(*errors)++;
 				lucasDone (&lldata);
@@ -7895,7 +7903,8 @@ restart_test:	dbltogw (&lldata.gwdata, 4.0, lldata.lldata);
 			if (gw_get_maxerr (&lldata.gwdata) > 0.45) {
 				sprintf (buf, SELFFAIL3, gw_get_maxerr (&lldata.gwdata));
 				OutputBoth (thread_num, buf);
-				OutputBoth (thread_num, SELFFAIL5);
+				sprintf (buf, SELFFAIL5, (fftlen % 1024 == 0) ? fftlen >> 10 : fftlen, (fftlen % 1024 == 0) ? "K" : "");
+				OutputBoth (thread_num, buf);
 				flashWindowAndBeep ();
 				(*errors)++;
 				lucasDone (&lldata);
@@ -7933,7 +7942,8 @@ restart_test:	dbltogw (&lldata.gwdata, 4.0, lldata.lldata);
 		if (reshi != test_data[i].reshi) {
 			sprintf (buf, SELFFAIL, reshi, test_data[i].reshi);
 			OutputBoth (thread_num, buf);
-			OutputBoth (thread_num, SELFFAIL5);
+			sprintf (buf, SELFFAIL5, (fftlen % 1024 == 0) ? fftlen >> 10 : fftlen, (fftlen % 1024 == 0) ? "K" : "");
+			OutputBoth (thread_num, buf);
 			flashWindowAndBeep ();
 			(*errors)++;
 			return (STOP_FATAL_ERROR);
@@ -7951,22 +7961,61 @@ restart_test:	dbltogw (&lldata.gwdata, 4.0, lldata.lldata);
 		if ((unsigned int) (current_time - start_time) + 30 >= test_time * 60) break;
 	}
 
-/* Save our position in self test data array for next time torture test */
-/* executes this FFT length */
+/* Save our position in self test data array for next time torture test executes this FFT length */
 
 	if (torture_index != NULL) *torture_index = i;
 
-/* We've passed the self-test.  Remember this in the .INI file */
-/* so that we do not need to do this again. */
+/* We've passed the self-test.  Remember this in the .INI file so that we do not need to do this again. */
 
-	if (fftlen % 1024 == 0)
-		sprintf (buf, SELFPASS, (int) (fftlen/1024), "K");
-	else
-		sprintf (buf, SELFPASS, (int) fftlen, "");
+	if (fftlen % 1024 == 0) sprintf (buf, SELFPASS, (int) (fftlen/1024), "K", addl_msg);
+	else sprintf (buf, SELFPASS, (int) fftlen, "", addl_msg);
 	OutputBoth (thread_num, buf);
 //	sprintf (iniName, SelfTestIniMask, (int) (fftlen/1024));
 //	IniWriteInt (LOCALINI_FILE, iniName, 1);
 	return (0);
+}
+
+/* Run a self test on one hyperthread of a physical core */
+
+struct torture_info_arg {
+	gwthread thread_id;
+	/* Arguments to pass to selfTestInternal */
+	int	thread_num;		/* Worker window / core to torture */
+	struct PriorityInfo sp_info;
+	unsigned long fftlen;
+	int	num_threads;		/* Number of threads the FFT should use */
+	int	is_small;		/* TRUE if FFT data will fit in L2/L3/L4 caches */
+	unsigned int test_time;		/* Number of minutes to self-test */
+	int	*torture_index;		/* Index into self test data array */
+	unsigned int memory;		/* MB of memory the torture test can use */
+	void	*bigbuf;		/* Memory block for the torture test */
+	const struct self_test_info *test_data; /* Self test data */
+	unsigned int test_data_count;
+	int	disabled_cpu_flags;	/* Which CPU instructions we should not use */
+	/* Result data from the torture test */
+	int	tests_completed;
+	int	self_test_errors;
+	int	self_test_warnings;
+	int	stop_reason;
+};
+
+void tortureOneHyperthread (void *arg)
+{
+	struct torture_info_arg *info;
+
+/* Type cast arg.  Init the return args (selfTestInternal increments these return values) */
+
+	info = (struct torture_info_arg *) arg;
+	info->tests_completed = 0;
+	info->self_test_errors = 0;
+	info->self_test_warnings = 0;
+
+/* Torture the hyperthread */
+
+	SetPriority (&info->sp_info);
+	info->stop_reason = selfTestInternal (info->thread_num, &info->sp_info, info->fftlen, info->num_threads, info->is_small, info->test_time,
+					      info->torture_index, info->memory, info->bigbuf, info->test_data, info->test_data_count, info->disabled_cpu_flags,
+					      &info->tests_completed, &info->self_test_errors, &info->self_test_warnings);
 }
 
 #ifdef ONE_HOUR_SELF_TEST
@@ -8015,8 +8064,7 @@ int selfTest (
 	tests_completed = 0;
 	self_test_errors = 0;
 	self_test_warnings = 0;
-	return (selfTestInternal (thread_num, sp_info, fftlen, 60, NULL, 0, NULL, 0,
-				  &tests_completed, &self_test_errors, &self_test_warnings));
+	return (selfTestInternal (thread_num, sp_info, fftlen, 1, 60, NULL, 0, NULL, 0, &tests_completed, &self_test_errors, &self_test_warnings));
 }
 #endif
 
@@ -8032,11 +8080,13 @@ void tortureTestDefaultSizes (
 	int	min_adjusted_L2_cache_size, min_adjusted_L3_cache_size, min_adjusted_L4_cache_size;
 	int	max_adjusted_L2_cache_size, max_adjusted_L3_cache_size, max_adjusted_L4_cache_size;
 
+/* BUG - this needs upgrading to handle asymmetric architectures like Intel Alder Lake */
+
 /* BUG/FEATURE - we should change torture test affinity to predictably distribute torture threads amongst the caches. */
-/* This would let us test larger FFT sizes when user changes the default setting of torture threads to a non-multiple of NUM_CPUS. */
+/* This would let us test larger FFT sizes when user changes the default setting of torture threads to a non-multiple of HW_NUM_CORES. */
 
 /* Determine how much cache each torture test worker should access.  This is tricky in the case where the number of threads is */
-/* not a multiple of NUM_CPUS.  This is because we do not know how the OS will distribute threads amongst the cores.  For example, */
+/* not a multiple of HW_NUM_CORES.  This is because we do not know how the OS will distribute threads amongst the cores.  For example, */
 /* picture a 18-core CPU with two L3 caches.  If there are 9 torture threads the OS could put all of the torture threads on one L3 */
 /* cache leaving the other L3 cache idle, or it could put 4 threads on one L3 cache and 5 on the other. */
 
@@ -8047,10 +8097,10 @@ void tortureTestDefaultSizes (
 	if (CPU_NUM_L2_CACHES) {
 		int	cores_per_L2_cache, min_workers_per_L2_cache, max_workers_per_L2_cache;
 
-		cores_per_L2_cache = NUM_CPUS / CPU_NUM_L2_CACHES;
+		cores_per_L2_cache = HW_NUM_CORES / CPU_NUM_L2_CACHES;
 
 		min_workers_per_L2_cache = divide_rounding_up (num_threads, CPU_NUM_L2_CACHES);
-		max_workers_per_L2_cache = num_threads / NUM_CPUS * cores_per_L2_cache + _intmin (num_threads % NUM_CPUS, cores_per_L2_cache);
+		max_workers_per_L2_cache = num_threads / HW_NUM_CORES * cores_per_L2_cache + _intmin (num_threads % HW_NUM_CORES, cores_per_L2_cache);
 
 		max_adjusted_L2_cache_size = CPU_TOTAL_L2_CACHE_SIZE / CPU_NUM_L2_CACHES / min_workers_per_L2_cache;
 		min_adjusted_L2_cache_size = CPU_TOTAL_L2_CACHE_SIZE / CPU_NUM_L2_CACHES / max_workers_per_L2_cache;
@@ -8064,9 +8114,9 @@ void tortureTestDefaultSizes (
 	if (CPU_NUM_L3_CACHES) {
 		int	cores_per_L3_cache, min_workers_per_L3_cache, max_workers_per_L3_cache;
 
-		cores_per_L3_cache = NUM_CPUS / CPU_NUM_L3_CACHES;
+		cores_per_L3_cache = HW_NUM_CORES / CPU_NUM_L3_CACHES;
 		min_workers_per_L3_cache = divide_rounding_up (num_threads, CPU_NUM_L3_CACHES);
-		max_workers_per_L3_cache = num_threads / NUM_CPUS * cores_per_L3_cache + _intmin (num_threads % NUM_CPUS, cores_per_L3_cache);
+		max_workers_per_L3_cache = num_threads / HW_NUM_CORES * cores_per_L3_cache + _intmin (num_threads % HW_NUM_CORES, cores_per_L3_cache);
 
 		max_adjusted_L3_cache_size = CPU_TOTAL_L3_CACHE_SIZE / CPU_NUM_L3_CACHES / min_workers_per_L3_cache;
 		min_adjusted_L3_cache_size = CPU_TOTAL_L3_CACHE_SIZE / CPU_NUM_L3_CACHES / max_workers_per_L3_cache;
@@ -8080,9 +8130,9 @@ void tortureTestDefaultSizes (
 	if (CPU_NUM_L4_CACHES) {
 		int	cores_per_L4_cache, min_workers_per_L4_cache, max_workers_per_L4_cache;
 
-		cores_per_L4_cache = NUM_CPUS / CPU_NUM_L4_CACHES;
+		cores_per_L4_cache = HW_NUM_CORES / CPU_NUM_L4_CACHES;
 		min_workers_per_L4_cache = divide_rounding_up (num_threads, CPU_NUM_L4_CACHES);
-		max_workers_per_L4_cache = num_threads / NUM_CPUS * cores_per_L4_cache + _intmin (num_threads % NUM_CPUS, cores_per_L4_cache);
+		max_workers_per_L4_cache = num_threads / HW_NUM_CORES * cores_per_L4_cache + _intmin (num_threads % HW_NUM_CORES, cores_per_L4_cache);
 
 		max_adjusted_L4_cache_size = CPU_TOTAL_L4_CACHE_SIZE / CPU_NUM_L4_CACHES / min_workers_per_L4_cache;
 		min_adjusted_L4_cache_size = CPU_TOTAL_L4_CACHE_SIZE / CPU_NUM_L4_CACHES / max_workers_per_L4_cache;
@@ -8092,7 +8142,6 @@ void tortureTestDefaultSizes (
 			min_adjusted_L4_cache_size += min_adjusted_L3_cache_size;
 		}
 	}
-
 
 /* Select FFT sizes that will overflow smaller caches and fit within the requested larger cache */
 
@@ -8126,6 +8175,7 @@ int tortureTest (
 	int	num_torture_workers)
 {
 	struct PriorityInfo sp_info;
+	int	num_threads;		/* Number of threads the FFT should use */
 	const struct self_test_info *test_data; /* Self test data */
 	unsigned int test_data_count;
 	int	num_lengths;		/* Number of FFT lengths we will torture test */
@@ -8146,10 +8196,14 @@ int tortureTest (
 	memset (&sp_info, 0, sizeof (sp_info));
 	sp_info.type = SET_PRIORITY_TORTURE;
 	sp_info.worker_num = thread_num;
-	sp_info.torture_num_workers = num_torture_workers;
-	sp_info.torture_threads_per_test = IniGetInt (INI_FILE, "TortureTestThreads", 1);
-	sp_info.verbose_flag = IniGetInt (INI_FILE, "AffinityVerbosityTorture", 0);
+	sp_info.torture_core_num = thread_num;
+	sp_info.torture_hyperthreading = IniGetInt (INI_FILE, "TortureHyperthreading", 1);
+	sp_info.verbosity = IniGetInt (INI_FILE, "AffinityVerbosityTorture", 0);
 	SetPriority (&sp_info);
+
+/* Calculate number of hyperthreads we run on this core */
+
+	num_threads = get_ranked_num_threads (sp_info.torture_core_num, 1, sp_info.torture_hyperthreading);
 
 /* Init counters */
 
@@ -8192,8 +8246,7 @@ loop:	run_indefinitely = TRUE;
 	OutputStr (thread_num, TORTURE1);
 	OutputStr (thread_num, TORTURE2);
 
-/* Determine fft lengths we should run and allocate a big block */
-/* of memory to test. */
+/* Determine fft lengths we should run and allocate a big block of memory to test. */
 
 	min_fft = IniGetInt (INI_FILE, "MinTortureFFT", 4) * 1024;
 	if (min_fft < 32) min_fft = 32;
@@ -8264,11 +8317,52 @@ loop:	run_indefinitely = TRUE;
 			if (current_small_index == num_lengths) current_small_index = 0;
 		}
 
-/* Do the self test for this FFT length */
+/* If using hyperthreads for torture testing and the FFTs written for this instruction set do not support multi-threading or this FFT length */
+/* is too small for multi-threading or the user sets an option to not use multi-threaded FFTs, then for each hyperthread launch a separate */
+/* thread to run a single threaded torture test. */
 
-		stop_reason = selfTestInternal (thread_num, &sp_info, lengths[index], lengths[index] <= max_small_fftlen, test_time,
-						&data_index[index], memory, bigbuf, test_data, test_data_count, disabled_cpu_flags,
-						&tests_completed, &self_test_errors, &self_test_warnings);
+		if (sp_info.torture_hyperthreading &&
+		    (!((CPU_FLAGS & ~disabled_cpu_flags) & (CPU_SSE2 | CPU_AVX | CPU_AVX512F)) ||
+		     lengths[index] < 262144 ||
+		     !IniGetInt (INI_FILE, "TortureMultiThreadedFFTs", 1))) {
+			struct torture_info_arg *info = (struct torture_info_arg *) malloc (num_threads * sizeof (struct torture_info_arg));
+			for (int i = 0; i < num_threads; i++) {
+				info[i].thread_num = thread_num;
+				info[i].sp_info = sp_info;
+				info[i].sp_info.torture_thread_num = i + 1;
+				info[i].fftlen = lengths[index];
+				info[i].num_threads = 1;
+				info[i].is_small = lengths[index] <= max_small_fftlen;
+				info[i].test_time = test_time;
+				info[i].torture_index = &data_index[index];
+				info[i].memory = memory / num_threads;
+				info[i].bigbuf = (bigbuf != NULL ? (char *) bigbuf + i * info[i].memory * 1048576 : NULL);
+				info[i].test_data = test_data;
+				info[i].test_data_count = test_data_count;
+				info[i].disabled_cpu_flags = disabled_cpu_flags;
+				gwthread_create_waitable (&info[i].thread_id, &tortureOneHyperthread, (void *) &info[i]);
+			}
+
+/* Wait for all the workers to finish.  Sum up the returned results. */
+
+			stop_reason = 0;
+			for (i = 0; i < num_threads; i++) {
+				gwthread_wait_for_exit (&info[i].thread_id);
+				tests_completed += info[i].tests_completed;
+				self_test_errors += info[i].self_test_errors;
+				self_test_warnings += info[i].self_test_warnings;
+				if (info[i].stop_reason) stop_reason = info[i].stop_reason;
+			}
+			free (info);
+		}
+
+/* Do the self test for this FFT length, possibly multi-threaded */
+
+		else {
+			stop_reason = selfTestInternal (thread_num, &sp_info, lengths[index], num_threads, lengths[index] <= max_small_fftlen, test_time,
+							&data_index[index], memory, bigbuf, test_data, test_data_count, disabled_cpu_flags,
+							&tests_completed, &self_test_errors, &self_test_warnings);
+		}
 		if (stop_reason) break;
 	}
 
@@ -8619,7 +8713,7 @@ int primeSieveTest (
 		{
 			double	fltfac;
 			fltfac = ((double) fachi * 4294967296.0 + (double) facmid) * 4294967296.0 + (double) faclo;
-			facdata.endpt = pow (2.0, ceil (_log2 (fltfac)));
+			facdata.endpt = pow (2.0, ceil (log2 (fltfac)));
 			if (facdata.endpt > fltfac * 1.1) facdata.endpt = fltfac * 1.1;
 		}
 		facdata.asm_data->FACHSW = fachi;
@@ -8763,11 +8857,14 @@ static	int	time_all_complex = 0;	/* TRUE if we should time all-complex FFTs */
 		memset (&sp_info, 0, sizeof (sp_info));
 		sp_info.type = SET_PRIORITY_QA;
 		sp_info.worker_num = thread_num;
-		sp_info.verbose_flag = IniGetInt (INI_FILE, "AffinityVerbosityQA", 0);
+		sp_info.normal_work_hyperthreading = FALSE;
+		sp_info.verbosity = IniGetInt (INI_FILE, "AffinityVerbosityQA", 0);
 		SetPriority (&sp_info);
 
 		if (p >= 9994 && p <= 9999)
 			return (lucas_QA (thread_num, 9999 - p));
+		if (p == 9993)
+			return (pplus1_QA (thread_num, &sp_info));
 		if (p == 9992)
 			return (pminus1_QA (thread_num, &sp_info));
 		if (p == 9991)
@@ -8790,50 +8887,60 @@ static	int	time_all_complex = 0;	/* TRUE if we should time all-complex FFTs */
 	memset (&sp_info, 0, sizeof (sp_info));
 	sp_info.type = SET_PRIORITY_TIME;
 	sp_info.worker_num = thread_num;
-	sp_info.verbose_flag = IniGetInt (INI_FILE, "AffinityVerbosityTime", 0);
-	sp_info.time_hyperthreads = 1;
+	sp_info.verbosity = IniGetInt (INI_FILE, "AffinityVerbosityTime", 0);
+	sp_info.time_hyperthreading = FALSE;
 	SetPriority (&sp_info);
 
 /* Get settings from INI file */
 
 	min_cores = IniGetInt (INI_FILE, "AdvancedTimeMinCores", 1);
 	if (min_cores < 1) min_cores = 1;
-	if (min_cores > (int) NUM_CPUS) min_cores = NUM_CPUS;
+	if (min_cores > (int) HW_NUM_CORES) min_cores = HW_NUM_CORES;
 
-	max_cores = IniGetInt (INI_FILE, "AdvancedTimeMaxCores", NUM_CPUS);
+	max_cores = IniGetInt (INI_FILE, "AdvancedTimeMaxCores", HW_NUM_CORES);
 	if (max_cores < 1) max_cores = 1;
-	if (max_cores > (int) NUM_CPUS) max_cores = NUM_CPUS;
+	if (max_cores > (int) HW_NUM_CORES) max_cores = HW_NUM_CORES;
 
 	incr_cores = IniGetInt (INI_FILE, "AdvancedTimeCoresIncrement", 1);
 	if (incr_cores < 1) incr_cores = 1;
 
-	min_hyperthreads = IniGetInt (INI_FILE, "AdvancedTimeMinHyperthreads", 1);
-	if (min_hyperthreads < 1) min_hyperthreads = 1;
-	if (min_hyperthreads > (int) CPU_HYPERTHREADS) min_hyperthreads = CPU_HYPERTHREADS;
-
-	max_hyperthreads = IniGetInt (INI_FILE, "AdvancedTimeMaxHyperthreads", CPU_HYPERTHREADS);
-	if (max_hyperthreads < 1) max_hyperthreads = 1;
-	if (max_hyperthreads > (int) CPU_HYPERTHREADS) max_hyperthreads = CPU_HYPERTHREADS;
+	// In 30.7, we've switched to only to values, 1=time_without_hyperthreading, 2=time_with_hyperthreading
+	// If CPU does not support hyperthreading (or OS does not permit setting affinities), then always time without hyperthreading
+	if (HW_NUM_CORES == HW_NUM_THREADS || !OS_CAN_SET_AFFINITY) {
+		min_hyperthreads = 1;
+		max_hyperthreads = 1;
+	} else {
+		min_hyperthreads = IniGetInt (INI_FILE, "AdvancedTimeMinHyperthreads", 1);
+		if (min_hyperthreads < 1) min_hyperthreads = 1;
+		if (min_hyperthreads > 2) min_hyperthreads = 2;
+		max_hyperthreads = IniGetInt (INI_FILE, "AdvancedTimeMaxHyperthreads", 2);
+		if (max_hyperthreads < 1) max_hyperthreads = 1;
+		if (max_hyperthreads > 2) max_hyperthreads = 2;
+	}
 
 	print_every_iter = IniGetInt (INI_FILE, "PrintTimedIterations", 1);
 
-/* Loop through all possible cores and hyperthreads values */
+/* Loop through all possible cores and hyperthreading values */
 
 	for (num_hyperthreads = min_hyperthreads; num_hyperthreads <= max_hyperthreads; num_hyperthreads++) {
-		sp_info.time_hyperthreads = num_hyperthreads;
+		sp_info.time_hyperthreading = (num_hyperthreads > 1);
 		for (num_cores = min_cores; num_cores <= max_cores; num_cores += incr_cores) {
-			if (!OS_CAN_SET_AFFINITY && num_hyperthreads > 1 && num_cores != NUM_CPUS) continue;
 
 /* Clear all timers */
 
 			clear_timers (timers, sizeof (timers) / sizeof (timers[0]));
 
+/* Output a message about the timing we are about to do.  Message must be output before gwinit output affinity verbosity messages. */
+
+			sprintf (buf, "\nTiming using %d core%s,%s hyperthreading\n", num_cores, num_cores > 1 ? "s" : "", num_hyperthreads > 1 ? "" : " no");
+			OutputStr (thread_num, buf);
+
 /* Init the FFT code */
 
 			gwinit (&lldata.gwdata);
 			gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
-			gwset_bench_cores (&lldata.gwdata, NUM_CPUS);		  // We're most likely to have bench data for this case
-			gwset_bench_workers (&lldata.gwdata, NUM_WORKER_THREADS); // We're most likely to have bench data for this case
+			gwset_bench_cores (&lldata.gwdata, HW_NUM_COMPUTE_CORES);	// We're most likely to have bench data for this case
+			gwset_bench_workers (&lldata.gwdata, NUM_WORKER_THREADS);	// We're most likely to have bench data for this case
 			if (ERRCHK) gwset_will_error_check (&lldata.gwdata);
 			else gwset_will_error_check_near_limit (&lldata.gwdata);
 			if (IniGetInt (LOCALINI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&lldata.gwdata);
@@ -8841,9 +8948,8 @@ static	int	time_all_complex = 0;	/* TRUE if we should time all-complex FFTs */
 			// Here is a hack to let me time different FFT implementations.
 			// For example, 39000001 times the first 2M FFT implementation,
 			// 39000002 times the second 2M FFT implementation, etc.
-			if (IniGetInt (INI_FILE, "TimeSpecificFFTImplementations", 0))
-				lldata.gwdata.bench_pick_nth_fft = p % 100;
-			gwset_num_threads (&lldata.gwdata, num_cores * num_hyperthreads);
+			if (IniGetInt (INI_FILE, "TimeSpecificFFTImplementations", 0)) lldata.gwdata.bench_pick_nth_fft = p % 100;
+			gwset_num_threads (&lldata.gwdata, get_ranked_num_threads (0, num_cores, num_hyperthreads > 1));
 			gwset_thread_callback (&lldata.gwdata, SetAuxThreadPriority);
 			gwset_thread_callback_data (&lldata.gwdata, &sp_info);
 			stop_reason = lucasSetup (thread_num, p, time_all_complex, &lldata);
@@ -8851,7 +8957,7 @@ static	int	time_all_complex = 0;	/* TRUE if we should time all-complex FFTs */
 			ASM_TIMERS = get_asm_timers (&lldata.gwdata);
 			memset (ASM_TIMERS, 0, 32 * sizeof (uint32_t));
 
-/* Output a message about the FFT length */
+/* Output a message about the FFT */
 
 			gwfft_description (&lldata.gwdata, fft_desc);
 			sprintf (buf, "Using %s\n", fft_desc);
@@ -8862,8 +8968,7 @@ static	int	time_all_complex = 0;	/* TRUE if we should time all-complex FFTs */
 
 			generateRandomData (&lldata);
 
-/* Do one squaring untimed, to prime the caches and start the */
-/* post-FFT process going. */
+/* Do one squaring untimed, to prime the caches and start the post-FFT process going. */
 
 			gwsetnormroutine (&lldata.gwdata, 0, ERRCHK != 0, 0);
 			gwstartnextfft (&lldata.gwdata, TRUE);
@@ -8948,10 +9053,9 @@ static	int	time_all_complex = 0;	/* TRUE if we should time all-complex FFTs */
 	return (0);
 }
 
-/* Busy loop to keep CPU cores occupied.  Used during */
-/* a benchmark so that turbo boost does not kick in. */
+/* Busy loop to keep CPU cores occupied.  Used during a benchmark so that turbo boost does not kick in. */
 
-int	last_bench_cpu_num = 0;
+int	last_bench_core_num = 0;
 
 void bench_busy_loop (void *arg)
 {
@@ -8970,12 +9074,12 @@ void bench_busy_loop (void *arg)
 	memset (&sp_info, 0, sizeof (sp_info));
 	sp_info.type = SET_PRIORITY_BUSY_LOOP;
 	sp_info.worker_num = MAIN_THREAD_NUM;
-	sp_info.busy_loop_cpu = cpu_num;
+	sp_info.busy_loop_core = cpu_num;
 	SetPriority (&sp_info);
 
-/* Stay busy until last_bench_cpu_num says this CPU thread should close */
+/* Stay busy until last_bench_core_num says this CPU thread should close */
 
-	while (cpu_num > last_bench_cpu_num) one_hundred_thousand_clocks ();
+	while (cpu_num > last_bench_core_num) one_hundred_thousand_clocks ();
 }
 
 /* Routine to add a timing to benchmark packet sent to server */
@@ -9036,8 +9140,8 @@ int factorBench (
 /* (this happens on a Core i7 Q840M processor). */
 
 	if (IniGetInt (INI_FILE, "BenchDummyWorkers", 0)) {
-		last_bench_cpu_num = 0;			// CPU #0 is benching
-		for (i = 1; i < NUM_CPUS; i++) {	// CPU #1 to NUM_CPUS-1 are busy looping
+		last_bench_core_num = 0;				// CPU #0 is benching
+		for (i = 1; i < HW_NUM_COMPUTE_CORES; i++) {	// CPU #1 to HW_NUM_COMPUTE_CORES-1 are busy looping
 			gwthread thread_id;
 			gwthread_create (&thread_id, &bench_busy_loop, (void *) (intptr_t) i);
 		}
@@ -9053,7 +9157,7 @@ int factorBench (
 		facdata.num_threads = 1;
 		stop_reason = factorSetup (thread_num, 35000011, &facdata);
 		if (stop_reason) {
-			last_bench_cpu_num = NUM_CPUS;
+			last_bench_core_num = HW_NUM_CORES;
 			return (stop_reason);
 		}
 		if (bit_lengths[i] <= 64) {
@@ -9066,7 +9170,7 @@ int factorBench (
 		facdata.endpt = (facdata.asm_data->FACHSW * 4294967296.0 + facdata.asm_data->FACMSW) * 4294967296.0 * 2.0;
 		stop_reason = factorPassSetup (thread_num, 0, &facdata);
 		if (stop_reason) {
-			last_bench_cpu_num = NUM_CPUS;
+			last_bench_core_num = HW_NUM_CORES;
 			return (stop_reason);
 		}
 
@@ -9088,7 +9192,7 @@ int factorBench (
 				OutputStrNoTimeStamp (thread_num, "\n");
 				OutputStr (thread_num, "Execution halted.\n");
 				factorDone (&facdata);
-				last_bench_cpu_num = NUM_CPUS;
+				last_bench_core_num = HW_NUM_CORES;
 				return (stop_reason);
 			}
 			clear_timers (timers, sizeof (timers) / sizeof (timers[0]));
@@ -9115,7 +9219,7 @@ int factorBench (
 
 /* End the threads that are looping and return */
 
-	last_bench_cpu_num = NUM_CPUS;
+	last_bench_core_num = HW_NUM_CORES;
 	writeResultsBench ("\n");
 	return (0);
 }
@@ -9133,9 +9237,9 @@ struct prime_bench_arg {
 	int	main_thread_num;
 	unsigned long fftlen;
 	int	plus1;
-	int	cpu_num;
-	int	threads;
-	int	hyperthreads;
+	int	core_num;
+	int	core_count;
+	bool	hyperthreading;
 	int	impl;
 	int	iterations;
 	int	error_check;
@@ -9163,16 +9267,16 @@ void primeBenchOneWorker (void *arg)
 	memset (&sp_info, 0, sizeof (sp_info));
 	sp_info.type = SET_PRIORITY_BENCHMARKING;
 	sp_info.worker_num = info->main_thread_num;
-	sp_info.verbose_flag = IniGetInt (INI_FILE, "AffinityVerbosityBench", 0);
-	sp_info.bench_base_cpu_num = info->cpu_num;
-	sp_info.bench_hyperthreads = info->hyperthreads;
+	sp_info.verbosity = IniGetInt (INI_FILE, "AffinityVerbosityBench", 0);
+	sp_info.bench_base_core_num = info->core_num;
+	sp_info.bench_hyperthreading = info->hyperthreading;
 	SetPriority (&sp_info);
 
 /* Initialize this FFT length */
 
 	gwinit (&lldata.gwdata);
 	gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
-	gwset_num_threads (&lldata.gwdata, info->threads);
+	gwset_num_threads (&lldata.gwdata, get_ranked_num_threads (info->core_num, info->core_count, info->hyperthreading));
 	gwset_thread_callback (&lldata.gwdata, SetAuxThreadPriority);
 	gwset_thread_callback_data (&lldata.gwdata, &sp_info);
 	lldata.gwdata.bench_pick_nth_fft = info->impl;
@@ -9229,8 +9333,7 @@ void primeBenchOneWorker (void *arg)
 	lucasDone (&lldata);
 }
 
-/* Time an FFT for a few seconds on multiple workers.  This let's us */
-/* benchmark the effects of memory bandwidth limitations. */
+/* Time an FFT for a few seconds on multiple workers.  This let's us benchmark the effects of memory bandwidth limitations. */
 
 int primeBenchMultipleWorkersInternal (
 	int	thread_num,
@@ -9336,12 +9439,13 @@ int primeBenchMultipleWorkersInternal (
 
 		for (cpus = min_cores; cpus <= max_cores; cpus += incr_cores) {
 		    if (! is_number_in_list (cpus, bench_cores)) continue;
-		    for (hypercpus = 1; hypercpus <= (int) CPU_HYPERTHREADS; hypercpus++) {
-			if (hypercpus > 1 && !bench_hyperthreading) break;
+		    for (hypercpus = 1; hypercpus <= 2; hypercpus++) {
+			if (hypercpus > 1 && (HW_NUM_CORES == HW_NUM_THREADS || !bench_hyperthreading)) break;
 			/* If the OS cannot set affinity, then we can only bench hyperthreading on all CPUs */
-			if (!OS_CAN_SET_AFFINITY && hypercpus > 1 && cpus != NUM_CPUS) continue;
+			if (!OS_CAN_SET_AFFINITY && hypercpus > 1 && cpus != HW_NUM_CORES) continue;
 			for (workers = min_workers; workers <= cpus && workers <= max_workers; workers += incr_workers) {
-			    int	cores_per_node, nodes_left, workers_left, worker_num, cores_left, core_num;
+			    int	nodes_left, workers_left, node, worker_num, cores_left, core_num;
+			    int efficiency_workers, unused_cores_left;
 
 			    if (! is_number_in_list (workers, bench_workers)) continue;
 			    if (cpus % workers != 0 && !bench_oddballs) continue;
@@ -9359,50 +9463,106 @@ int primeBenchMultipleWorkersInternal (
 				     workers, workers > 1 ? "s" : "");
 			    OutputStr (thread_num, buf);
 
-/* Start the workers */
+/* Init the variables and events that control the workers */
 
 			    num_bench_workers = workers;
 			    num_bench_workers_initialized = 0;
 			    bench_worker_finished = FALSE;
-			    cores_per_node = NUM_CPUS / NUM_THREADING_NODES;
-			    nodes_left = NUM_THREADING_NODES;
-			    workers_left = workers;
-			    cores_left = cpus;
-			    worker_num = 0;
 			    gwevent_reset (&bench_workers_sync);
+
+/* Start the workers.  First assign all the performance cores.  If the user also wants to benchmark efficiency cores, then */
+/* assign workers to the efficiency cores as a last resort.  Assume all efficiency cores belong to one threading node. */
+/* Finally, assume having as few workers as possible assigned to the efficiency cores is the way to go. */
+
+			    // Figure out the number of efficiency cores and workers we will use
+			    if (cpus <= (int) HW_NUM_COMPUTE_CORES) {
+				unused_cores_left = HW_NUM_COMPUTE_CORES - cpus;	// Assign only to performance cores
+				efficiency_workers = 0;
+			    } else {
+				unused_cores_left = 0;					// Assign to performance + efficiency cores
+				if (workers == 1) efficiency_workers = 0;
+				else if (workers <= (int) HW_NUM_COMPUTE_CORES) efficiency_workers = 1;
+				else efficiency_workers = workers - HW_NUM_COMPUTE_CORES;
+			    }
+
+			    // For the compute cores divide cores as evenly as possible amongst workers without crossing a threading node boundary.
+			    // That is, don't include efficiency cores and workers in our even distribution calculations.
+			    nodes_left = HW_NUM_COMPUTE_THREADING_NODES;
+			    cores_left = HW_NUM_COMPUTE_CORES;
+			    workers_left = workers - efficiency_workers;
+
+			    // Loop through the threading nodes.  First assign compute cores, then if necessary assign efficiency cores.
+			    core_num = 0;
+			    worker_num = 0;
+			    node = 0;
 			    while (workers_left) {
-				int	nodes_to_use, workers_this_node, cores_this_node;
-				core_num = (NUM_THREADING_NODES - nodes_left) * cores_per_node;
-				nodes_to_use = divide_rounding_up (nodes_left, workers_left);		// ceil (nodes_left / workers_left)
-				workers_this_node = divide_rounding_up (workers_left, nodes_left);	// ceil (workers_left / nodes_left)
-				if (workers_this_node == 1)
-					cores_this_node = divide_rounding_up (cores_left, workers_left);// ceil (cores_left / workers_left)
-				else
-					cores_this_node = divide_rounding_up (cores_left, nodes_left);	// ceil (cores_left / nodes_left)
-				for ( ; workers_this_node; workers_this_node--) {
-				    int	cores_to_use = cores_this_node / workers_this_node;
+				int	nodes_to_use, cores_this_nodeset, unused_cores_this_nodeset, workers_this_nodeset, nodesets_left;
+
+				// Calculate the number of cores in this set of threading nodes.  Multiple nodes occur when there are fewer
+				// workers left than nodes left.  One or more workers must use multiple nodes.
+				cores_this_nodeset = 0;
+				nodes_to_use = divide_rounding_up (nodes_left, workers_left);
+				nodesets_left = _intmin (nodes_left, workers_left);
+				while (nodes_to_use--) {
+					int cores_this_node = get_cores_in_threading_node (node);
+					cores_this_nodeset += cores_this_node;
+
+					// Make workers this nodeset proportional to the fraction of total cores in this nodeset.
+					// In the final nodeset, we must assign all the workers we have not yet figured out.  This happens
+					// automatically as the final cores_this_nodeset value must equal the unassigned cores remaining.
+					// Distribute unused cores equitably amongst all the nodesets.  This is calculated by
+					// excess_cores_this_nodeset (i.e. cores_this_nodeset - avg_cores_per_nodeset) + unused_cores_per_nodeset
+					// NOTE: These calculations must happen before we adjust for efficiency cores in the next code snipet.
+					if (nodes_to_use == 0) {
+						workers_this_nodeset = divide_rounding (workers_left * cores_this_nodeset, cores_left);
+						unused_cores_this_nodeset =
+							divide_rounding (cores_this_nodeset * nodesets_left - cores_left + unused_cores_left, nodesets_left);
+					}
+
+					// Account for this node being used
+					node++;
+					nodes_left--;
+
+					// If we've reached the first efficiency node, add back in the number of efficiency cores and workers
+					// so that we now divide efficiency cores as evenly as possible amongst the efficiency nodes.
+					if (node == HW_NUM_COMPUTE_THREADING_NODES) {
+						nodes_left += HW_NUM_THREADING_NODES - HW_NUM_COMPUTE_THREADING_NODES;
+						cores_left += HW_NUM_CORES - HW_NUM_COMPUTE_CORES;
+						unused_cores_left += HW_NUM_CORES - cpus;
+						workers_left += efficiency_workers;
+						if (efficiency_workers == 0 && cpus > (int) HW_NUM_COMPUTE_CORES) nodes_to_use = nodes_left;
+					}
+				}
+
+				// Do more bookkeepping
+				cores_left -= cores_this_nodeset;
+				unused_cores_left -= unused_cores_this_nodeset;
+
+				// Assign nodeset cores to the nodeset workers
+				for ( ; workers_this_nodeset; workers_this_nodeset--) {
+				    int	cores_to_use = cores_this_nodeset / workers_this_nodeset;
 				    info[worker_num].main_thread_num = thread_num;
 				    info[worker_num].fftlen = fftlen;
 				    info[worker_num].plus1 = plus1;
 				    info[worker_num].impl = (all_bench ? impl : 0);
-				    info[worker_num].cpu_num = core_num;
-				    info[worker_num].threads = cores_to_use * hypercpus;
-				    info[worker_num].hyperthreads = hypercpus;
+				    info[worker_num].core_num = core_num;
+				    info[worker_num].core_count = cores_to_use;
+				    info[worker_num].hyperthreading = (hypercpus > 1);
 				    info[worker_num].error_check = bench_error_check;
 				    gwthread_create_waitable (&thread_id[worker_num], &primeBenchOneWorker, (void *) &info[worker_num]);
 				    core_num += cores_to_use;
-				    cores_this_node -= cores_to_use;
-				    cores_left -= cores_to_use;
+				    cores_this_nodeset -= cores_to_use;
 				    worker_num++;
-				    workers_left--; 
+				    workers_left--;
 				}
-				nodes_left -= nodes_to_use;
+				core_num += unused_cores_this_nodeset;
 			    }
+			    // Assert that all workers and compute cores were assigned
+			    ASSERTG (workers_left == 0 && cores_left == 0);
 
 /* Wait for all the workers to finish */
 
-			    for (i = 0; i < workers; i++)
-				    gwthread_wait_for_exit (&thread_id[i]);
+			    for (i = 0; i < workers; i++) gwthread_wait_for_exit (&thread_id[i]);
 			    stop_reason = stopCheck (thread_num);
 			    if (stop_reason) {
 				if (all_bench) gwbench_write_data ();	/* Write accumulated benchmark data to gwnum.txt */
@@ -9486,7 +9646,7 @@ int primeBenchMultipleWorkersInternal (
 /* all-cores timings for FFT lengths from 1M on up.  These timings should prove more useful in */
 /* comparing which CPUs are the most powerful. */
 
-			    if (!all_bench && is_a_5678 && !plus1 && cpus == NUM_CPUS && hypercpus == 1 && fftlen / 1024 >= 1024)
+			    if (!all_bench && is_a_5678 && !plus1 && cpus == HW_NUM_CORES && hypercpus == 1 && fftlen / 1024 >= 1024)
 				add_bench_data_to_pkt (pkt, "TP%luK", fftlen, throughput, FALSE);
 
 /* Benchmark next FFT */
@@ -9548,22 +9708,22 @@ int primeBenchMultipleWorkers (
 
 	min_cores = IniGetInt (INI_FILE, "BenchMinCores", 1);
 	if (min_cores < 1) min_cores = 1;
-	if (min_cores > (int) NUM_CPUS) min_cores = NUM_CPUS;
+	if (min_cores > (int) HW_NUM_CORES) min_cores = HW_NUM_CORES;
 
-	max_cores = IniGetInt (INI_FILE, "BenchMaxCores", NUM_CPUS);
+	max_cores = IniGetInt (INI_FILE, "BenchMaxCores", HW_NUM_CORES);
 	if (max_cores < 1) max_cores = 1;
-	if (max_cores > (int) NUM_CPUS) max_cores = NUM_CPUS;
+	if (max_cores > (int) HW_NUM_CORES) max_cores = HW_NUM_CORES;
 
 	incr_cores = IniGetInt (INI_FILE, "BenchCoresIncrement", 1);
 	if (incr_cores < 1) incr_cores = 1;
 
 	min_workers = IniGetInt (INI_FILE, "BenchMinWorkers", 1);
 	if (min_workers < 1) min_workers = 1;
-	if (min_workers > (int) NUM_CPUS) min_workers = NUM_CPUS;
+	if (min_workers > (int) HW_NUM_CORES) min_workers = HW_NUM_CORES;
 
-	max_workers = IniGetInt (INI_FILE, "BenchMaxWorkers", NUM_CPUS);
+	max_workers = IniGetInt (INI_FILE, "BenchMaxWorkers", HW_NUM_CORES);
 	if (max_workers < 1) max_workers = 1;
-	if (max_workers > (int) NUM_CPUS) max_workers = NUM_CPUS;
+	if (max_workers > (int) HW_NUM_CORES) max_workers = HW_NUM_CORES;
 
 	incr_workers = IniGetInt (INI_FILE, "BenchWorkersIncrement", 1);
 	if (incr_workers < 1) incr_workers = 1;
@@ -9656,7 +9816,7 @@ void autoBench (void)
 	else {
 		num_cores = 0;
 		for (i = 0; i < (int) NUM_WORKER_THREADS; i++) num_cores += CORES_PER_TEST[i];
-		if (num_cores > (int) NUM_CPUS) num_cores = NUM_CPUS;
+		if (num_cores > (int) HW_NUM_CORES) num_cores = HW_NUM_CORES;
 	}
 	num_workers = BENCH_NUM_WORKERS ? BENCH_NUM_WORKERS : NUM_WORKER_THREADS; /* Use gwnum.txt override or default to all workers */
 
@@ -9675,17 +9835,19 @@ void autoBench (void)
 
 /* Loop over all work units */
 
-	    w = NULL;
 	    est = 0.0;
-	    for ( ; ; ) {
+	    for (int pass = 0; pass <= 1; pass++)
+	    for (w = NULL; ; ) {
 		int	all_complex, num_benchmarks;
 		unsigned long min_fftlen, max_fftlen;    
 
-/* Read the next line of the work file */
+/* Read the next line of the work file.  Handle CERT lines first in computing estimated completion dates. */
 
 		w = getNextWorkToDoLine (tnum, w, SHORT_TERM_USE);
 		if (w == NULL) break;
-		if (w->work_type == WORK_NONE || w->work_type == WORK_CERT) continue;
+		if (w->work_type == WORK_NONE) continue;
+		if (pass == 0 && w->work_type != WORK_CERT) continue;
+		if (pass == 1 && w->work_type == WORK_CERT) continue;
 
 /* Ignore any worktodo entries that will not begin within the next 7 days.  No particular reason for this. */
 /* This reduces the likelihood of an excessively long autobench.  The worktodo entry might be deleted before */
@@ -9695,13 +9857,14 @@ void autoBench (void)
 		if (est > autobench_days_of_work * 86400.0) continue;
 		est += work_estimate (tnum, w);
 
-/* Trial factoring is the only work type that does not use FFTs */
+/* Trial factoring is the only work type that does not use FFTs.  CERTs are short work assignments unlikely to benefit from an auto-bench. */
 
 		if (w->work_type == WORK_FACTOR) continue;
+		if (w->work_type == WORK_CERT) continue;
 
-/* If this is an LL test determine the FFT size that will actually be used */
+/* If this is an LL or PRP test determine the FFT size that will actually be used */
 
-		if (w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK || w->work_type == WORK_ADVANCEDTEST)
+		if (w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK || w->work_type == WORK_ADVANCEDTEST || w->work_type == WORK_PRP)
 			pick_fft_size (MAIN_THREAD_NUM, w);
 
 /* Ask gwnum how many relevant benchmarks are in its database */
@@ -9837,7 +10000,7 @@ int primeBench (
 	double	best_time, total_time;
 	char	buf[512];
 	char	bench_cores[512];
-	int	min_cores, max_cores, incr_cores, cpu, hypercpu;
+	int	min_cores, max_cores, incr_cores, cores, hypercpu;
 	int	all_bench, only_time_5678, time_all_complex, plus1, stop_reason;
 	int	is_a_5678, bench_hyperthreading, bench_arch;
 	unsigned long fftlen, min_FFT_length, max_FFT_length;
@@ -9873,8 +10036,8 @@ int primeBench (
 	memset (&sp_info, 0, sizeof (sp_info));
 	sp_info.type = SET_PRIORITY_BENCHMARKING;
 	sp_info.worker_num = thread_num;
-	sp_info.verbose_flag = IniGetInt (INI_FILE, "AffinityVerbosityBench", 0);
-	sp_info.bench_hyperthreads = 1;
+	sp_info.verbosity = IniGetInt (INI_FILE, "AffinityVerbosityBench", 0);
+	sp_info.bench_hyperthreading = FALSE;
 	SetPriority (&sp_info);
 
 /* Perform the requested type of benchmark */
@@ -9916,8 +10079,8 @@ int primeBench (
 /* (this happens on a Core i7 Q840M processor). */
 
 	if (IniGetInt (INI_FILE, "BenchDummyWorkers", 0)) {
-		last_bench_cpu_num = 0;			// CPU #0 is benching
-		for (i = 1; i < NUM_CPUS; i++) {	// CPU #1 to NUM_CPUS-1 are busy looping
+		last_bench_core_num = 0;				// CPU #0 is benching
+		for (i = 1; i < HW_NUM_COMPUTE_CORES; i++) {	// CPU #1 to HW_NUM_COMPUTE_CORES-1 are busy looping
 			gwthread thread_id;
 			gwthread_create (&thread_id, &bench_busy_loop, (void *) (intptr_t) i);
 		}
@@ -9928,38 +10091,36 @@ int primeBench (
 
 	min_cores = IniGetInt (INI_FILE, "BenchMinCores", 1);
 	if (min_cores < 1) min_cores = 1;
-	if (min_cores > (int) NUM_CPUS) min_cores = NUM_CPUS;
+	if (min_cores > (int) HW_NUM_CORES) min_cores = HW_NUM_CORES;
 
-	max_cores = IniGetInt (INI_FILE, "BenchMaxCores", NUM_CPUS);
+	max_cores = IniGetInt (INI_FILE, "BenchMaxCores", HW_NUM_CORES);
 	if (max_cores < 1) max_cores = 1;
-	if (max_cores > (int) NUM_CPUS) max_cores = NUM_CPUS;
+	if (max_cores > (int) HW_NUM_CORES) max_cores = HW_NUM_CORES;
 
 	incr_cores = IniGetInt (INI_FILE, "BenchCoresIncrement", 1);
 	if (incr_cores < 1) incr_cores = 1;
 
 /* Loop over all possible single-worker multithread possibilities */
 
-	for (cpu = min_cores; cpu <= max_cores; cpu += incr_cores) {
-	  if (! is_number_in_list (cpu, bench_cores)) continue;
-	  for (hypercpu = 1; hypercpu <= (int) CPU_HYPERTHREADS; hypercpu++) {
+	for (cores = min_cores; cores <= max_cores; cores += incr_cores) {
+	  if (! is_number_in_list (cores, bench_cores)) continue;
+	  for (hypercpu = 1; hypercpu <= 2; hypercpu++) {
 	    if (hypercpu > 1 && !bench_hyperthreading) break;
-	    /* Only bench hyperthreading on one CPU and all CPUs */
-	    if (hypercpu > 1 && cpu != 1 && cpu != NUM_CPUS) continue;
-	    /* If the OS cannot set affinity, then we can only bench hyperthreading on all CPUs */
-	    if (!OS_CAN_SET_AFFINITY && hypercpu > 1 && cpu != NUM_CPUS) continue;
+	    if (hypercpu > 1 && HW_NUM_CORES == HW_NUM_THREADS) break;
+	    /* Only bench hyperthreading on one core and all cores */
+	    if (hypercpu > 1 && cores != 1 && cores != HW_NUM_COMPUTE_CORES && cores != HW_NUM_CORES) continue;
+	    /* If the OS cannot set affinity, then we can only bench hyperthreading on all cores */
+	    if (!OS_CAN_SET_AFFINITY && hypercpu > 1 && cores != HW_NUM_CORES) continue;
 	    /* Output a message if using multi-threaded FFT */
-	    if (cpu > 1 || hypercpu > 1) {
+	    if (cores > 1 || hypercpu > 1) {
 	      if (! (CPU_FLAGS & CPU_SSE2)) continue;  // Only SSE2 code supports multi-threaded FFTs
-	      if (CPU_HYPERTHREADS == 1)
-	        sprintf (buf, "Timing FFTs using %d cores.\n", cpu);
-	      else
-	        sprintf (buf, "Timing FFTs using %d threads on %d core%s.\n", cpu * hypercpu, cpu, cpu > 1 ? "s" : "");
+	      sprintf (buf, "Timing%s FFTs using %d core%s.\n", hypercpu > 1 ? " hyperthreaded" : "", cores, cores > 1 ? "s" : "");
 	      OutputBothBench (thread_num, buf);
 	    }
 
 /* Set global that makes sure we are running the correct number of busy loops */
 
-	    last_bench_cpu_num = cpu - 1;
+	    last_bench_core_num = cores - 1;
 
 /* Loop over a variety of FFT lengths */
 
@@ -9970,17 +10131,16 @@ int primeBench (
 	        for (impl = 1; ; impl++) {
 		  if (impl > 1 && !all_bench) break;
 
-/* Initialize for this FFT length.  Compute the number of iterations to */
-/* time.  This is based on the fact that it doesn't take too long for */
+/* Initialize for this FFT length.  Compute the number of iterations to time.  This is based on the fact that it doesn't take too long for */
 /* my 1400 MHz P4 to run 10 iterations of a 1792K FFT. */
 
 		  gwinit (&lldata.gwdata);
 		  gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
 		  if (IniGetInt (LOCALINI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&lldata.gwdata);
 		  if (IniGetInt (INI_FILE, "HyperthreadPrefetch", 0)) gwset_hyperthread_prefetch (&lldata.gwdata);
-		  gwset_num_threads (&lldata.gwdata, cpu * hypercpu);
-		  sp_info.bench_base_cpu_num = 0;
-		  sp_info.bench_hyperthreads = hypercpu;
+		  gwset_num_threads (&lldata.gwdata, get_ranked_num_threads (0, cores, hypercpu > 1));
+		  sp_info.bench_base_core_num = 0;
+		  sp_info.bench_hyperthreading = (hypercpu > 1);
 		  gwset_thread_callback (&lldata.gwdata, SetAuxThreadPriority);
 		  gwset_thread_callback_data (&lldata.gwdata, &sp_info);
 		  if (all_bench) lldata.gwdata.bench_pick_nth_fft = impl;
@@ -10063,7 +10223,7 @@ int primeBench (
 				OutputStrNoTimeStamp (thread_num, "\n");
 				OutputStr (thread_num, "Execution halted.\n");
 				lucasDone (&lldata);
-				last_bench_cpu_num = NUM_CPUS;
+				last_bench_core_num = HW_NUM_CORES;
 				return (stop_reason);
 			}
 			clear_timers (timers, sizeof (timers) / sizeof (timers[0]));
@@ -10098,8 +10258,7 @@ int primeBench (
 			strcat (buf, ", avg: ");
 			print_timer (timers, 0, buf, TIMER_NL | TIMER_MS);
 		  } else {
-			sprintf (buf, "Best time for %luK%s FFT length: ",
-				 fftlen / 1024, plus1 ? " all-complex" : "");
+			sprintf (buf, "Best time for %luK%s FFT length: ", fftlen / 1024, plus1 ? " all-complex" : "");
 			timers[0] = best_time;
 			print_timer (timers, 0, buf, TIMER_MS);
 			timers[0] = total_time / iterations;
@@ -10111,14 +10270,14 @@ int primeBench (
 /* Accumulate best times to send to the server.  These are the "classic" best times -- that is, */
 /* best non-hyperthreaded single-core timings for FFT lengths from 1M on up. */
 
-		  if (!all_bench && is_a_5678 && !plus1 && cpu == 1 && hypercpu == 1 && fftlen / 1024 >= 1024)
+		  if (!all_bench && is_a_5678 && !plus1 && cores == 1 && hypercpu == 1 && fftlen / 1024 >= 1024)
 			add_bench_data_to_pkt (&pkt, "FFT%luK", fftlen, timer_value (timers, 0), TRUE);
 
 /* Accumulate best times to send to the server.  We send the non-hyperthreaded all-cores */
 /* timings for FFT lengths from 1M on up.  These timings should prove more useful in */
 /* comparing which CPU is are most powerful. */
 
-		  if (!all_bench && is_a_5678 && !plus1 && cpu == NUM_CPUS && hypercpu == 1 && fftlen / 1024 >= 1024)
+		  if (!all_bench && is_a_5678 && !plus1 && cores == HW_NUM_COMPUTE_CORES && hypercpu == 1 && fftlen / 1024 >= 1024)
 			add_bench_data_to_pkt (&pkt, "AC%luK", fftlen, timer_value (timers, 0), TRUE);
 
 /* Time next FFT */
@@ -10127,11 +10286,11 @@ int primeBench (
 	      }  // End fftlen loop
 	    }  // End plus1 loop
 	  } // End hyper loop
-	} // End cpu loop
+	} // End cores loop
 
 /* End the threads that are busy looping */
 
-	last_bench_cpu_num = NUM_CPUS;
+	last_bench_core_num = HW_NUM_CORES;
 
 /* Single worker benchmark complete */
 
@@ -10741,14 +10900,16 @@ int generateProofFile (
 		}
 		gwfree_internal_memory (gwdata);
 
-// Open the PRP residues file, create or open the PRP proof file
+// Open the PRP residues file unless all residues are in emergency memory, create or open the PRP proof file
 
-		fd = _open (ps->residues_filename, _O_BINARY | _O_RDONLY);
-		if (fd < 0) {
-			sprintf (buf, "Cannot open PRP proof interim residues file: %s\n", ps->residues_filename);
-			OutputBoth (ps->thread_num, buf);
-			OutputBothErrno (ps->thread_num);
-			goto pfail;
+		if (ps->num_emergency_allocs == 0 || ps->first_emergency_residue_number != 1) {
+			fd = _open (ps->residues_filename, _O_BINARY | _O_RDONLY);
+			if (fd < 0) {
+				sprintf (buf, "Cannot open PRP proof interim residues file: %s\n", ps->residues_filename);
+				OutputBoth (ps->thread_num, buf);
+				OutputBothErrno (ps->thread_num);
+				goto pfail;
+			}
 		}
 		tempFileName (w, filename);
 		sprintf (proof_filename, "%s.proof", filename);
@@ -10871,8 +11032,8 @@ int generateProofFile (
 
 // Close input and output files, free memory
 
-		_close (fd); fd = -1;
-		_close (fdout); fdout = -1;
+		if (fd >= 0) _close (fd), fd = -1;
+		if (fdout >= 0) _close (fdout), fdout = -1;
 		gwfree (gwdata, M); M = NULL;
 
 // Generate an MD5 hash of the bytes just written to the proof file.  This will be a unique identifier to thwart a bad actor from uploading a counterfeit proof file.
@@ -10922,6 +11083,8 @@ int generateProofFile (
 		else if (!IniGetInt (LOCALINI_FILE, "PreallocateDisk", 1)) {
 			_unlink (ps->residues_filename);
 		}
+		for (i = 0; i < ps->num_emergency_allocs; i++) free (ps->emergency_allocs[i]);
+		ps->num_emergency_allocs = 0;
 		break;
 
 // Cleanup after a proof failure, close and delete/truncate proof file
@@ -10943,6 +11106,8 @@ pfail:		if (fd >= 0) _close (fd);
 		if (proofgen_waits == 0) {		// We've run out of 5 minute waits.  Give up on trying to generate the proof file.
 			OutputBoth (ps->thread_num, "Proof generation failed.\n");
 			ps->proof_power = 0;		// Clear proof power so that JSON will report no proof file generated
+			for (i = 0; i < ps->num_emergency_allocs; i++) free (ps->emergency_allocs[i]);
+			ps->num_emergency_allocs = 0;
 			_unlink (ps->residues_filename);
 			break;
 		}
@@ -11099,7 +11264,7 @@ int writePRPSaveFile (			// Returns TRUE if successful
 	closeWriteSaveFile (write_save_file_state, fd);
 	return (TRUE);
 
-/* An error occured.  Delete the current file. */
+/* An error occurred.  Delete the current file. */
 
 writeerr:
 	sprintf (buf, WRITEFILEERR, write_save_file_state->base_filename);
@@ -11140,11 +11305,13 @@ int readPRPSaveFile (
 		if (!read_long (fd, &savefile_prp_base, &sum)) goto err;
 		if (!read_long (fd, &ps->units_bit, &sum)) goto err;
 		if (!read_long (fd, &savefile_two_power_opt, &sum)) goto err;
-		ps->two_power_opt = savefile_two_power_opt;
+		// This test causes PRP test to restart from scratch if PRPStraightForward option is changed.
+		// Alternatively we could re-init PRP code with two_power_opt toggled.
+		if (ps->two_power_opt != savefile_two_power_opt) goto err;
 	} else {
 		savefile_prp_base = 3;
 		ps->units_bit = 0;
-		ps->two_power_opt = FALSE;
+		if (ps->two_power_opt) goto err;		// Alternatively we could re-init PRP code with two_power_opt off
 	}
 
 	// Validate save file's PRP base is the desired PRP base
@@ -11460,7 +11627,7 @@ int prp (
 	unsigned long excess_squarings;		/* Number of extra squarings we are doing in order to generate a PRP proof */
 	int	proof_next_interim_residue;	/* The next interim residue to output */
 	unsigned long proof_next_interim_residue_iter; /* The iteration where the next interim residue occurs */
-	unsigned long initial_log2k_iters, initial_nonproof_iters, final_residue_counter;
+	unsigned long initiallog2k_iters, initial_nonproof_iters, final_residue_counter;
 	int	proof_residue;			/* True if this iteration must output a PRP proof residue */
 	char	proof_hash[33];			/* 128-bit MD5 hash of the proof file */
 
@@ -11566,7 +11733,7 @@ int prp (
 		if (ps.residue_type == PRIMENET_PRP_TYPE_FERMAT_VAR) ps.residue_type = PRIMENET_PRP_TYPE_FERMAT;
 		else if (ps.residue_type == PRIMENET_PRP_TYPE_SPRP_VAR) ps.residue_type = PRIMENET_PRP_TYPE_SPRP;
 	}
-	initial_log2k_iters = (int) floor (_log2 (w->k));
+	initiallog2k_iters = (int) floor (log2 (w->k));
 
 /* If k=1,b=2 and we are doing a traditional Fermat PRP implementation, then interim residues are output based on the bit */
 /* representation of N = 2^n + c - 1.  N looks like this:
@@ -11679,15 +11846,12 @@ begin:	N = exp = NULL;
 	gwsetmaxmulbyconst (&gwdata, ps.prp_base);
 	if (IniGetInt (LOCALINI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&gwdata);
 	if (IniGetInt (INI_FILE, "HyperthreadPrefetch", 0)) gwset_hyperthread_prefetch (&gwdata);
-	if (HYPERTHREAD_LL) {
-		sp_info->normal_work_hyperthreads = IniGetInt (LOCALINI_FILE, "HyperthreadLLcount", CPU_HYPERTHREADS);
-		gwset_will_hyperthread (&gwdata, sp_info->normal_work_hyperthreads);
-	}
-	gwset_bench_cores (&gwdata, NUM_CPUS);
+	if (HYPERTHREAD_LL) sp_info->normal_work_hyperthreading = TRUE, gwset_will_hyperthread (&gwdata, 2);
+	gwset_bench_cores (&gwdata, HW_NUM_CORES);
 	gwset_bench_workers (&gwdata, NUM_WORKER_THREADS);
 	if (ERRCHK) gwset_will_error_check (&gwdata);
 	else gwset_will_error_check_near_limit (&gwdata);
-	gwset_num_threads (&gwdata, CORES_PER_TEST[thread_num] * sp_info->normal_work_hyperthreads);
+	gwset_num_threads (&gwdata, get_worker_num_threads (thread_num, HYPERTHREAD_LL));
 	gwset_thread_callback (&gwdata, SetAuxThreadPriority);
 	gwset_thread_callback_data (&gwdata, sp_info);
 	gwset_minimum_fftlen (&gwdata, w->minimum_fftlen);
@@ -11711,7 +11875,7 @@ begin:	N = exp = NULL;
 
 /* Compute the number we are testing. */
 
-	stop_reason = setN (&gwdata, thread_num, w, &N);
+	stop_reason = setN (thread_num, w, &N);
 	if (stop_reason) goto exit;
 
 /* If N is one, the number is already fully factored.  Print an error message. */
@@ -11903,7 +12067,7 @@ begin:	N = exp = NULL;
 /* Calculate the number of squarings in a full or partial proof and number of squarings that are handled outside of the proof */
 
 		ps.proof_num_iters = (w->n + excess_squarings) / ps.proof_power_mult;
-		initial_nonproof_iters = initial_log2k_iters + (w->n + excess_squarings) % ps.proof_power_mult;
+		initial_nonproof_iters = initiallog2k_iters + (w->n + excess_squarings) % ps.proof_power_mult;
 
 /* Map the current iteration (from the save file) into the next interim residue to output */
 
@@ -11935,7 +12099,7 @@ begin:	N = exp = NULL;
 
 /* Calculate the exponent we will use to do our left-to-right binary exponentiation */
 
-	exp = allocgiant (((unsigned long) (w->n * _log2 (w->b) + excess_squarings) >> 5) + 5);
+	exp = allocgiant (((unsigned long) (w->n * log2 (w->b) + excess_squarings) >> 5) + 5);
 	if (exp == NULL) {
 		stop_reason = OutOfMemory (thread_num);
 		goto exit;
@@ -12058,7 +12222,7 @@ begin:	N = exp = NULL;
 				gwcopy (&gwdata, ps.x, ps.alt_x);
 				ps.alt_units_bit = 0;
 			} else {
-				gwadd3 (&gwdata, ps.x, ps.x, ps.alt_x);
+				gwadd3o (&gwdata, ps.x, ps.x, ps.alt_x, GWADD_FORCE_NORMALIZE); // Don't corrupt min/max roundoff error output
 				ps.alt_units_bit = ps.units_bit + 1;
 				if (ps.alt_units_bit >= w->n) ps.alt_units_bit -= w->n;
 			}
@@ -12086,7 +12250,7 @@ begin:	N = exp = NULL;
 			if (w->k != 1.0) {
 				ps.state = PRP_STATE_DCHK_PASS1;
 				ps.start_counter = 0;
-				ps.end_counter = initial_log2k_iters;
+				ps.end_counter = initiallog2k_iters;
 			} else {
 				ps.state = PRP_STATE_GERB_START_BLOCK;
 			}
@@ -12128,10 +12292,9 @@ rotateg (t1, w->n, ps.units_bit, &gwdata.gdata);
 				ps.state = PRP_STATE_DCHK_PASS1;
 				ps.start_counter = ps.counter;
 				ps.end_counter = ps.counter + iters_left;
-				// Only Mersennes support shift counts.  Alt_x cannot have a different shift count when
-				// DCHK ends and GERBICZ resumes.
+				// Only Mersennes support shift counts.  Alt_x cannot have a different shift count when DCHK ends and GERBICZ resumes.
 				if (ps.alt_units_bit && ps.end_counter == final_counter) {
-					gwadd3 (&gwdata, ps.alt_x, ps.alt_x, ps.alt_x);
+					gwadd3o (&gwdata, ps.alt_x, ps.alt_x, ps.alt_x, GWADD_FORCE_NORMALIZE); // Don't corrupt min/max roundoff error output
 					ps.alt_units_bit = ps.alt_units_bit + 1;
 					if (ps.alt_units_bit >= w->n) ps.alt_units_bit -= w->n;
 				}
@@ -12725,7 +12888,7 @@ OutputStr (thread_num, "Iteration failed.\n");
 
 		if ((ps.state == PRP_STATE_NORMAL || ps.state == PRP_STATE_DCHK_PASS1 || ps.state == PRP_STATE_GERB_START_BLOCK) &&
 		    ps.proof_power && ps.counter != final_counter && ps.counter == initial_nonproof_iters + ps.proof_num_iters) {
-			int proof_number = (ps.counter - initial_log2k_iters) / ps.proof_num_iters;
+			int proof_number = (ps.counter - initiallog2k_iters) / ps.proof_num_iters;
 			stop_reason = generateProofFile (&gwdata, &ps, w, proof_number, proof_hash);
 			if (stop_reason) goto exit;
 			initial_nonproof_iters += ps.proof_num_iters;
@@ -13020,7 +13183,7 @@ exit:	gwdone (&gwdata);
 	free (ps.emergency_allocs);
 	return (stop_reason);
 
-/* An error occured, output a message saying we are restarting, sleep, */
+/* An error occurred, output a message saying we are restarting, sleep, */
 /* then try restarting at last save point. */
 
 restart:if (sleep5) OutputBoth (thread_num, ERRMSG2);

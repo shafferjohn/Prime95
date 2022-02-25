@@ -4,7 +4,7 @@
 | This file contains various utility routines that may be used by gwnum
 | routines, prime95, or other consumers of gwnum.
 | 
-|  Copyright 2004-2019 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2004-2020 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 /* Include files */
@@ -39,53 +39,32 @@ void * aligned_offset_malloc (
 	size_t	alignment,
 	size_t	mod)
 {
-#ifdef _WIN64
-	char	*p, *q;
-	p = (char *) malloc (sizeof (void *) + size + alignment);
-	if (p == NULL) return (NULL);
-	q = (char *) (((uint64_t) p + sizeof (void *) + mod + alignment - 1) & ~(alignment - 1)) - mod;
-	* (void **) ((char *) q - sizeof (void *)) = p;
-	return (q);
-// For compatibility with 32-bit versions of the program, I've elected to use
-// my own implementation rather than the Microsoft routine below.
+// For portability, I've elected to use my own implementation rather than the Microsoft routine below.
 //	return (_aligned_offset_malloc (size, alignment, mod));
-#else
 	char	*p, *q;
 	p = (char *) malloc (sizeof (void *) + size + alignment);
 	if (p == NULL) return (NULL);
-	q = (char *) (((long) p + sizeof (void *) + mod + alignment - 1) & ~(alignment - 1)) - mod;
+	q = (char *) (((intptr_t) p + sizeof (void *) + mod + alignment - 1) & ~(alignment - 1)) - mod;
 	* (void **) ((char *) q - sizeof (void *)) = p;
 	return (q);
-#endif
 }
 
 void * aligned_malloc (
 	size_t	size,
 	size_t	alignment)
 {
-#ifdef _WIN64
-	return (aligned_offset_malloc (size, alignment, 0));
-// For compatibility with 32-bit versions of the program, I've elected to use
-// my own implementation rather than the Microsoft routine below.
+// For portability, I've elected to use my own implementation rather than the Microsoft routine below.
 //	return (_aligned_malloc (size, alignment));
-#else
 	return (aligned_offset_malloc (size, alignment, 0));
-#endif
 }
 
 void aligned_free (
 	void	*ptr)
 {
-#ifdef _WIN64
-	if (ptr == NULL) return;
-	free (* (void **) ((char *) ptr - sizeof (void *)));
-// For compatibility with 32-bit versions of the program, I've elected to use
-// my own implementation rather than the Microsoft routine below.
+// For portability, I've elected to use my own implementation rather than the Microsoft routine below.
 //	_aligned_free (ptr);
-#else
 	if (ptr == NULL) return;
 	free (* (void **) ((char *) ptr - sizeof (void *)));
-#endif
 }
 
 
@@ -94,7 +73,6 @@ void aligned_free (
 //*******************************************************
 
 #define TWO_MEGABYTES	2*1024*1024
-#define round_up_to_multiple_of(a,b)	(((a)+(b)-1) & ~(b-1))
 
 static int large_pages_are_supported = 0;
 #if defined (_WIN32)
@@ -240,7 +218,39 @@ void large_pages_free (
 #endif
 }
 
-/* Utility routines used in copying strings */
+/* Large page versions of the aligned malloc routines */
+
+void * aligned_offset_large_pages_malloc (
+	size_t	size,
+	size_t	alignment,
+	size_t	mod)
+{
+	char	*p, *q;
+	p = (char *) large_pages_malloc (sizeof (void *) + size + alignment);
+	if (p == NULL) return (NULL);
+	q = (char *) (((intptr_t) p + sizeof (void *) + mod + alignment - 1) & ~(alignment - 1)) - mod;
+	* (void **) ((char *) q - sizeof (void *)) = p;
+	return (q);
+}
+
+void * aligned_large_pages_malloc (
+	size_t	size,
+	size_t	alignment)
+{
+	return (aligned_offset_large_pages_malloc (size, alignment, 0));
+}
+
+void aligned_large_pages_free (
+	void	*ptr)
+{
+	if (ptr == NULL) return;
+	large_pages_free (* (void **) ((char *) ptr - sizeof (void *)));
+}
+
+
+//*******************************************************
+//       Utility routines used in copying strings
+//*******************************************************
 
 void truncated_strcpy_with_len (
 	char	*buf,
