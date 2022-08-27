@@ -21,7 +21,7 @@ objconv=c:\objconv\objconv
 
 # List of all buildables in this makefile
 
-all:	gwnumd.lib gwnum.lib linux\gwnum.a macosx\gwnum.a release\ecmstag1.obj debug\ecmstag1.obj
+all:	gwnumd.lib gwnum.lib polymult.lib polymultd.lib linux\gwnum.a macosx\gwnum.a release\ecmstag1.obj debug\ecmstag1.obj
 
 # Make libraries out of the object files
 
@@ -62,6 +62,14 @@ gwnum.lib: release\cpuid.obj release\gwnum.obj release\gwtables.obj release\gwth
 	   timeit.obj
     del gwnum.lib
     lib /OUT:gwnum.lib release\*.obj *.obj
+
+polymult.lib: release\polymult\polymult.obj release\polymult\polymult_sse2.obj release\polymult\polymult_avx.obj release\polymult\polymult_fma.obj
+    del polymult.lib
+    lib /OUT:polymult.lib release\polymult\*.obj
+
+polymultd.lib: debug\polymult\polymult.obj debug\polymult\polymult_sse2.obj debug\polymult\polymult_avx.obj debug\polymult\polymult_fma.obj
+    del polymultd.lib
+    lib /OUT:polymultd.lib debug\polymult\*.obj
 
 linux\gwnum.a: mult.obj mult1.obj mult1aux.obj mult2.obj mult2p.obj mult2a.obj mult2aux.obj \
 	       mult3.obj mult3p.obj mult3a.obj mult3ap.obj mult4.obj mult4p.obj gianthlp.obj cpuidhlp.obj hyperhlp.obj \
@@ -183,6 +191,30 @@ release\radix.obj: radix.c radix.h gwnum.h
 
 debug\radix.obj: radix.c radix.h gwnum.h
     $(cld) /Fodebug\radix.obj radix.c
+
+release\polymult\polymult.obj: polymult.c polymult.h
+    $(cl) /arch:IA32 /Forelease\polymult\polymult.obj polymult.c
+
+debug\polymult\polymult.obj: polymult.c polymult.h
+    $(cld) /arch:IA32 /Fodebug\polymult\polymult.obj polymult.c
+
+release\polymult\polymult_sse2.obj: polymult.c polymult.h
+    $(cl) /arch:SSE2 /DSSE2 /Forelease\polymult\polymult_sse2.obj polymult.c
+
+debug\polymult\polymult_sse2.obj: polymult.c polymult.h
+    $(cld) /arch:SSE2 /DSSE2 /Fodebug\polymult\polymult_sse2.obj polymult.c
+
+release\polymult\polymult_avx.obj: polymult.c polymult.h
+    $(cl) /arch:AVX /DAVX /Forelease\polymult\polymult_avx.obj polymult.c
+
+debug\polymult\polymult_avx.obj: polymult.c polymult.h
+    $(cld) /arch:AVX /DAVX /Fodebug\polymult\polymult_avx.obj polymult.c
+
+release\polymult\polymult_fma.obj: polymult.c polymult.h
+    $(cl) /arch:AVX2 /DFMA /Forelease\polymult\polymult_fma.obj polymult.c
+
+debug\polymult\polymult_fma.obj: polymult.c polymult.h
+    $(cld) /arch:AVX2 /DFMA /Fodebug\polymult\polymult_fma.obj polymult.c
 
 release\ecmstag1.obj: ecmstag1.c gwnum.h
     $(cl)  /Ic:\gmp32 /Forelease\ecmstag1.obj ecmstag1.c

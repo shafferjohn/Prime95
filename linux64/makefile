@@ -6,7 +6,7 @@
 #	make install
 #
 # Hwloc can be downloaded from https://www.open-mpi.org/projects/hwloc/
-# Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl --disable-opencl
+# Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl --disable-opencl --disable-rsmi
 #
 #  Ugh, different linux variants require different makefiles.
 #  The current makefile is for CentOS 7.  We prefer to link against older Linux versions because linking on the latest, greatest version
@@ -25,11 +25,11 @@ CPP = g++
 CPPFLAGS = -I.. -I../gwnum -I../../boost_1_76_0 -DX86_64 -std=c++11 -O2 -DPORT=8
 
 LFLAGS = -Wl,-M -Wl,-L/usr/local/lib
-#LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -lz -lxml2 -ldl -lgmp
-LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -ldl -lgmp
+#LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld ../gwnum/polymult.a -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -lz -lxml2 -ldl -lgmp
+LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld ../gwnum/polymult.a -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -ldl -lgmp
 
 FACTOROBJ = factor64.o
-LINUXOBJS = prime.o menu.o cJSON.o ecm.o pair.o pm1prob.o
+LINUXOBJS = prime.o menu.o cJSON.o ecm.o exponentiate.o pair.o pm1prob.o
 EXE      = mprime
 
 #########################################################################
@@ -46,16 +46,19 @@ clean:
 	rm -f $(EXE) $(EXE2) $(LINUXOBJS)
 
 cJSON.o:
-	$(CPP) $(CPPFLAGS) -c ../cJSON.c
+	$(CC) $(CFLAGS) -c ../cJSON.c
 
 ecm.o:
 	$(CPP) $(CPPFLAGS) -c ../ecm.cpp
+
+exponentiate.o:
+	$(CC) $(CFLAGS) -c ../exponentiate.c
 
 pair.o:
 	$(CPP) $(CPPFLAGS) -c ../pair.cpp
 
 pm1prob.o:
-	$(CPP) $(CPPFLAGS) -c ../pm1prob.c
+	$(CC) $(CFLAGS) -c ../pm1prob.c
 
 .c.o:
 	$(CC) $(CFLAGS) -c $<

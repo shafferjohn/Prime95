@@ -18,6 +18,7 @@
 #include <malloc.h>
 #else
 #include <unistd.h>
+#include <strings.h>
 #define _O_APPEND	O_APPEND
 #define _O_RDONLY	O_RDONLY
 #define _O_WRONLY	O_WRONLY

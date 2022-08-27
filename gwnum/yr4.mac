@@ -5059,8 +5059,7 @@ yr4_4cl_four_complex_with_mult MACRO srcreg,srcinc,d1,d2
 	yr4_dispatch CALLP,ycomplex_mult_opcode,d1,d2 ;; Handle more difficult cases
 	jmp	back_to_orig
 
-orig:
-	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
+orig:	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
 	vmulpd	ymm5, ymm8, ymm9		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
@@ -5145,7 +5144,7 @@ back_to_orig:
 ;; Same as above code between orig and back_to_orig, except we implement mul4_opcode options
 
 yr4_4c_mult_opcode MACRO srcreg,d1,d2
-	LOCAL	fma, fmasave, addmul, addmulsave, submul, submulsave, muladd, muladdhard, mulsub, mulsubhard, done
+	LOCAL	fma_or_unfft, fma, fmasave, addmul, addmulsave, submul, submulsave, muladd, muladdhard, mulsub, mulsubhard, unfft, done
 
 	movzx	r10, mul4_opcode		;; Load the mul4_opcode
 	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
@@ -5157,7 +5156,7 @@ yr4_4c_mult_opcode MACRO srcreg,d1,d2
 	je	submulsave			;; opcode == 0x82, submul with FFT save
 	cmp	r10, 80h			;; Test the mul4_opcode (part 3)
 	ja	addmulsave			;; opcode == 0x81, addmul with FFT save
-	jb	fma				;; opcode == 3,4, muladd,mulsub
+	jb	fma_or_unfft			;; opcode == 3,4,5 muladd,mulsub,unfft
 						;; opcode == 0x80, plain mul with FFT save, fall through
 
 	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
@@ -5478,66 +5477,20 @@ submulsave:
 
 	jmp	done
 
-fmasave:
-	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
-	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
-	ystore	[srcreg], ymm8			;; R1
-	vmulpd	ymm5, ymm8, ymm9		;; R1 * MemR1			; 12-16
-	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
-	ystore	[srcreg+32], ymm3		;; I1
-	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
-	vmulpd	ymm3, ymm3, ymm9		;; I1 * MemR1			; 15-19
+fma_or_unfft:
+	cmp	r10, 4				;; Case off opcode
+	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
+	;;ja	unfft				;; 5=unfft
 
-	vmovapd	ymm10, [srcreg+d1][rbp]		;; MemR2
-	vmovapd	ymm12, [srcreg+d1+32][rbp]	;; MemI2
-
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
-
-	ystore	[srcreg+d1], ymm2		;; R2
-	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
-	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
-	ystore	[srcreg+d1+32], ymm6		;; I2
-	vmulpd	ymm13, ymm6, ymm12		;; I2 * MemI2			; 18-22
-	vmulpd	ymm6, ymm6, ymm10		;; I2 * MemR2			; 19-23
-
-	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
-	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
-
-	vsubpd	ymm5, ymm5, ymm11		;; R1*MemR1-I1*MemI1 (new R1)	; 19-21
-	vaddpd	ymm8, ymm8, ymm3		;; R1*MemI1+I1*MemR1 (new I1)	; 20-22
-
-	ystore	[srcreg+d2], ymm7		;; R3
-	vmulpd	ymm3, ymm7, ymm10		;; R3 * MemR3			; 20-24
-	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 21-25
-	ystore	[srcreg+d2+32], ymm9		;; I3
-	vmulpd	ymm11, ymm9, ymm12		;; I3 * MemI3			; 22-26
-	vmulpd	ymm9, ymm9, ymm10		;; I3 * MemR3			; 23-27
-
-	vmovapd	ymm10, [srcreg+d2+d1][rbp]	;; MemR4
-	vmovapd	ymm12, [srcreg+d2+d1+32][rbp]	;; MemI4
-
-	ystore	[srcreg+d2+d1], ymm0		;; R4
-	ystore	[srcreg+d2+d1+32], ymm4		;; I4
-
-	vsubpd	ymm1, ymm1, ymm13		;; R2*MemR2-I2*MemI2 (new R2)	; 23-25
-	vaddpd	ymm2, ymm2, ymm6		;; R2*MemI2+I2*MemR2 (new I2)	; 24-26
-
-	vmulpd	ymm6, ymm0, ymm10		;; R4 * MemR4			; 24-28
-	vmulpd	ymm0, ymm0, ymm12		;; R4 * MemI4			; 25-29
-	vmulpd	ymm13, ymm4, ymm12		;; I4 * MemI4			; 26-30
-	vmulpd	ymm4, ymm4, ymm10		;; I4 * MemR4			; 27-31
-
-	vsubpd	ymm3, ymm3, ymm11		;; R3*MemR3-I3*MemI3 (new R3)	; 28-30
-	vaddpd	ymm7, ymm7, ymm9		;; R3*MemI3+I3*MemR3 (new I3)	; 29-31
-
-	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
-	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
-
-	cmp	r10, 84h			;; Case off opcode
-	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	jb	muladd				;; 83=muladd
-	je	mulsub				;; 84=mulsub
+unfft:	vaddpd	ymm10, ymm8, ymm2		;; R1 + R2 (new R1)		; 26-28
+	vsubpd	ymm5, ymm8, ymm2		;; R1 - R2 (new R2)		; 27-29
+	vmovapd ymm8, ymm3			;; I1
+	vmovapd ymm2, ymm6			;; I2
+	vmovapd ymm3, ymm7			;; R3
+	vmovapd ymm6, ymm0			;; R4
+	vaddpd	ymm7, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
+	vsubpd	ymm0, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+	jmp	done
 
 fma:	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
@@ -5585,10 +5538,9 @@ fma:	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
 	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
 	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
 
-	cmp	r10, 4				;; Case off opcode
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way
@@ -5664,6 +5616,67 @@ muladdhard:
 	vsubpd	ymm5, ymm5, ymm1		;; R1 - R2 (new R2)		; 27-29
 
 	jmp	done
+
+fmasave:
+	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
+	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
+	ystore	[srcreg], ymm8			;; R1
+	vmulpd	ymm5, ymm8, ymm9		;; R1 * MemR1			; 12-16
+	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
+	ystore	[srcreg+32], ymm3		;; I1
+	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
+	vmulpd	ymm3, ymm3, ymm9		;; I1 * MemR1			; 15-19
+
+	vmovapd	ymm10, [srcreg+d1][rbp]		;; MemR2
+	vmovapd	ymm12, [srcreg+d1+32][rbp]	;; MemI2
+
+	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
+	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+
+	ystore	[srcreg+d1], ymm2		;; R2
+	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
+	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
+	ystore	[srcreg+d1+32], ymm6		;; I2
+	vmulpd	ymm13, ymm6, ymm12		;; I2 * MemI2			; 18-22
+	vmulpd	ymm6, ymm6, ymm10		;; I2 * MemR2			; 19-23
+
+	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
+	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
+
+	vsubpd	ymm5, ymm5, ymm11		;; R1*MemR1-I1*MemI1 (new R1)	; 19-21
+	vaddpd	ymm8, ymm8, ymm3		;; R1*MemI1+I1*MemR1 (new I1)	; 20-22
+
+	ystore	[srcreg+d2], ymm7		;; R3
+	vmulpd	ymm3, ymm7, ymm10		;; R3 * MemR3			; 20-24
+	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 21-25
+	ystore	[srcreg+d2+32], ymm9		;; I3
+	vmulpd	ymm11, ymm9, ymm12		;; I3 * MemI3			; 22-26
+	vmulpd	ymm9, ymm9, ymm10		;; I3 * MemR3			; 23-27
+
+	vmovapd	ymm10, [srcreg+d2+d1][rbp]	;; MemR4
+	vmovapd	ymm12, [srcreg+d2+d1+32][rbp]	;; MemI4
+
+	ystore	[srcreg+d2+d1], ymm0		;; R4
+	ystore	[srcreg+d2+d1+32], ymm4		;; I4
+
+	vsubpd	ymm1, ymm1, ymm13		;; R2*MemR2-I2*MemI2 (new R2)	; 23-25
+	vaddpd	ymm2, ymm2, ymm6		;; R2*MemI2+I2*MemR2 (new I2)	; 24-26
+
+	vmulpd	ymm6, ymm0, ymm10		;; R4 * MemR4			; 24-28
+	vmulpd	ymm0, ymm0, ymm12		;; R4 * MemI4			; 25-29
+	vmulpd	ymm13, ymm4, ymm12		;; I4 * MemI4			; 26-30
+	vmulpd	ymm4, ymm4, ymm10		;; I4 * MemR4			; 27-31
+
+	vsubpd	ymm3, ymm3, ymm11		;; R3*MemR3-I3*MemI3 (new R3)	; 28-30
+	vaddpd	ymm7, ymm7, ymm9		;; R3*MemI3+I3*MemR3 (new I3)	; 29-31
+
+	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
+	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
+
+	cmp	r10, 84h			;; Case off opcode
+	mov	r10, SRC3ARG			;; Load distance to FFT(1)
+	jb	muladd				;; 83=muladd
+	;;je	mulsub				;; 84=mulsub
 
 mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	mulsubhard			;; Yes, do it the hard way
@@ -5784,8 +5797,7 @@ yr4_4cl_four_complex_with_mult MACRO srcreg,srcinc,d1,d2
 	yr4_dispatch CALLP,ycomplex_mult_opcode,d1,d2 ;; Handle more difficult cases
 	jmp	back_to_orig
 
-orig:
-	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
+orig:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
 	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
@@ -5860,7 +5872,7 @@ back_to_orig:
 ;; Same as above code between orig and back_to_orig, except we implement mul4_opcode options
 
 yr4_4c_mult_opcode MACRO srcreg,d1,d2
-	LOCAL	fma, fmasave, addmul, addmulsave, submul, submulsave, muladd, muladdhard, mulsub, mulsubhard, done
+	LOCAL	fma_or_unfft, fma, fmasave, addmul, addmulsave, submul, submulsave, muladd, muladdhard, mulsub, mulsubhard, unfft, done
 
 	movzx	r10, mul4_opcode		;; Load the mul4_opcode
 	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
@@ -5872,7 +5884,7 @@ yr4_4c_mult_opcode MACRO srcreg,d1,d2
 	je	submulsave			;; opcode == 0x82, submul with FFT save
 	cmp	r10, 80h			;; Test the mul4_opcode (part 3)
 	ja	addmulsave			;; opcode == 0x81, addmul with FFT save
-	jb	fma				;; opcode == 3,4, muladd,mulsub
+	jb	fma_or_unfft			;; opcode == 3,4,5 muladd,mulsub,unfft
 						;; opcode == 0x80, plain mul with FFT save, fall through
 
 	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
@@ -6128,56 +6140,21 @@ submulsave:
 
 	jmp	done
 
-fmasave:
-	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
-	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
-	ystore	[srcreg], ymm8			;; R1
-	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
-	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
+fma_or_unfft:
+	cmp	r10, 4				;; Case off opcode
+	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
+	;;ja	unfft				;; 5=unfft
 
-	vmovapd	ymm11, [srcreg+d1][rbp]		;; MemR2
-	vmovapd	ymm13, [srcreg+d1+32][rbp]	;; MemI2
-	ystore	[srcreg+d1], ymm2		;; R2
-	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
-	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
-
+unfft:	vmovapd ymm5, ymm8			;; R1
+	vmovapd ymm8, ymm3			;; I1
+	vmovapd ymm14, ymm2			;; R2
+	vmovapd ymm2, ymm6			;; I2
+	vmovapd ymm3, ymm0			;; R4
 	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
-
-	ystore	[srcreg+32], ymm3		;; I1
-	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
-	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
-
-	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
-	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
-	ystore	[srcreg+d2], ymm7		;; R3
-	vmulpd	ymm1, ymm7, ymm10		;; R3 * MemR3			; 16-20
-	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 17-21
-
-	ystore	[srcreg+d1+32], ymm6		;; I2
-	yfnmaddpd ymm14, ymm6, ymm13, ymm14	;; R2*MemR2-I2*MemI2 (new R2)	; 19-23
-	yfmaddpd ymm2, ymm6, ymm11, ymm2	;; R2*MemI2+I2*MemR2 (new I2)	; 20-24
-
-	vmovapd	ymm11, [srcreg+d2+d1][rbp]	;; MemR4
-	vmovapd	ymm13, [srcreg+d2+d1+32][rbp]	;; MemI4
-
-	ystore	[srcreg+d2+32], ymm9		;; I3
-	ystore	[srcreg+d2+d1], ymm0		;; R4
-	ystore	[srcreg+d2+d1+32], ymm4		;; I4
-
-	vmulpd	ymm3, ymm0, ymm11		;; R4 * MemR4			; 18-22
-	vmulpd	ymm0, ymm0, ymm13		;; R4 * MemI4			; 19-23
-
-	yfnmaddpd ymm1, ymm9, ymm12, ymm1	;; R3*MemR3-I3*MemI3 (new R3)	; 21-25
-	yfmaddpd ymm7, ymm9, ymm10, ymm7	;; R3*MemI3+I3*MemR3 (new I3)	; 22-26
-
-	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
-	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
-
-	cmp	r10, 84h			;; Case off opcode
-	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	jb	muladd				;; 83=muladd
-	je	mulsub				;; 84=mulsub
+	vsubpd	ymm0, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+	vmovapd ymm1, ymm7			;; R3
+	vmovapd ymm7, ymm9			;; I3
+	jmp	done
 
 fma:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
@@ -6215,10 +6192,9 @@ fma:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
 	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
 
-	cmp	r10, 4				;; Case off opcode
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way
@@ -6272,6 +6248,57 @@ muladdhard:
 	yfmaddpd ymm0, ymm4, ymm9, ymm0			;; I4 = I4 + MemI4*MemR4#2
 
 	jmp	done
+
+fmasave:
+	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
+	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
+	ystore	[srcreg], ymm8			;; R1
+	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
+	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
+
+	vmovapd	ymm11, [srcreg+d1][rbp]		;; MemR2
+	vmovapd	ymm13, [srcreg+d1+32][rbp]	;; MemI2
+	ystore	[srcreg+d1], ymm2		;; R2
+	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
+	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
+
+	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
+	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+
+	ystore	[srcreg+32], ymm3		;; I1
+	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
+	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
+
+	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
+	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
+	ystore	[srcreg+d2], ymm7		;; R3
+	vmulpd	ymm1, ymm7, ymm10		;; R3 * MemR3			; 16-20
+	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 17-21
+
+	ystore	[srcreg+d1+32], ymm6		;; I2
+	yfnmaddpd ymm14, ymm6, ymm13, ymm14	;; R2*MemR2-I2*MemI2 (new R2)	; 19-23
+	yfmaddpd ymm2, ymm6, ymm11, ymm2	;; R2*MemI2+I2*MemR2 (new I2)	; 20-24
+
+	vmovapd	ymm11, [srcreg+d2+d1][rbp]	;; MemR4
+	vmovapd	ymm13, [srcreg+d2+d1+32][rbp]	;; MemI4
+
+	ystore	[srcreg+d2+32], ymm9		;; I3
+	ystore	[srcreg+d2+d1], ymm0		;; R4
+	ystore	[srcreg+d2+d1+32], ymm4		;; I4
+
+	vmulpd	ymm3, ymm0, ymm11		;; R4 * MemR4			; 18-22
+	vmulpd	ymm0, ymm0, ymm13		;; R4 * MemI4			; 19-23
+
+	yfnmaddpd ymm1, ymm9, ymm12, ymm1	;; R3*MemR3-I3*MemI3 (new R3)	; 21-25
+	yfmaddpd ymm7, ymm9, ymm10, ymm7	;; R3*MemI3+I3*MemR3 (new I3)	; 22-26
+
+	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
+	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
+
+	cmp	r10, 84h			;; Case off opcode
+	mov	r10, SRC3ARG			;; Load distance to FFT(1)
+	jb	muladd				;; 83=muladd
+	;;je	mulsub				;; 84=mulsub
 
 mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	mulsubhard			;; Yes, do it the hard way
@@ -6380,8 +6407,7 @@ yr4_4cl_four_complex_with_mulf MACRO srcreg,srcinc,d1,d2
 	yr4_dispatch CALLP,ycomplex_mulf_opcode,d1,d2 ;; Handle more difficult cases
 	jmp	back_to_orig
 
-orig:
-	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
+orig:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm0, [srcreg][rbx]		;; R1
 	vmovapd	ymm11, [srcreg+32][rbp]		;; MemI1
 	vmovapd	ymm1, [srcreg+32][rbx]		;; I1
@@ -6469,15 +6495,16 @@ back_to_orig:
 ;; Same as above code between orig and back_to_orig, except we implement mul4_opcode options
 
 yr4_4c_mulf_opcode MACRO srcreg,d1,d2
-	LOCAL	submul, fma, muladd, muladdhard, mulsub, mulsubhard, done
+	LOCAL	fma_or_unfft, fma, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft, done
 
 	movzx	r10, mul4_opcode		;; Load the mul4_opcode
 	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
 	cmp	r10, 2				;; Case off opcode
-	jg	fma				;; 3,4=muladd,mulsub
+	jg	fma_or_unfft			;; 3,4,5=muladd,mulsub,unfft
 	je	submul				;; 2=submul
+	;;jl	addmul				;; 1=addmul
 
-	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
+addmul:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vaddpd	ymm10, ymm10, [srcreg][r9]	;; MemR1
 	vmovapd	ymm0, [srcreg][rbx]		;; R1
 	vmovapd	ymm11, [srcreg+32][rbp]		;; MemI1
@@ -6601,6 +6628,23 @@ submul:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 
 	jmp	done
 
+fma_or_unfft:
+	cmp	r10, 4				;; Case off opcode
+	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
+	;;ja	unfft				;; 5=unfft
+
+unfft:	vmovapd	ymm2, [srcreg][rbx]		;; R1
+	vmovapd	ymm6, [srcreg+d1][rbx]		;; R2
+	vaddpd	ymm12, ymm2, ymm6		;; R1 + R2 (new R1)		; 15-17
+	vsubpd	ymm2, ymm2, ymm6		;; R1 - R2 (new R2)		; 16-17
+	vmovapd	ymm0, [srcreg+32][rbx]		;; I1
+	vmovapd	ymm4, [srcreg+d1+32][rbx]	;; I2
+	vmovapd	ymm8, [srcreg+d2][rbx]		;; R3
+	vmovapd	ymm1, [srcreg+d2+32][rbx]	;; I3
+	vmovapd	ymm10, [srcreg+d2+d1][rbx]	;; R4
+	vmovapd	ymm5, [srcreg+d2+d1+32][rbx]	;; I4
+	jmp	done
+
 fma:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm0, [srcreg][rbx]		;; R1
 	vmovapd	ymm11, [srcreg+32][rbp]		;; MemI1
@@ -6650,10 +6694,9 @@ fma:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vsubpd	ymm10, ymm10, ymm11		;; R4*MemR4 - I4*MemI4 (new R4)	; 20-22
 	vaddpd	ymm5, ymm5, ymm7		;; R4*MemI4 + I4*MemR4 (new I4)	; 21-23
 
-	cmp	r10, 4				;; Case off opcode
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way
@@ -6820,8 +6863,7 @@ yr4_4cl_four_complex_with_mulf MACRO srcreg,srcinc,d1,d2
 	yr4_dispatch CALLP,ycomplex_mulf_opcode,d1,d2 ;; Handle more difficult cases
 	jmp	back_to_orig
 
-orig:
-	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
+orig:	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm0, [srcreg][rbx]		;; R1
 	vmovapd	ymm15, [srcreg+32][rbp]		;; MemI1
 	vmulpd	ymm2, ymm0, ymm14		;; R1 * MemR1			; 1-5
@@ -6901,15 +6943,16 @@ back_to_orig:
 ;; Same as above code between orig and back_to_orig, except we implement mul4_opcode options
 
 yr4_4c_mulf_opcode MACRO srcreg,d1,d2
-	LOCAL	submul, fma, muladd, muladdhard, mulsub, mulsubhard, done
+	LOCAL	fma_or_unfft, fma, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft, done
 
 	movzx	r10, mul4_opcode		;; Load the mul4_opcode
 	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
 	cmp	r10, 2				;; Case off opcode
-	jg	fma				;; 3,4=muladd,mulsub
+	jg	fma_or_unfft			;; 3,4,5=muladd,mulsub,unfft
 	je	submul				;; 2=submul
+	;;jl	addmul				;; 1=addmul
 
-	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
+addmul:	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
 	vaddpd	ymm14, ymm14, [srcreg][r9]	;; MemR1
 	vmovapd	ymm0, [srcreg][rbx]		;; R1
 	vmovapd	ymm15, [srcreg+32][rbp]		;; MemI1
@@ -6960,8 +7003,7 @@ yr4_4c_mulf_opcode MACRO srcreg,d1,d2
 
 	jmp	done
 
-submul:
-	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
+submul:	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
 	vsubpd	ymm14, ymm14, [srcreg][r9]	;; MemR1
 	vmovapd	ymm0, [srcreg][rbx]		;; R1
 	vmovapd	ymm15, [srcreg+32][rbp]		;; MemI1
@@ -7012,6 +7054,21 @@ submul:
 
 	jmp	done
 
+fma_or_unfft:
+	cmp	r10, 4				;; Case off opcode
+	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
+	;;ja	unfft				;; 5=unfft
+
+unfft:	vmovapd	ymm2, [srcreg][rbx]		;; R1
+	vmovapd	ymm0, [srcreg+32][rbx]		;; I1
+	vmovapd	ymm5, [srcreg+d1][rbx]		;; R2
+	vmovapd	ymm3, [srcreg+d1+32][rbx]	;; I2
+	vmovapd	ymm7, [srcreg+d2][rbx]		;; R3
+	vmovapd	ymm6, [srcreg+d2+32][rbx]	;; I3
+	vmovapd	ymm4, [srcreg+d2+d1][rbx]	;; R4
+	vmovapd	ymm1, [srcreg+d2+d1+32][rbx]	;; I4
+	jmp	done
+
 fma:	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm0, [srcreg][rbx]		;; R1
 	vmovapd	ymm15, [srcreg+32][rbp]		;; MemI1
@@ -7053,10 +7110,9 @@ fma:	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
 	yfnmaddpd ymm4, ymm9, ymm15, ymm4	;; R4*MemR4-I4*MemI4 (new R4)	; 12-16
 	yfmaddpd ymm1, ymm9, ymm14, ymm1	;; R4*MemI4+I4*MemR4 (new I4)	; 13-17
 
-	cmp	r10, 4				;; Case off opcode
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way
@@ -12175,7 +12231,7 @@ yr4_4cl_eight_reals_four_complex_with_mult MACRO srcreg,srcinc,d1,d2
 IFDEF X86_64
 
 yr4_4cl_eight_reals_four_complex_with_mult MACRO srcreg,srcinc,d1,d2
-	LOCAL	orig, back_to_orig, no_save_fft, submul, fma, muladd, muladdhard, mulsub, mulsubhard
+	LOCAL	orig, back_to_orig, no_save_fft, fma_or_unfft, fma, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft
 
 	ymult7	srcreg, srcreg+rbp
 						;; Eight-reals comments		; Three four-complex comments
@@ -12259,12 +12315,12 @@ yr4_4cl_eight_reals_four_complex_with_mult MACRO srcreg,srcinc,d1,d2
 no_save_fft:
 	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
 	cmp	al, 2				;; Case off opcode
-	jg	fma				;; 3,4=muladd,mulsub
-	;jl	addmul				;; 1=addmul, fall through
+	jg	fma_or_unfft			;; 3,4,5=muladd,mulsub,unfft
 	je	submul				;; 2=submul
+	;jl	addmul				;; 1=addmul, fall through
 
 	;; Multiply the results
-	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
+addmul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vaddpd	ymm14, ymm14, [srcreg+d1][r9]	;; MemR2
 	vmovapd	ymm15, [srcreg+d1+32][rbp]	;; MemI2
 	vaddpd	ymm15, ymm15, [srcreg+d1+32][r9];; MemI2
@@ -12356,6 +12412,23 @@ submul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 
 	jmp	back_to_orig
 
+fma_or_unfft:
+	cmp	al, 4				;; Case off opcode
+	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
+	;;ja	unfft				;; 5=unfft
+
+unfft:	vmovapd ymm10, ymm3			;; R1
+	vmovapd ymm3, ymm0			;; I1
+	vmovapd ymm4, ymm8			;; R2
+	vmovapd ymm8, ymm6			;; I2
+	vmovapd ymm6, ymm1			;; R3
+	vmovapd ymm1, ymm5			;; I3
+	vmovapd ymm5, ymm7			;; R4
+	vmovapd ymm7, ymm2			;; I4
+	vmovapd	ymm2, ymm10			;; R1 (back_to_orig uses low double)
+	vmovapd	ymm9, ymm3			;; I1 (back_to_orig uses low double)
+	jmp	back_to_orig
+
 fma:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vmovapd	ymm15, [srcreg+d1+32][rbp]	;; MemI2
 	vmulpd	ymm4, ymm8, ymm14		;; R2 * MemR2
@@ -12393,9 +12466,8 @@ fma:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
 
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	cmp	al, 4				;; Case off opcode
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way
@@ -12696,7 +12768,7 @@ yr4_4cl_eight_reals_four_complex_with_mulf MACRO srcreg,srcinc,d1,d2
 IFDEF X86_64
 
 yr4_4cl_eight_reals_four_complex_with_mulf MACRO srcreg,srcinc,d1,d2
-	LOCAL	orig, back_to_orig, no_save_fft, submul, fma, muladd, muladdhard, mulsub, mulsubhard
+	LOCAL	orig, back_to_orig, no_save_fft, fma_or_unfft, fma, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft
 
 	ymult7	srcreg+rbx, srcreg+rbp
 
@@ -12705,11 +12777,11 @@ yr4_4cl_eight_reals_four_complex_with_mulf MACRO srcreg,srcinc,d1,d2
 	je	orig				;; Jump if nothing special
 	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4
 	cmp	al, 2				;; Case off opcode
-	jg	fma				;; 3,4=muladd,mulsub
-	;jl	addmul				;; 1=addmul, fall through
+	jg	fma_or_unfft			;; 3,4,5=muladd,mulsub,unfft
 	je	submul				;; 2=submul
+	;jl	addmul				;; 1=addmul, fall through
 
-	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
+addmul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vaddpd	ymm14, ymm14, [srcreg+d1][r9]	;; MemR2
 	vmovapd	ymm15, [srcreg+d1+32][rbp]	;; MemI2
 	vaddpd	ymm15, ymm15, [srcreg+d1+32][r9];; MemI2
@@ -12817,6 +12889,23 @@ submul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 
 	jmp	back_to_orig
 
+fma_or_unfft:
+	cmp	al, 4				;; Case off opcode
+	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
+	;;ja	unfft				;; 5=unfft
+
+unfft:	vmovapd	ymm10, [srcreg][rbx]		;; R1
+	vmovapd	ymm3, [srcreg+32][rbx]		;; I1
+	vmovapd	ymm4, [srcreg+d1][rbx]		;; R2
+	vmovapd	ymm8, [srcreg+d1+32][rbx]	;; I2
+	vmovapd	ymm6, [srcreg+d2][rbx]		;; R3
+	vmovapd	ymm1, [srcreg+d2+32][rbx]	;; I3
+	vmovapd	ymm5, [srcreg+d2+d1][rbx]	;; R4
+	vmovapd	ymm7, [srcreg+d2+d1+32][rbx]	;; I4
+	vmovapd	ymm2, ymm10			;; R1 (back_to_orig uses low double)
+	vmovapd	ymm9, ymm3			;; I1 (back_to_orig uses low double)
+	jmp	back_to_orig
+
 fma:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vmovapd	ymm15, [srcreg+d1+32][rbp]	;; MemI2
 	vmovapd	ymm8, [srcreg+d1][rbx]		;; R2
@@ -12862,9 +12951,8 @@ fma:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
 
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	cmp	al, 4				;; Case off opcode
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way

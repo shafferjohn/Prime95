@@ -18,10 +18,13 @@ cJSON.obj: ../cJSON.c
 ecm.obj: ../ecm.cpp
     $(cl) $(copt) ..\ecm.cpp
 
+exponentiate.obj: ..\exponentiate.c
+    $(cl) $(copt) ..\exponentiate.c
+
 pair.obj: ../pair.cpp
     $(cl) $(copt) ..\pair.cpp
 
-pm1prob.obj: ../pm1prob.c
+pm1prob.obj: ..\pm1prob.c
     $(cl) $(copt) ..\pm1prob.c
 
 main.obj: main.c main.h prime95.h
@@ -35,5 +38,5 @@ prime.obj: prime.c prime95.h ..\commonc.c ..\commonb.c
 
 # Update the executable file
 
-ntprime.exe: main.obj prime.obj service.obj cJSON.obj ecm.obj pair.obj pm1prob.obj
+ntprime.exe: main.obj prime.obj service.obj cJSON.obj ecm.obj exponentiate.obj pair.obj pm1prob.obj
     link @main.lnk

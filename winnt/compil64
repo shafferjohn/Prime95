@@ -12,16 +12,19 @@ all: ntprime64.exe
 
 # Update the object files if necessary
 
-amd64\cJSON.obj: ../cJSON.c
+amd64\cJSON.obj: ..\cJSON.c
     $(cl64) $(copt) /Foamd64\cJSON.obj ..\cJSON.c
 
-amd64\ecm.obj: ../ecm.cpp
+amd64\ecm.obj: ..\ecm.cpp
     $(cl64) $(copt) /Foamd64\ecm.obj ..\ecm.cpp
 
-amd64\pair.obj: ../pair.cpp
+amd64\exponentiate.obj: ..\exponentiate.c
+    $(cl64) $(copt) /Foamd64\exponentiate.obj ..\exponentiate.c
+
+amd64\pair.obj: ..\pair.cpp
     $(cl64) $(copt) /Foamd64\pair.obj ..\pair.cpp
 
-amd64\pm1prob.obj: ../pm1prob.c
+amd64\pm1prob.obj: ..\pm1prob.c
     $(cl64) $(copt) /Foamd64\pm1prob.obj ..\pm1prob.c
 
 amd64\main.obj: main.c main.h prime95.h
@@ -35,6 +38,6 @@ amd64\prime.obj: prime.c prime95.h ..\commonc.c ..\commonb.c
 
 # Update the executable file
 
-ntprime64.exe: amd64\main.obj amd64\prime.obj amd64\service.obj amd64\cJSON.obj amd64\ecm.obj amd64\pair.obj amd64\pm1prob.obj
+ntprime64.exe: amd64\main.obj amd64\prime.obj amd64\service.obj amd64\cJSON.obj amd64\ecm.obj amd64\exponentiate.obj amd64\pair.obj amd64\pm1prob.obj
     link @main64.lnk
 

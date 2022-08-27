@@ -1615,7 +1615,6 @@ int isHighResTimerAvailable (void)
 #endif
 #if defined (__linux__) || defined (__FreeBSD__) || defined (__APPLE__) || defined (__HAIKU__)
 	struct timeval start, end;
-	struct timezone tz;
 	int	i;
 
 /* Return true if gettimeofday is more accurate than 1/10 millisecond. */
@@ -1623,9 +1622,9 @@ int isHighResTimerAvailable (void)
 /* 100 microseconds apart. */
 
 	for (i = 0; i < 10; i++) {
-		gettimeofday (&start, &tz);
+		gettimeofday (&start, NULL);
 		for ( ; ; ) {
-			gettimeofday (&end, &tz);
+			gettimeofday (&end, NULL);
 			if (start.tv_sec != end.tv_sec) break;
 			if (start.tv_usec == end.tv_usec) continue;
 			if (end.tv_usec - start.tv_usec < 100) return (TRUE);
@@ -1651,9 +1650,7 @@ double getHighResTimer (void)
 #endif
 #if defined (__linux__) || defined (__FreeBSD__) || defined (__APPLE__) || defined (__HAIKU__)
 	struct timeval x;
-	struct timezone tz;
-
-	gettimeofday (&x, &tz);
+	gettimeofday (&x, NULL);
 	return ((double) x.tv_sec * 1000000.0 + (double) x.tv_usec);
 #endif
 }

@@ -22,8 +22,8 @@ public:
 	UINT	m_b;
 	UINT	m_n;
 	long	m_c;
-	double	m_bound1;
-	double	m_bound2;
+	uint64_t m_bound1;
+	uint64_t m_bound2;
 	UINT	m_num_curves;
 	//}}AFX_DATA
 

@@ -3,7 +3,7 @@
 # Install the curl package.  This is installed to $(LOCALBASE) by default.
 #
 # Hwloc can be downloaded from https://www.open-mpi.org/projects/hwloc/
-# Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl
+# Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl --disable-opencl --disable-rsmi
 #
 
 CC ?= cc
@@ -13,10 +13,10 @@ CXX ?= cc
 CXXFLAGS += -I.. -I../gwnum -I$(LOCALBASE)/include -I../../boost_1_76_0 -DX86_64 -O2 -std=c++11 -DPORT=12
 
 LDFLAGS += -fpie -L$(LOCALBASE)/lib -Wl,-M
-LIBS += ../gwnum/gwnum.a ../gwnum/gwnum.ld -lm -lpthread -lhwloc -lcurl -lstdc++ -lcompat -lgmp
+LIBS += ../gwnum/gwnum.a ../gwnum/gwnum.ld ../gwnum/polymult.a -lm -lpthread -lhwloc -lcurl -lstdc++ -lcompat -lgmp
 
 FACTOROBJ = factor64.o
-OBJS = prime.o menu.o cJSON.o ecm.o pair.o pm1prob.o
+OBJS = prime.o menu.o cJSON.o ecm.o exponentiate.o pair.o pm1prob.o
 EXE      = mprime
 
 #########################################################################
@@ -37,6 +37,9 @@ cJSON.o:
 
 ecm.o:
 	$(CXX) $(CXXFLAGS) -c ../ecm.cpp
+
+exponentiate.o:
+	$(CC) $(CCFLAGS) -c ../exponentiate.c
 
 pair.o:
 	$(CXX) $(CXXFLAGS) -c ../pair.cpp

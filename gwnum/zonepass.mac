@@ -329,7 +329,6 @@ zs_onepass_real_unfft_wrapper MACRO srcreg,srcinc,d1,d2,d4,colreg,colinc,maskreg
 	vmovapd	zmm30, [srcreg+d1+64]			;; (+64 d1_7 d1_6 d1_5 d1_4 d1_3 d1_2 d1_1 d1_0)
 	vshuff64x2 zmm8, zmm16, zmm8, 11011101b		;; d7_3 d6_3 d5_3 d4_3 d3_3 d2_3 d1_3 d0_3 (R4)		; 13-15		n 18
 	vbroadcastf64x4	zmm30{k7}, [srcreg+d2+d1+64+32]	;; (+64 d1_7 d1_6 d1_5 d1_4 d3_7 d3_6 d3_5 d3_4)	; 13		n 22
-	zstore	[srcreg], zmm7				;; Save R1						; 13
 
 	vmovapd	zmm1, [srcreg+d4+64]			;; (+64 d4_7 d4_6 d4_5 d4_4 d4_3 d4_2 d4_1 d4_0)
 	vshuff64x2 zmm16, zmm2, zmm3, 10001000b		;; d7_4	d6_4 d5_4 d4_4 d3_4 d2_4 d1_4 d0_4 (R5)		; 14-16		n 19
@@ -367,7 +366,9 @@ zs_onepass_real_unfft_wrapper MACRO srcreg,srcinc,d1,d2,d4,colreg,colinc,maskreg
 	vshufpd	zmm13, zmm10, zmm30, 00000000b		;; d1_6 d0_6 d1_4 d0_4 d3_6 d2_6 d3_4 d2_4		; 22		n 28
 	vmulpd	zmm14, zmm14, zmm27			;; apply the inverse col multiplier to R8		; 22-25		n 45
 
+	vbroadcastsd zmm20, [colreg+0*8]		;; Load the inverse col multiplier for R1/R9
 	vshufpd	zmm30, zmm10, zmm30, 11111111b		;; d1_7 d0_7 d1_5 d0_5 d3_7 d2_7 d3_5 d2_5		; 23		n 30
+	vmulpd	zmm7, zmm7, zmm20			;; apply the inverse col multiplier to R1		; 23-26
 	mov	r13, [maskreg+0*8]			;; Load uncompressed fudge flags
 
 	vshufpd	zmm10, zmm1, zmm6, 00000000b		;; d5_6 d4_6 d5_4 d4_4 d7_6 d6_6 d7_4 d6_4		; 24		n 28
@@ -382,14 +383,15 @@ zs_onepass_real_unfft_wrapper MACRO srcreg,srcinc,d1,d2,d4,colreg,colinc,maskreg
 	bump	maskreg, maskinc
 
 	vshuff64x2 zmm9, zmm0, zmm9, 01110111b		;; d7_2 d6_2 d5_2 d4_2 d3_2 d2_2 d1_2 d0_2 (R11)	; 27-29		n 30
+	zstore	[srcreg], zmm7				;; Save R1						; 27
 	L1prefetchw srcreg+d1+L1pd, L1pt
 
 	vshuff64x2 zmm0, zmm13, zmm10, 00100010b	;; d7_4 d6_4 d5_4 d4_4 d3_4 d2_4 d1_4 d0_4 (R13)	; 28-30		n 31
 	L1prefetchw srcreg+d1+64+L1pd, L1pt
 
 	vshuff64x2 zmm10, zmm13, zmm10, 01110111b	;; d7_6 d6_6 d5_6 d4_6 d3_6 d2_6 d1_6 d0_6 (R15)	; 29-31		n 32
+	vmulpd	zmm1, zmm1, zmm20			;; apply the inverse col multiplier to R11		; 29-32
 	L1prefetchw srcreg+d2+L1pd, L1pt
-	zstore	[srcreg+64], zmm1			;; Save R9						; 29
 
 	vshuff64x2 zmm13, zmm30, zmm6, 00100010b	;; d7_5 d6_5 d5_5 d4_5 d3_5 d2_5 d1_5 d0_5 (R14)	; 30-32		n 33
 	vmulpd	zmm9, zmm9, zmm22			;; apply the inverse col multiplier to R11		; 30-33		n 40
@@ -405,6 +407,7 @@ zs_onepass_real_unfft_wrapper MACRO srcreg,srcinc,d1,d2,d4,colreg,colinc,maskreg
 
 	vshuff64x2 zmm12, zmm11, zmm12, 01110111b	;; d7_3 d6_3 d5_3 d4_3 d3_3 d2_3 d1_3 d0_3 (R12)	; 33-35		n 44
 	vmulpd	zmm13, zmm13, zmm25			;; apply the inverse col multiplier to R14		; 33-36		n 46
+	zstore	[srcreg+64], zmm1			;; Save R9						; 33
 	L1prefetchw srcreg+d4+L1pd, L1pt
 
 	kmovw	k2, r13d				;; Load R2 and R10 fudge factor mask			; 34		n 35
@@ -763,20 +766,22 @@ zs_onepass_complex_unfft_wrapper_preload MACRO
 	vbroadcastsd zmm28, ZMM_B
 	ENDM
 zs_onepass_complex_unfft_wrapper MACRO srcreg,srcinc,d1,d2,d4,pmreg,pminc,colreg,colinc,maskreg,maskinc,maxrpt,L1pt,L1pd
-	vmovapd zmm21, [pmreg+1*128]		;; premultiplier sine for R2/I2
-	vmulpd	zmm21, zmm21, [colreg+1*8]{1to8};; apply the col multiplier to sine for R2/I2		; x17-20
-	vmovapd zmm22, [pmreg+2*128]		;; premultiplier sine for R3/I3
-	vmulpd	zmm22, zmm22, [colreg+2*8]{1to8};; apply the col multiplier to sine for R3/I3		; x17-20
-	vmovapd zmm23, [pmreg+3*128]		;; premultiplier sine for R4/I4
-	vmulpd	zmm23, zmm23, [colreg+3*8]{1to8};; apply the col multiplier to sine for R4/I4		; x17-20
-	vmovapd zmm24, [pmreg+4*128]		;; premultiplier sine for R5/I5
-	vmulpd	zmm24, zmm24, [colreg+4*8]{1to8};; apply the col multiplier to sine for R5/I5		; x17-20
-	vmovapd zmm25, [pmreg+5*128]		;; premultiplier sine for R6/I6
-	vmulpd	zmm25, zmm25, [colreg+5*8]{1to8};; apply the col multiplier to sine for R6/I6		; x17-20
-	vmovapd zmm26, [pmreg+6*128]		;; premultiplier sine for R7/I7
-	vmulpd	zmm26, zmm26, [colreg+6*8]{1to8};; apply the col multiplier to sine for R7/I7		; x17-20
-	vmovapd zmm27, [pmreg+7*128]		;; premultiplier sine for R8/I8
-	vmulpd	zmm27, zmm27, [colreg+7*8]{1to8};; apply the col multiplier to sine for R8/I8		; x17-20
+	vmovapd zmm20, [pmreg+0*128]			;; premultiplier sine for R1/I1
+	vmulpd	zmm20, zmm20, [colreg+0*8]{1to8}	;; apply the col multiplier to sine for R1/I1		; x17-20
+	vmovapd zmm21, [pmreg+1*128]			;; premultiplier sine for R2/I2
+	vmulpd	zmm21, zmm21, [colreg+1*8]{1to8}	;; apply the col multiplier to sine for R2/I2		; x17-20
+	vmovapd zmm22, [pmreg+2*128]			;; premultiplier sine for R3/I3
+	vmulpd	zmm22, zmm22, [colreg+2*8]{1to8}	;; apply the col multiplier to sine for R3/I3		; x17-20
+	vmovapd zmm23, [pmreg+3*128]			;; premultiplier sine for R4/I4
+	vmulpd	zmm23, zmm23, [colreg+3*8]{1to8}	;; apply the col multiplier to sine for R4/I4		; x17-20
+	vmovapd zmm24, [pmreg+4*128]			;; premultiplier sine for R5/I5
+	vmulpd	zmm24, zmm24, [colreg+4*8]{1to8}	;; apply the col multiplier to sine for R5/I5		; x17-20
+	vmovapd zmm25, [pmreg+5*128]			;; premultiplier sine for R6/I6
+	vmulpd	zmm25, zmm25, [colreg+5*8]{1to8}	;; apply the col multiplier to sine for R6/I6		; x17-20
+	vmovapd zmm26, [pmreg+6*128]			;; premultiplier sine for R7/I7
+	vmulpd	zmm26, zmm26, [colreg+6*8]{1to8}	;; apply the col multiplier to sine for R7/I7		; x17-20
+	vmovapd zmm27, [pmreg+7*128]			;; premultiplier sine for R8/I8
+	vmulpd	zmm27, zmm27, [colreg+7*8]{1to8}	;; apply the col multiplier to sine for R8/I8		; x17-20
 	bump	colreg, colinc
 
 	vmovapd	zmm15, [srcreg]				;; d0_7	d0_6 d0_5 d0_4 d0_3 d0_2 d0_1 d0_0
@@ -844,7 +849,6 @@ zs_onepass_complex_unfft_wrapper MACRO srcreg,srcinc,d1,d2,d4,pmreg,pminc,colreg
 	vshuff64x2 zmm3, zmm2, zmm3, 11011101b		;; d7_6 d6_6 d5_6 d4_6 d3_6 d2_6 d1_6 d0_6 (R7)		; 15-17		n 21
 	vbroadcastf64x4	zmm6{k7}, [srcreg+d4+d2+d1+64+32];;(+64 d5_7 d5_6 d5_5 d5_4 d7_7 d7_6 d7_5 d7_4)	; 15		n 27
 
-	vmovapd zmm20, [pmreg+0*128]			;; premultiplier sine for R1/I1
 	vshufpd	zmm0, zmm9, zmm11, 00000000b		;; d1_2 d0_2 d1_0 d0_0 d3_2 d2_2 d3_0 d2_0		; 16		n 18
 	vmulpd	zmm7, zmm7, zmm20			;; apply col multiplier * premultiplier sine to R1	; 16-19		n 26
 

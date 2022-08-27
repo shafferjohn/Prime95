@@ -3,7 +3,7 @@
 |
 | This file contains handy #defines that I use in all my projects
 | 
-|  Copyright 2005-2020 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2005-2021 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 #ifndef _GWCOMMON_H
@@ -21,6 +21,9 @@
 /* portable way to do this.  Finally supported in Visual Studio 2013. */
 
 #include "inttypes.h"
+#ifndef __cplusplus
+#include "stdbool.h"
+#endif
 
 /* Define the ASSERT macro I use while debugging */
 

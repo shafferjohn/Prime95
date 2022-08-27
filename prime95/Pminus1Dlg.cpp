@@ -26,8 +26,8 @@ CPminus1Dlg::CPminus1Dlg(CWnd* pParent /*=NULL*/)
 	m_b = 2;
 	m_n = 1277;
 	m_c = -1;
-	m_bound1 = 1000000.0;
-	m_bound2 = 0.0;
+	m_bound1 = 1000000;
+	m_bound2 = 0;
 	//}}AFX_DATA_INIT
 }
 

@@ -25,7 +25,7 @@ cl64do=cl /GF /W3 /MT /DX86_64 /D_CRT_SECURE_NO_DEPRECATE /DGDEBUG /Z7 /O2 /c
 
 # List of all buildables in this makefile
 
-all:	gwnum64.lib gwnum64d.lib linux64\gwnum.a macosx64\gwnum.a amd64\release\ecmstag1.obj amd64\debug\ecmstag1.obj
+all:	gwnum64.lib gwnum64d.lib polymult64.lib polymult64d.lib linux64\gwnum.a macosx64\gwnum.a amd64\release\ecmstag1.obj amd64\debug\ecmstag1.obj
 #all:	linux64\gwnum.a
 
 # Make libraries out of the object files
@@ -71,6 +71,16 @@ gwnum64d.lib: amd64\debug\cpuid.obj amd64\debug\gwnum.obj amd64\debug\gwtables.o
 	      amd64\cpuidhlp.obj amd64\hyperhlp.obj amd64\mult.obj amd64\gianthlp.obj amd64\timeit.obj
     del gwnum64d.lib
     lib /OUT:gwnum64d.lib amd64\debug\*.obj amd64\*.obj
+
+polymult64.lib: amd64\release\polymult\polymult.obj amd64\release\polymult\polymult_sse2.obj amd64\release\polymult\polymult_avx.obj \
+		amd64\release\polymult\polymult_fma.obj amd64\release\polymult\polymult_avx512.obj
+    del polymult64.lib
+    lib /OUT:polymult64.lib amd64\release\polymult\*.obj
+
+polymult64d.lib: amd64\debug\polymult\polymult.obj amd64\debug\polymult\polymult_sse2.obj amd64\debug\polymult\polymult_avx.obj \
+		 amd64\debug\polymult\polymult_fma.obj amd64\debug\polymult\polymult_avx512.obj
+    del polymult64d.lib
+    lib /OUT:polymult64d.lib amd64\debug\polymult\*.obj
 
 linux64\gwnum.a: linux64\xmult1ax.obj linux64\xmult2.obj linux64\xmult2a_core.obj linux64\xmult2a_k8.obj linux64\xmult2ax.obj \
 		 linux64\xmult3.obj linux64\xmult3a_core.obj linux64\xmult3a_k8.obj linux64\xmult3ax.obj \
@@ -195,6 +205,36 @@ amd64\release\radix.obj: radix.c radix.h gwnum.h
 
 amd64\debug\radix.obj: radix.c radix.h gwnum.h
     $(cl64d) /Foamd64\debug\radix.obj radix.c
+
+amd64\release\polymult\polymult.obj: polymult.c polymult.h
+    $(cl64) /Foamd64\release\polymult\polymult.obj polymult.c
+
+amd64\debug\polymult\polymult.obj: polymult.c polymult.h
+    $(cl64d) /Foamd64\debug\polymult\polymult.obj polymult.c
+
+amd64\release\polymult\polymult_sse2.obj: polymult.c polymult.h
+    $(cl64) /DSSE2 /Foamd64\release\polymult\polymult_sse2.obj polymult.c
+
+amd64\debug\polymult\polymult_sse2.obj: polymult.c polymult.h
+    $(cl64d) /DSSE2 /Foamd64\debug\polymult\polymult_sse2.obj polymult.c
+
+amd64\release\polymult\polymult_avx.obj: polymult.c polymult.h
+    $(cl64) /arch:AVX /DAVX /Foamd64\release\polymult\polymult_avx.obj polymult.c
+
+amd64\debug\polymult\polymult_avx.obj: polymult.c polymult.h
+    $(cl64d) /arch:AVX /DAVX /Foamd64\debug\polymult\polymult_avx.obj polymult.c
+
+amd64\release\polymult\polymult_fma.obj: polymult.c polymult.h
+    $(cl64) /arch:AVX2 /DFMA /Foamd64\release\polymult\polymult_fma.obj polymult.c
+
+amd64\debug\polymult\polymult_fma.obj: polymult.c polymult.h
+    $(cl64d) /arch:AVX2 /DFMA /Foamd64\debug\polymult\polymult_fma.obj polymult.c
+
+amd64\release\polymult\polymult_avx512.obj: polymult.c polymult.h
+    $(cl64) /arch:AVX512 /DAVX512 /Foamd64\release\polymult\polymult_avx512.obj polymult.c
+
+amd64\debug\polymult\polymult_avx512.obj: polymult.c polymult.h
+    $(cl64d) /arch:AVX512 /DAVX512 /Foamd64\debug\polymult\polymult_avx512.obj polymult.c
 
 amd64\release\ecmstag1.obj: ecmstag1.c gwnum.h
     $(cl64) /Ic:\gmp64 /Foamd64\release\ecmstag1.obj ecmstag1.c

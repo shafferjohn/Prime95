@@ -1,4 +1,4 @@
-; Copyright 2018-2021 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2018-2022 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -2039,7 +2039,7 @@ back_to_orig:
 ;; Same as above code between orig and back_to_orig, except we implement mul4_opcode options
 
 zr64_64c_mult_opcode MACRO srcreg,d1,d2,d4
-	LOCAL	fma, fmasave, addmul, addmulsave, submul, submulsave, muladd, muladdhard, mulsub, mulsubhard, done
+	LOCAL	fma_or_unfft, fma, fmasave, addmul, addmulsave, submul, submulsave, muladd, muladdhard, mulsub, mulsubhard, unfft, done
 
 	movzx	r10, mul4_opcode		;; Load the mul4_opcode
 	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
@@ -2051,7 +2051,7 @@ zr64_64c_mult_opcode MACRO srcreg,d1,d2,d4
 	je	submulsave			;; opcode == 0x82, submul with FFT save
 	cmp	r10, 80h			;; Test the mul4_opcode (part 3)
 	ja	addmulsave			;; opcode == 0x81, addmul with FFT save
-	jb	fma				;; opcode == 3,4, muladd,mulsub
+	jb	fma_or_unfft			;; opcode == 3,4,5, muladd,mulsub,unfft
 						;; opcode == 0x80, plain mul with FFT save, fall through
 
 	vmovapd	zmm30, [srcreg+rbp]		;; MemR1
@@ -2148,8 +2148,7 @@ zr64_64c_mult_opcode MACRO srcreg,d1,d2,d4
 
 	jmp	done
 
-addmul:
-	vmovapd	zmm30, [srcreg+rbp]		;; MemR1
+addmul:	vmovapd	zmm30, [srcreg+rbp]		;; MemR1
 	vaddpd	zmm30, zmm30, [srcreg+r9]	;; MemR1
 	vmulpd	zmm20, zmm13, zmm30		;; A1 = R1 * MemR1					; 88-91		n 92
 	vmulpd	zmm30, zmm5, zmm30		;; B1 = I1 * MemR1					; 88-91		n 92
@@ -2354,8 +2353,7 @@ addmulsave:
 
 	jmp	done
 
-submul:
-	vmovapd	zmm30, [srcreg+rbp]		;; MemR1
+submul:	vmovapd	zmm30, [srcreg+rbp]		;; MemR1
 	vsubpd	zmm30, zmm30, [srcreg+r9]	;; MemR1
 	vmulpd	zmm20, zmm13, zmm30		;; A1 = R1 * MemR1					; 88-91		n 92
 	vmulpd	zmm30, zmm5, zmm30		;; B1 = I1 * MemR1					; 88-91		n 92
@@ -2560,89 +2558,36 @@ submulsave:
 
 	jmp	done
 
-fmasave:
-	vmovapd	zmm30, [srcreg+rbp]		;; MemR1
-	vmulpd	zmm20, zmm13, zmm30		;; A1 = R1 * MemR1					; 88-91		n 92
-	vmulpd	zmm30, zmm5, zmm30		;; B1 = I1 * MemR1					; 88-91		n 92
-	zstore	[srcreg], zmm13			;; R1
-	zstore	[srcreg+64], zmm5		;; I1
+fma_or_unfft:
+	cmp	r10, 4				;; Case off opcode
+	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
+	;;ja	unfft				;; 5=unfft
 
-	vmovapd	zmm21, [srcreg+rbp+d1]		;; MemR2
-	vmulpd	zmm6, zmm19, zmm21		;; A2 = R2 * MemR2					; 89-92		n 93
-	vmulpd	zmm21, zmm8, zmm21		;; B2 = I2 * MemR2					; 89-92		n 93
-	zstore	[srcreg+d1], zmm19		;; R2
-	zstore	[srcreg+d1+64], zmm8		;; I2
+unfft:	vmovapd zmm1, zmm0			;; I3
 
-	vmovapd	zmm1, [srcreg+rbp+d2]		;; MemR3
-	vmulpd	zmm17, zmm14, zmm1		;; A3 = R3 * MemR3					; 90-93		n 94
-	vmulpd	zmm1, zmm0, zmm1		;; B3 = I3 * MemR3					; 90-93		n 94
-	zstore	[srcreg+d2], zmm14		;; R3
-	zstore	[srcreg+d2+64], zmm0		;; I3
+	zfnmaddpd zmm0, zmm12, zmm31, zmm18	;; R5 - R6 * SQRTHALF (final R6)			; 91-94		n 97
+	zfmaddpd zmm6, zmm12, zmm31, zmm18	;; R5 + R6 * SQRTHALF (final R5)			; 91-94		n 96
 
-	zfmaddpd zmm16, zmm12, zmm31, zmm18	;; R5 + R6 * SQRTHALF (final R5)			; 91-94		n 96
-	zfnmaddpd zmm12, zmm12, zmm31, zmm18	;; R5 - R6 * SQRTHALF (final R6)			; 91-94		n 97
+	vmovapd zmm17, zmm14			;; R3
 
-	vmovapd zmm18, [srcreg+rbp+64]		;; MemI1
-	zfnmaddpd zmm20, zmm5, zmm18, zmm20	;; A1 - I1 * MemI1 (R1)					; 92-95		n 110
-	zfmaddpd zmm18, zmm13, zmm18, zmm30	;; B1 + R1 * MemI1 (I1)					; 92-95		n 104
+	vaddpd	zmm12, zmm9, zmm4		;; I5 + I6 (new I5)					; 105-108	n 116
+	vsubpd	zmm14, zmm9, zmm4		;; I5 - I6 (new I6)					; 105-108	n 117
 
-	vmovapd zmm30, [srcreg+rbp+d1+64]	;; MemI2
-	zfnmaddpd zmm6, zmm8, zmm30, zmm6	;; A2 - I2 * MemI2 (R2)					; 93-96		n 110
-	zfmaddpd zmm21, zmm19, zmm30, zmm21	;; B2 + R2 * MemI2 (I2)					; 93-96		n 104
+	vaddpd	zmm4, zmm5, zmm8		;; I1 + I2 (new I1)					; 104-107	n 114
+	vsubpd	zmm18, zmm5, zmm8		;; I1 - I2 (new I2)					; 104-107	n 121
 
-	vmovapd zmm30, [srcreg+rbp+d2+64]	;; MemI3
-	zfnmaddpd zmm17, zmm0, zmm30, zmm17	;; A3 - I3 * MemI3 (R3)					; 94-97		n 113
-	zfmaddpd zmm1, zmm14, zmm30, zmm1	;; B3 + R3 * MemI3 (I3)					; 94-97		n 108
+	vmovapd zmm20, zmm13			;; R1
+	vmovapd zmm13, zmm7			;; I4
 
-	vmovapd	zmm30, [srcreg+rbp+d2+d1]	;; MemR4
-	vmulpd	zmm5, zmm11, zmm30		;; A4 = R4 * MemR4					; 95-98		n 99
-	vmulpd	zmm13, zmm7, zmm30		;; B4 = I4 * MemR4					; 95-98		n 99
-	zstore	[srcreg+d2+d1], zmm11		;; R4
-	zstore	[srcreg+d2+d1+64], zmm7		;; I4
+	zfnmaddpd zmm7, zmm3, zmm31, zmm15	;; R7 - I8 * SQRTHALF (final R7)			; 98-101	n 102
+	zfmaddpd zmm9, zmm3, zmm31, zmm15	;; R7 + I8 * SQRTHALF (final R8)			; 98-101	n 103
 
-	vmovapd	zmm30, [srcreg+rbp+d4]		;; MemR5
-	vmulpd	zmm8, zmm16, zmm30		;; A5 = R5 * MemR5					; 96-99		n 100
-	vmulpd	zmm19, zmm9, zmm30		;; B5 = I5 * MemR5					; 96-99		n 100
-	zstore	[srcreg+d4], zmm16		;; R5
-	zstore	[srcreg+d4+64], zmm9		;; I5
-
-	vmovapd	zmm30, [srcreg+rbp+d4+d1]	;; MemR6
-	vmulpd	zmm0, zmm12, zmm30		;; A6 = R6 * MemR6					; 97-100	n 101
-	vmulpd	zmm14, zmm4, zmm30		;; B6 = I6 * MemR6					; 97-100	n 101
-	zstore	[srcreg+d4+d1], zmm12		;; R6
-	zstore	[srcreg+d4+d1+64], zmm4		;; I6
-
-	zfnmaddpd zmm30, zmm3, zmm31, zmm15	;; R7 - I8 * SQRTHALF (final R7)			; 98-101	n 102
-	zfmaddpd zmm3, zmm3, zmm31, zmm15	;; R7 + I8 * SQRTHALF (final R8)			; 98-101	n 103
-
-	vmovapd zmm15, [srcreg+rbp+d2+d1+64]	;; MemI4
-	zfnmaddpd zmm5, zmm7, zmm15, zmm5	;; A4 - I4 * MemI4 (R4)					; 99-102	n 113
-	zfmaddpd zmm13, zmm11, zmm15, zmm13	;; B4 + R4 * MemI4 (I4)					; 99-102	n 108
-
-	vmovapd zmm15, [srcreg+rbp+d4+64]	;; MemI5
-	zfnmaddpd zmm8, zmm9, zmm15, zmm8	;; A5 - I5 * MemI5 (R5)					; 100-103	n 109
-	zfmaddpd zmm19, zmm16, zmm15, zmm19	;; B5 + R5 * MemI5 (I5)					; 100-103	n 105
-
-	vmovapd zmm15, [srcreg+rbp+d4+d1+64]	;; MemI6
-	zfnmaddpd zmm0, zmm4, zmm15, zmm0	;; A6 - I6 * MemI6 (R6)					; 101-104	n 109
-	zfmaddpd zmm14, zmm12, zmm15, zmm14	;; B6 + R6 * MemI6 (I6)					; 101-104	n 105
-
-	vmovapd	zmm15, [srcreg+rbp+d4+d2]	;; MemR7
-	vmulpd	zmm7, zmm30, zmm15		;; A7 = R7 * MemR7					; 102-105	n 106
-	vmulpd	zmm11, zmm2, zmm15		;; B7 = I7 * MemR7					; 102-105	n 106
-	zstore	[srcreg+d4+d2], zmm30		;; R7
-	zstore	[srcreg+d4+d2+64], zmm2		;; I7
-
-	vmovapd	zmm15, [srcreg+rbp+d4+d2+d1]	;; MemR8
-	vmulpd	zmm9, zmm3, zmm15		;; A8 = R8 * MemR8					; 103-106	n 107
-	vmulpd	zmm16, zmm10, zmm15		;; B8 = I8 * MemR8					; 103-106	n 107
-	zstore	[srcreg+d4+d2+d1], zmm3		;; R8
-	zstore	[srcreg+d4+d2+d1+64], zmm10	;; I8
-
-	cmp	r10, 84h			;; Case off opcode
-	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	jb	muladd				;; 83=muladd
-	je	mulsub				;; 84=mulsub
+	vmovapd zmm5, zmm11			;; R4
+	vmovapd zmm11, zmm2			;; I7
+	vmovapd zmm8, zmm6			;; R5
+	vmovapd zmm6, zmm19			;; R2
+	vmovapd zmm16, zmm10			;; I8
+	jmp	done
 
 fma:	vmovapd	zmm30, [srcreg+rbp]		;; MemR1
 	vmulpd	zmm20, zmm13, zmm30		;; A1 = R1 * MemR1					; 88-91		n 92
@@ -2706,10 +2651,9 @@ fma:	vmovapd	zmm30, [srcreg+rbp]		;; MemR1
 	vmulpd	zmm9, zmm3, zmm15		;; A8 = R8 * MemR8					; 103-106	n 107
 	vmulpd	zmm16, zmm10, zmm15		;; B8 = I8 * MemR8					; 103-106	n 107
 
-	cmp	r10, 4				;; Case off opcode
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way
@@ -2836,6 +2780,90 @@ muladdhard:
 	zfmaddpd zmm16, zmm2, zmm30, zmm16		;; I8 = I8 + MemI8*MemR8#2
 
 	jmp	done
+
+fmasave:
+	vmovapd	zmm30, [srcreg+rbp]		;; MemR1
+	vmulpd	zmm20, zmm13, zmm30		;; A1 = R1 * MemR1					; 88-91		n 92
+	vmulpd	zmm30, zmm5, zmm30		;; B1 = I1 * MemR1					; 88-91		n 92
+	zstore	[srcreg], zmm13			;; R1
+	zstore	[srcreg+64], zmm5		;; I1
+
+	vmovapd	zmm21, [srcreg+rbp+d1]		;; MemR2
+	vmulpd	zmm6, zmm19, zmm21		;; A2 = R2 * MemR2					; 89-92		n 93
+	vmulpd	zmm21, zmm8, zmm21		;; B2 = I2 * MemR2					; 89-92		n 93
+	zstore	[srcreg+d1], zmm19		;; R2
+	zstore	[srcreg+d1+64], zmm8		;; I2
+
+	vmovapd	zmm1, [srcreg+rbp+d2]		;; MemR3
+	vmulpd	zmm17, zmm14, zmm1		;; A3 = R3 * MemR3					; 90-93		n 94
+	vmulpd	zmm1, zmm0, zmm1		;; B3 = I3 * MemR3					; 90-93		n 94
+	zstore	[srcreg+d2], zmm14		;; R3
+	zstore	[srcreg+d2+64], zmm0		;; I3
+
+	zfmaddpd zmm16, zmm12, zmm31, zmm18	;; R5 + R6 * SQRTHALF (final R5)			; 91-94		n 96
+	zfnmaddpd zmm12, zmm12, zmm31, zmm18	;; R5 - R6 * SQRTHALF (final R6)			; 91-94		n 97
+
+	vmovapd zmm18, [srcreg+rbp+64]		;; MemI1
+	zfnmaddpd zmm20, zmm5, zmm18, zmm20	;; A1 - I1 * MemI1 (R1)					; 92-95		n 110
+	zfmaddpd zmm18, zmm13, zmm18, zmm30	;; B1 + R1 * MemI1 (I1)					; 92-95		n 104
+
+	vmovapd zmm30, [srcreg+rbp+d1+64]	;; MemI2
+	zfnmaddpd zmm6, zmm8, zmm30, zmm6	;; A2 - I2 * MemI2 (R2)					; 93-96		n 110
+	zfmaddpd zmm21, zmm19, zmm30, zmm21	;; B2 + R2 * MemI2 (I2)					; 93-96		n 104
+
+	vmovapd zmm30, [srcreg+rbp+d2+64]	;; MemI3
+	zfnmaddpd zmm17, zmm0, zmm30, zmm17	;; A3 - I3 * MemI3 (R3)					; 94-97		n 113
+	zfmaddpd zmm1, zmm14, zmm30, zmm1	;; B3 + R3 * MemI3 (I3)					; 94-97		n 108
+
+	vmovapd	zmm30, [srcreg+rbp+d2+d1]	;; MemR4
+	vmulpd	zmm5, zmm11, zmm30		;; A4 = R4 * MemR4					; 95-98		n 99
+	vmulpd	zmm13, zmm7, zmm30		;; B4 = I4 * MemR4					; 95-98		n 99
+	zstore	[srcreg+d2+d1], zmm11		;; R4
+	zstore	[srcreg+d2+d1+64], zmm7		;; I4
+
+	vmovapd	zmm30, [srcreg+rbp+d4]		;; MemR5
+	vmulpd	zmm8, zmm16, zmm30		;; A5 = R5 * MemR5					; 96-99		n 100
+	vmulpd	zmm19, zmm9, zmm30		;; B5 = I5 * MemR5					; 96-99		n 100
+	zstore	[srcreg+d4], zmm16		;; R5
+	zstore	[srcreg+d4+64], zmm9		;; I5
+
+	vmovapd	zmm30, [srcreg+rbp+d4+d1]	;; MemR6
+	vmulpd	zmm0, zmm12, zmm30		;; A6 = R6 * MemR6					; 97-100	n 101
+	vmulpd	zmm14, zmm4, zmm30		;; B6 = I6 * MemR6					; 97-100	n 101
+	zstore	[srcreg+d4+d1], zmm12		;; R6
+	zstore	[srcreg+d4+d1+64], zmm4		;; I6
+
+	zfnmaddpd zmm30, zmm3, zmm31, zmm15	;; R7 - I8 * SQRTHALF (final R7)			; 98-101	n 102
+	zfmaddpd zmm3, zmm3, zmm31, zmm15	;; R7 + I8 * SQRTHALF (final R8)			; 98-101	n 103
+
+	vmovapd zmm15, [srcreg+rbp+d2+d1+64]	;; MemI4
+	zfnmaddpd zmm5, zmm7, zmm15, zmm5	;; A4 - I4 * MemI4 (R4)					; 99-102	n 113
+	zfmaddpd zmm13, zmm11, zmm15, zmm13	;; B4 + R4 * MemI4 (I4)					; 99-102	n 108
+
+	vmovapd zmm15, [srcreg+rbp+d4+64]	;; MemI5
+	zfnmaddpd zmm8, zmm9, zmm15, zmm8	;; A5 - I5 * MemI5 (R5)					; 100-103	n 109
+	zfmaddpd zmm19, zmm16, zmm15, zmm19	;; B5 + R5 * MemI5 (I5)					; 100-103	n 105
+
+	vmovapd zmm15, [srcreg+rbp+d4+d1+64]	;; MemI6
+	zfnmaddpd zmm0, zmm4, zmm15, zmm0	;; A6 - I6 * MemI6 (R6)					; 101-104	n 109
+	zfmaddpd zmm14, zmm12, zmm15, zmm14	;; B6 + R6 * MemI6 (I6)					; 101-104	n 105
+
+	vmovapd	zmm15, [srcreg+rbp+d4+d2]	;; MemR7
+	vmulpd	zmm7, zmm30, zmm15		;; A7 = R7 * MemR7					; 102-105	n 106
+	vmulpd	zmm11, zmm2, zmm15		;; B7 = I7 * MemR7					; 102-105	n 106
+	zstore	[srcreg+d4+d2], zmm30		;; R7
+	zstore	[srcreg+d4+d2+64], zmm2		;; I7
+
+	vmovapd	zmm15, [srcreg+rbp+d4+d2+d1]	;; MemR8
+	vmulpd	zmm9, zmm3, zmm15		;; A8 = R8 * MemR8					; 103-106	n 107
+	vmulpd	zmm16, zmm10, zmm15		;; B8 = I8 * MemR8					; 103-106	n 107
+	zstore	[srcreg+d4+d2+d1], zmm3		;; R8
+	zstore	[srcreg+d4+d2+d1+64], zmm10	;; I8
+
+	cmp	r10, 84h			;; Case off opcode
+	mov	r10, SRC3ARG			;; Load distance to FFT(1)
+	jb	muladd				;; 83=muladd
+	;;je	mulsub				;; 84=mulsub
 
 mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	mulsubhard			;; Yes, do it the hard way
@@ -3367,16 +3395,17 @@ back_to_orig:
 ;; Same as above code between orig and back_to_orig, except we implement mul4_opcode options
 
 zr64_64c_mulf_opcode MACRO srcreg,d1,d2,d4
-	LOCAL	submul, fma, muladd, muladdhard, mulsub, mulsubhard, done
+	LOCAL	fma_or_unfft, fma, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft, done
 
 	movzx	r10, mul4_opcode		;; Load the mul4_opcode
 	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
 	cmp	r10, 2				;; Case off opcode
-	jg	fma				;; 3,4=muladd,mulsub
+	jg	fma_or_unfft			;; 3,4,5=muladd,mulsub,unfft
 	je	submul				;; 2=submul
+	;;jl	addmul				;; 1=addmul
 
 	;; Multiply the complex numbers
-	vmovapd	zmm16, [srcreg][rbx]		;; R1
+addmul:	vmovapd	zmm16, [srcreg][rbx]		;; R1
 	vmovapd	zmm9, [srcreg+64][rbx]		;; I1
 	vmovapd	zmm18, [srcreg+rbp]		;; MemR1
 	vaddpd	zmm18, zmm18, [srcreg+r9]	;; MemR1
@@ -3474,8 +3503,7 @@ zr64_64c_mulf_opcode MACRO srcreg,d1,d2,d4
 
 	jmp	done
 
-submul:
-	vmovapd	zmm16, [srcreg][rbx]		;; R1
+submul:	vmovapd	zmm16, [srcreg][rbx]		;; R1
 	vmovapd	zmm9, [srcreg+64][rbx]		;; I1
 	vmovapd	zmm18, [srcreg+rbp]		;; MemR1
 	vsubpd	zmm18, zmm18, [srcreg+r9]	;; MemR1
@@ -3573,8 +3601,30 @@ submul:
 
 	jmp	done
 
-fma:
-	vmovapd	zmm16, [srcreg][rbx]		;; R1
+fma_or_unfft:
+	cmp	r10, 4				;; Case off opcode
+	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
+	;;ja	unfft				;; 5=unfft
+
+unfft:	vmovapd	zmm20, [srcreg][rbx]		;; R1
+	vmovapd	zmm18, [srcreg+64][rbx]		;; I1
+	vmovapd	zmm6, [srcreg+d1][rbx]		;; R2
+	vmovapd	zmm21, [srcreg+d1+64][rbx]	;; I2
+	vmovapd	zmm17, [srcreg+d2][rbx]		;; R3
+	vmovapd	zmm1, [srcreg+d2+64][rbx]	;; I3
+	vmovapd	zmm5, [srcreg+d2+d1][rbx]	;; R4
+	vmovapd	zmm13, [srcreg+d2+d1+64][rbx]	;; I4
+	vmovapd	zmm8, [srcreg+d4][rbx]		;; R5
+	vmovapd	zmm19, [srcreg+d4+64][rbx]	;; I5
+	vmovapd	zmm0, [srcreg+d4+d1][rbx]	;; R6
+	vmovapd	zmm14, [srcreg+d4+d1+64][rbx]	;; I6
+	vmovapd	zmm7, [srcreg+d4+d2][rbx]	;; R7
+	vmovapd	zmm11, [srcreg+d4+d2+64][rbx]	;; I7
+	vmovapd	zmm9, [srcreg+d4+d2+d1][rbx]	;; R8
+	vmovapd	zmm16, [srcreg+d4+d2+d1+64][rbx];; I8
+	jmp	done
+
+fma:	vmovapd	zmm16, [srcreg][rbx]		;; R1
 	vmovapd	zmm9, [srcreg+64][rbx]		;; I1
 	vmovapd	zmm18, [srcreg+rbp]		;; MemR1
 	vmulpd	zmm20, zmm16, zmm18		;; A1 = R1 * MemR1					; 90-93		n 94
@@ -3654,10 +3704,9 @@ fma:
 	zfnmaddpd zmm9, zmm10, zmm15, zmm9	;; A8 - I8 * MemI8 (R8)					; 105-108	n 111
 	zfmaddpd zmm16, zmm3, zmm15, zmm16	;; B8 + R8 * MemI8 (I8)					; 105-108	n 112
 
-	cmp	r10, 4				;; Case off opcode
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way
@@ -4691,8 +4740,8 @@ nosave:
 	vbroadcastsd zmm1, ZMM_TWO
 
 	cmp	al, 4				;; Case off opcode
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way
@@ -5355,17 +5404,14 @@ zr64f_hundredtwentyeight_real_with_mult_preload MACRO
 	zr64_128r_mult_cmn_preload
 	ENDM
 zr64f_hundredtwentyeight_real_with_mult MACRO srcreg,srcinc,d1,d2,d4,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
-	;; Presently, gwnum does not support a with_mult (gwfftmul) interface with two sources and one destination.
-	;; Thus, rbx is always zero.
-	;; zr64_128r_mult_cmn srcreg,rbx,srcinc,d1,d2,d4,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
-	zr64_128r_mult_cmn srcreg,0,srcinc,d1,d2,d4,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
+	zr64_128r_mult_cmn srcreg,rbx,srcinc,d1,d2,d4,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
 	ENDM
 
 zr64_128r_mult_cmn_preload MACRO
 	;; preload would be silly for a macro that is executed only once
 	ENDM
 zr64_128r_mult_cmn MACRO srcreg,srcoff,srcinc,d1,d2,d4,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
-	LOCAL	orig, back_to_orig, no_save_fft, submul, fma, muladd, muladdhard, mulsub, mulsubhard
+	LOCAL	orig, back_to_orig, no_save_fft, fma_or_unfft, fma, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft
 
 	;; For zero pad
 	zmult7	srcreg+srcoff, srcreg+rbp
@@ -5748,12 +5794,12 @@ zr64_128r_mult_cmn MACRO srcreg,srcoff,srcinc,d1,d2,d4,screg1,scinc1,screg2,scin
 
 no_save_fft:
 	cmp	al, 2				;; Case off opcode
-	jg	fma				;; 3,4=muladd,mulsub
-	;jl	addmul				;; 1=addmul, fall through
+	jg	fma_or_unfft			;; 3,4,5=muladd,mulsub,unfft
 	je	submul				;; 2=submul
+	;jl	addmul				;; 1=addmul, fall through
 
 	;; Multiply the results
-	vmovapd	zmm24, [srcreg+rbp+d1]		;;		MemR2
+addmul:	vmovapd	zmm24, [srcreg+rbp+d1]		;;		MemR2
 	vaddpd	zmm24, zmm24, [srcreg+r9+d1]	;;		MemR2
 	vmulpd	zmm17, zmm2, zmm24		;;		A2 = R2 * MemR2					; 1-4		n 5
 	vmulpd	zmm16, zmm3, zmm24		;;		B2 = I2 * MemR2					; 1-4		n 5
@@ -5843,8 +5889,7 @@ no_save_fft:
 
 	jmp	back_to_orig
 
-submul:
-	vmovapd	zmm24, [srcreg+rbp+d1]		;;		MemR2
+submul:	vmovapd	zmm24, [srcreg+rbp+d1]		;;		MemR2
 	vsubpd	zmm24, zmm24, [srcreg+r9+d1]	;;		MemR2
 	vmulpd	zmm17, zmm2, zmm24		;;		A2 = R2 * MemR2					; 1-4		n 5
 	vmulpd	zmm16, zmm3, zmm24		;;		B2 = I2 * MemR2					; 1-4		n 5
@@ -5934,9 +5979,40 @@ submul:
 
 	jmp	back_to_orig
 
-fma:
+fma_or_unfft:
+	cmp	al, 4				;; Case off opcode
+	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
+	;;ja	unfft				;; 5=unfft
+
+unfft:	vmovapd	zmm23, zmm1			;; R1				R1a
+	vmovapd	zmm22 {k7}{z}, zmm11		;; I1				0
+	vmovsd	Q [srcreg-16], xmm23		;;				Save product of FFT sums
+
+	vmovapd	zmm17, zmm2			;;		R2
+	vmovapd	zmm2 {k6}, zmm11		;; R2				R1b
+
+	vmovapd	zmm16, zmm3			;;		I2
+	vmovapd	zmm3, zmm10			;;		R5 & R9
+
+						;;				R1a/R1b becomes R1/R2
+	vaddpd	zmm10, zmm23, zmm2		;; R1 + R2 (new R1)		R1 + R2 (new R1/HALF)		; 16-19		n 26
+	vsubpd	zmm23, zmm23, zmm2		;; R1 - R2 (new R2)		R1 - R2 (new R2/HALF)		; 17-20		n 28
+
+	vmovapd	zmm20, zmm12			;;		I4 & I6
+	vmovapd	zmm1, zmm4			;;		I7 & I11
+	vmovapd	zmm18, zmm15			;;		I3 & I5
+	vmovapd	zmm15, zmm6			;;		R6 & R10
+	vmovapd	zmm19, zmm13			;;		R3 & R5
+	vmovapd	zmm13, zmm8			;;		I6 & I10
+	vmovapd	zmm21, zmm9			;;		R4 & R6
+	vmovapd	zmm9, zmm14			;;		R7 & R11
+	vmovapd	zmm11, zmm0			;;		R8 & R12
+	vmovapd	zmm2, zmm7			;;		I5 & I9
+	vmovapd	zmm7, zmm5			;;		I8 & I12
+	jmp	back_to_orig
+
 	;; Multiply the results
-	vmovapd	zmm24, [srcreg+rbp+d1]		;;		MemR2
+fma:	vmovapd	zmm24, [srcreg+rbp+d1]		;;		MemR2
 	vmulpd	zmm17, zmm2, zmm24		;;		A2 = R2 * MemR2					; 1-4		n 5
 	vmulpd	zmm16, zmm3, zmm24		;;		B2 = I2 * MemR2					; 1-4		n 5
 
@@ -5974,9 +6050,8 @@ fma:
 	vmulpd	zmm13, zmm8, zmm24		;;		B6 = I6 * MemR6					; 9-12		n 15
 
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	cmp	al, 4				;; Case off opcode
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way
@@ -6743,7 +6818,7 @@ zr64f_hundredtwentyeight_real_with_mulf_preload MACRO
 	;; preload would be silly for a macro that is executed only once
 	ENDM
 zr64f_hundredtwentyeight_real_with_mulf MACRO srcreg,srcinc,d1,d2,d4,screg1,scinc1,screg2,scinc2,maxrpt,L1pt,L1pd
-	LOCAL	orig, back_to_orig, submul, fma, muladd, muladdhard, mulsub, mulsubhard
+	LOCAL	orig, back_to_orig, fma_or_unfft, fma, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft
 
 	;; For zero pad
 	zmult7	srcreg+rbx, srcreg+rbp
@@ -6757,11 +6832,11 @@ zr64f_hundredtwentyeight_real_with_mulf MACRO srcreg,srcinc,d1,d2,d4,screg1,scin
 	je	orig
 	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
 	cmp	al, 2				;; Case off opcode
-	jg	fma				;; 3,4=muladd,mulsub
-	;jl	addmul				;; 1=addmul, fall through
+	jg	fma_or_unfft			;; 3,4,5=muladd,mulsub,unfft
 	je	submul				;; 2=submul
+	;jl	addmul				;; 1=addmul, fall through
 
-	vmovapd	zmm2, [srcreg+d1][rbx]		;;		R2
+addmul:	vmovapd	zmm2, [srcreg+d1][rbx]		;;		R2
 	vmovapd	zmm24, [srcreg+rbp+d1]		;;		MemR2
 	vaddpd	zmm24, zmm24, [srcreg+r9+d1]	;;		MemR2
 	vmulpd	zmm17, zmm2, zmm24		;;		A2 = R2 * MemR2					; 1-4		n 5
@@ -6867,8 +6942,7 @@ zr64f_hundredtwentyeight_real_with_mulf MACRO srcreg,srcinc,d1,d2,d4,screg1,scin
 
 	jmp	back_to_orig
 
-submul:
-	vmovapd	zmm2, [srcreg+d1][rbx]		;;		R2
+submul:	vmovapd	zmm2, [srcreg+d1][rbx]		;;		R2
 	vmovapd	zmm24, [srcreg+rbp+d1]		;;		MemR2
 	vsubpd	zmm24, zmm24, [srcreg+r9+d1]	;;		MemR2
 	vmulpd	zmm17, zmm2, zmm24		;;		A2 = R2 * MemR2					; 1-4		n 5
@@ -6974,8 +7048,39 @@ submul:
 
 	jmp	back_to_orig
 
-fma:
-	vmovapd	zmm2, [srcreg+d1][rbx]		;;		R2
+fma_or_unfft:
+	cmp	al, 4				;; Case off opcode
+	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
+	;;ja	unfft				;; 5=unfft
+
+unfft:	vmovapd	zmm23, [srcreg][rbx]		;; R1				R1a
+	vmovapd	zmm11, [srcreg+64][rbx]		;; I1				R1b
+	vmovapd	zmm22 {k7}{z}, zmm11		;; I1				0
+	vmovsd	Q [srcreg-16], xmm23		;;				Save product of FFT sums
+
+	vmovapd	zmm17, [srcreg+d1][rbx]		;;		R2
+	vblendmpd zmm12 {k6}, zmm17, zmm11	;; R2				R1b
+
+						;;				R1a/R1b becomes R1/R2
+	vaddpd	zmm10, zmm23, zmm12		;; R1 + R2 (new R1)		R1 + R2 (new R1/HALF)		; 16-19		n 26
+	vsubpd	zmm23, zmm23, zmm12		;; R1 - R2 (new R2)		R1 - R2 (new R2/HALF)		; 17-20		n 28
+
+	vmovapd	zmm16, [srcreg+d1+64][rbx]	;;		I2
+	vmovapd	zmm19, [srcreg+d2][rbx]		;;		R3 & R5
+	vmovapd	zmm18, [srcreg+d2+64][rbx]	;;		I3 & I5
+	vmovapd	zmm21, [srcreg+d2+d1][rbx]	;;		R4 & R6
+	vmovapd	zmm20, [srcreg+d2+d1+64][rbx]	;;		I4 & I6
+	vmovapd	zmm3, [srcreg+d4][rbx]		;;		R5 & R9
+	vmovapd	zmm2, [srcreg+d4+64][rbx]	;;		I5 & I9
+	vmovapd	zmm15, [srcreg+d4+d1][rbx]	;;		R6 & R10
+	vmovapd	zmm13, [srcreg+d4+d1+64][rbx]	;;		I6 & I10
+	vmovapd	zmm9, [srcreg+d4+d2][rbx]	;;		R7 & R11
+	vmovapd	zmm1, [srcreg+d4+d2+64][rbx]	;;		I7 & I11
+	vmovapd	zmm11, [srcreg+d4+d2+d1][rbx]	;;		R8 & R12
+	vmovapd	zmm7, [srcreg+d4+d2+d1+64][rbx] ;;		I8 & I12
+	jmp	back_to_orig
+
+fma:	vmovapd	zmm2, [srcreg+d1][rbx]		;;		R2
 	vmovapd	zmm24, [srcreg+rbp+d1]		;;		MemR2
 	vmulpd	zmm17, zmm2, zmm24		;;		A2 = R2 * MemR2					; 1-4		n 5
 	vmovapd	zmm3, [srcreg+d1+64][rbx]	;;		I2
@@ -7025,9 +7130,8 @@ fma:
 	vmulpd	zmm13, zmm8, zmm24		;;		B6 = I6 * MemR6					; 9-12		n 15
 
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	cmp	al, 4				;; Case off opcode
-	;jb	muladd				;; 3=muladd, fall through
 	je	mulsub				;; 4=mulsub
+	;jb	muladd				;; 3=muladd, fall through
 
 muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	jne	muladdhard			;; Yes, do it the hard way

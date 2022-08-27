@@ -175,8 +175,8 @@ struct primenetGetAssignment {
 	uint32_t has_been_pminus1ed;	/* TRUE if P-1 has been run */
 	double	how_far_factored;	/* Log base 2 of highest trial factor tested */
 	double	factor_to;		/* Log base 2 of how far to trial factor */
-	double	B1;			/* P-1/ECM B1 */
-	double	B2;			/* P-1/ECM B2 */
+	uint64_t B1;			/* P-1/ECM B1 */
+	uint64_t B2;			/* P-1/ECM B2 */
 	double	tests_saved;		/* Primality tests saved if P-1 finds a factor */
 	uint32_t curves;		/* ECM curves to run */
 	uint32_t prp_base;		/* PRP base to use in a PRP double-check */
@@ -205,8 +205,8 @@ struct primenetRegisterAssignment {
 					/* factor tested. */
 	double	factor_to;		/* Log base 2 of how far to trial */
 					/* factor. */
-	double	B1;			/* P-1/ECM B1 */
-	double	B2;			/* P-1/ECM B2 */
+	uint64_t B1;			/* P-1/ECM B1 */
+	uint64_t B2;			/* P-1/ECM B2 */
 	double	tests_saved;		/* Primality tests saved if P-1 */
 					/* finds a factor */
 	uint32_t curves;		/* ECM curves to run */
@@ -278,8 +278,8 @@ struct primenetAssignmentResult {
 	uint32_t curves;		/* ECM curves ran */
 	double	start_bits;		/* Log base 2 of starting trial factor tested. */
 	double	end_bits;		/* Log base 2 of ending trial factor tested. */
-	double	B1;			/* P-1/ECM B1 */
-	double	B2;			/* P-1/ECM B2 */
+	uint64_t B1;			/* P-1/ECM B1 */
+	uint64_t B2;			/* P-1/ECM B2 */
 	uint32_t stage;			/* ECM stage the factor was found */
 	uint32_t shift_count;		/* LL or PRP shift count */
 	uint32_t fftlen;		/* FFT length used, for proper CPU credit on server */

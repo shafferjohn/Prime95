@@ -543,28 +543,26 @@ int format_args (char* args, short operation, void* pkt)
 			p = p + strlen (p);
 		}
 		if (z->work_type == PRIMENET_WORK_TYPE_PMINUS1) {
-			sprintf (p, "&A=%.0f&b=%d&n=%d&C=%d&B1=%.0f",
-				 z->k, z->b, z->n, z->c, z->B1);
+			sprintf (p, "&A=%.0f&b=%d&n=%d&C=%d&B1=%" PRIu64, z->k, z->b, z->n, z->c, z->B1);
 			p = p + strlen (p);
 			if (z->B2 != 0.0) {
-				sprintf (p, "&B2=%.0f", z->B2);
+				sprintf (p, "&B2=%" PRIu64, z->B2);
 				p = p + strlen (p);
 			}
 		}
 		if (z->work_type == PRIMENET_WORK_TYPE_PPLUS1) {
-			sprintf (p, "&A=%.0f&b=%d&n=%d&C=%d&B1=%.0f", z->k, z->b, z->n, z->c, z->B1);
+			sprintf (p, "&A=%.0f&b=%d&n=%d&C=%d&B1=%" PRIu64, z->k, z->b, z->n, z->c, z->B1);
 			p = p + strlen (p);
 			if (z->B2 != 0.0) {
-				sprintf (p, "&B2=%.0f", z->B2);
+				sprintf (p, "&B2=%" PRIu64, z->B2);
 				p = p + strlen (p);
 			}
 		}
 		if (z->work_type == PRIMENET_WORK_TYPE_ECM) {
-			sprintf (p, "&A=%.0f&b=%d&n=%d&C=%d&B1=%.0f",
-				 z->k, z->b, z->n, z->c, z->B1);
+			sprintf (p, "&A=%.0f&b=%d&n=%d&C=%d&B1=%" PRIu64, z->k, z->b, z->n, z->c, z->B1);
 			p = p + strlen (p);
 			if (z->B2 != 0.0) {
-				sprintf (p, "&B2=%.0f", z->B2);
+				sprintf (p, "&B2=%" PRIu64, z->B2);
 				p = p + strlen (p);
 			}
 			sprintf (p, "&CR=%d", z->curves);
@@ -672,33 +670,30 @@ int format_args (char* args, short operation, void* pkt)
 			p = armor (p + strlen (p), z->factor);
 		}
 		if (z->result_type == PRIMENET_AR_P1_FACTOR) {
-			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&B1=%.0f",
-				 z->k, z->b, z->n, z->c, z->B1);
+			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&B1=%" PRIu64, z->k, z->b, z->n, z->c, z->B1);
 			p += strlen (p);
 			if (z->B2) {
-				sprintf (p, "&B2=%.0f", z->B2);
+				sprintf (p, "&B2=%" PRIu64, z->B2);
 				p += strlen (p);
 			}
 			strcpy (p, "&f=");
 			p = armor (p + strlen (p), z->factor);
 		}
 		if (z->result_type == PRIMENET_AR_PP1_FACTOR) {
-			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&pp1n=%d&pp1d=%d&B1=%.0f",
-				 z->k, z->b, z->n, z->c, z->pp1_numerator, z->pp1_denominator, z->B1);
+			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&pp1n=%d&pp1d=%d&B1=%" PRIu64, z->k, z->b, z->n, z->c, z->pp1_numerator, z->pp1_denominator, z->B1);
 			p += strlen (p);
 			if (z->B2) {
-				sprintf (p, "&B2=%.0f", z->B2);
+				sprintf (p, "&B2=%" PRIu64, z->B2);
 				p += strlen (p);
 			}
 			strcpy (p, "&f=");
 			p = armor (p + strlen (p), z->factor);
 		}
 		if (z->result_type == PRIMENET_AR_ECM_FACTOR) {
-			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&CR=%d&B1=%.0f&stage=%d",
-				 z->k, z->b, z->n, z->c, z->curves, z->B1, z->stage);
+			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&CR=%d&B1=%" PRIu64 "&stage=%d", z->k, z->b, z->n, z->c, z->curves, z->B1, z->stage);
 			p += strlen (p);
 			if (z->B2) {
-				sprintf (p, "&B2=%.0f", z->B2);
+				sprintf (p, "&B2=%" PRIu64, z->B2);
 				p += strlen (p);
 			}
 			strcpy (p, "&f=");
@@ -711,29 +706,27 @@ int format_args (char* args, short operation, void* pkt)
 			p += strlen (p);
 		}
 		if (z->result_type == PRIMENET_AR_P1_NOFACTOR) {
-			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&B1=%.0f",
-				 z->k, z->b, z->n, z->c, z->B1);
+			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&B1=%" PRIu64, z->k, z->b, z->n, z->c, z->B1);
 			p += strlen (p);
 			if (z->B2) {
-				sprintf (p, "&B2=%.0f", z->B2);
+				sprintf (p, "&B2=%" PRIu64, z->B2);
 				p += strlen (p);
 			}
 		}
 		if (z->result_type == PRIMENET_AR_PP1_NOFACTOR) {
-			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&pp1n=%d&pp1d=%d&B1=%.0f",
+			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&pp1n=%d&pp1d=%d&B1=%" PRIu64,
 				 z->k, z->b, z->n, z->c, z->pp1_numerator, z->pp1_denominator, z->B1);
 			p += strlen (p);
 			if (z->B2) {
-				sprintf (p, "&B2=%.0f", z->B2);
+				sprintf (p, "&B2=%" PRIu64, z->B2);
 				p += strlen (p);
 			}
 		}
 		if (z->result_type == PRIMENET_AR_ECM_NOFACTOR) {
-			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&CR=%d&B1=%.0f",
-				 z->k, z->b, z->n, z->c, z->curves, z->B1);
+			sprintf (p, "&A=%.0f&b=%d&n=%d&c=%d&CR=%d&B1=%" PRIu64, z->k, z->b, z->n, z->c, z->curves, z->B1);
 			p += strlen (p);
 			if (z->B2) {
-				sprintf (p, "&B2=%.0f", z->B2);
+				sprintf (p, "&B2=%" PRIu64, z->B2);
 				p += strlen (p);
 			}
 		}
@@ -945,6 +938,17 @@ int primenet_parse_uint (
 	return (TRUE);
 }
 
+void primenet_parse_u64 (
+	char	*buf,
+	char	*id,
+	uint64_t *result)
+{
+	buf = find_id (buf, id);
+	if (buf == NULL) return;
+	*result = (uint64_t) atof (buf);
+//bug -raise error if not number
+}
+
 void primenet_parse_double (
 	char	*buf,
 	char	*id,
@@ -955,7 +959,7 @@ void primenet_parse_double (
 	*result = atof (buf);
 //bug -raise error if not number
 }
-	
+
 
 
 /*
@@ -1135,8 +1139,8 @@ int primenet_parse_page (char *response_buf, short operation, void *pkt)
 		primenet_parse_uint (s, "p1", &z->has_been_pminus1ed);
 		primenet_parse_double (s, "sf", &z->how_far_factored);
 		primenet_parse_double (s, "ef", &z->factor_to);
-		primenet_parse_double (s, "B1", &z->B1);
-		primenet_parse_double (s, "B2", &z->B2);
+		primenet_parse_u64 (s, "B1", &z->B1);
+		primenet_parse_u64 (s, "B2", &z->B2);
 		primenet_parse_uint (s, "CR", &z->curves);
 		primenet_parse_double (s, "saved", &z->tests_saved);
 		primenet_parse_uint (s, "base", &z->prp_base);

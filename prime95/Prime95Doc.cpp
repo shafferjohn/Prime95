@@ -537,7 +537,7 @@ void CPrime95Doc::OnPminus1()
 
 	dlg.m_k = 1.0;
 	dlg.m_b = 2;
-	dlg.m_n = 1061;
+	dlg.m_n = 1277;
 	dlg.m_c = -1;
 	dlg.m_bound1 = 1000000;
 	if (dlg.DoModal () == IDOK) {
@@ -571,7 +571,7 @@ void CPrime95Doc::OnEcm()
 
 	dlg.m_k = 1.0;
 	dlg.m_b = 2;
-	dlg.m_n = 1061;
+	dlg.m_n = 1277;
 	dlg.m_c = -1;
 	dlg.m_bound1 = 1000000;
 	dlg.m_num_curves = 100;

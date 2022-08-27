@@ -1,11 +1,11 @@
-/* Copyright 1995-2021 Mersenne Research, Inc. */
+/* Copyright 1995-2022 Mersenne Research, Inc. */
 /* Author:  George Woltman */
 /* Email: woltman@alum.mit.edu */
 
 /* Handy definitions */
 
 #define _XOPEN_SOURCE 500
-typedef int bool;
+//typedef int bool;			we use stdbool included in gwcommon.h
 #include "common.h"
 #include <strings.h>
 #include <time.h>

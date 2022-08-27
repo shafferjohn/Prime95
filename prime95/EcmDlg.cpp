@@ -26,8 +26,8 @@ CEcmDlg::CEcmDlg(CWnd* pParent /*=NULL*/)
 	m_b = 2;
 	m_n = 1277;
 	m_c = -1;
-	m_bound1 = 850.0e6;
-	m_bound2 = 0.0;
+	m_bound1 = 850000000;
+	m_bound2 = 0;
 	m_num_curves = 10;
 	//}}AFX_DATA_INIT
 }

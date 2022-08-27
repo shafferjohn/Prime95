@@ -4,7 +4,7 @@
 | This file contains the C routines and global variables that are used
 | to implement multi-threading, mutexes, and locking.
 | 
-|  Copyright 2006-2009 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2006-2021 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 /* Include files */
@@ -45,6 +45,7 @@ void gwmutex_init (
 void gwmutex_lock (
 	gwmutex	*mutex)			/* Mutex to lock */
 {
+	if (*mutex == NULL) return;
 #ifdef _WIN32
 	EnterCriticalSection ((LPCRITICAL_SECTION) *mutex);
 #else
@@ -55,6 +56,7 @@ void gwmutex_lock (
 void gwmutex_unlock (
 	gwmutex	*mutex)			/* Mutex to unlock */
 {
+	if (*mutex == NULL) return;
 #ifdef _WIN32
 	LeaveCriticalSection ((LPCRITICAL_SECTION) *mutex);
 #else
@@ -62,19 +64,17 @@ void gwmutex_unlock (
 #endif
 }
 
-
 void gwmutex_destroy (
 	gwmutex	*mutex)			/* Mutex to destroy */
 {
-	if (mutex != NULL) {
+	if (*mutex == NULL) return;
 #ifdef _WIN32
-		DeleteCriticalSection ((LPCRITICAL_SECTION) *mutex);
+	DeleteCriticalSection ((LPCRITICAL_SECTION) *mutex);
 #else
-		pthread_mutex_destroy ((pthread_mutex_t *) *mutex);
+	pthread_mutex_destroy ((pthread_mutex_t *) *mutex);
 #endif
-		free (*mutex);
-		*mutex = NULL;
-	}
+	free (*mutex);
+	*mutex = NULL;
 }
 
 /* Data structures for implementing events */

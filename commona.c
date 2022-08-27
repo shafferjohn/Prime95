@@ -148,11 +148,11 @@ void rangeStatusMessage (
 		buf += strlen (buf);
 
 		if (w->work_type == WORK_ECM)
-			sprintf (buf, "ECM %d curve%s B1=%.0f", w->curves_to_do, w->curves_to_do == 1 ? "" : "s", w->B1);
+			sprintf (buf, "ECM %d curve%s B1=%" PRIu64, w->curves_to_do, w->curves_to_do == 1 ? "" : "s", w->B1);
 		else if (w->work_type == WORK_PMINUS1)
-			sprintf (buf, "P-1 B1=%.0f", w->B1);
+			sprintf (buf, "P-1 B1=%" PRIu64, w->B1);
 		else if (w->work_type == WORK_PPLUS1)
-			sprintf (buf, "P+1 B1=%.0f", w->B1);
+			sprintf (buf, "P+1 B1=%" PRIu64, w->B1);
 		else if (w->work_type == WORK_FACTOR)
 			sprintf (buf, "factor from 2^%d to 2^%d", (int) w->sieve_depth, (int) w->factor_to);
 		else

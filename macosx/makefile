@@ -1,7 +1,7 @@
 # Makefile for Mac OS X mprime
 #
 # Hwloc can be downloaded from https://www.open-mpi.org/projects/hwloc/
-# Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl --disable-opencl
+# Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl --disable-opencl --disable-rsmi
 #
 
 ENVP= MACOSX_DEPLOYMENT_TARGET=10.4

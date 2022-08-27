@@ -780,7 +780,7 @@ ENDIF
 	ENDM
 
 ymult7	MACRO	src1, src2
-	LOCAL	nozpad, orig, addmul, submul, muladd, mulsub, hard, nothard, done
+	LOCAL	nozpad, orig, addmul, submul, muladd, mulsub, hard, nothard, unfft, done
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	nozpad			;; No, skip 7 word multiply
 
@@ -792,6 +792,10 @@ ymult7	MACRO	src1, src2
 	vmovsd	xmm6, Q [src1-56]	;; Load copy of input FFT word at halfway + 2
 	vmovsd	xmm7, Q [src1-64]	;; Load copy of input FFT word at halfway + 3
 
+	mov	al, mul4_opcode		;; Load gwmul4 opcode
+	cmp	al, 5			;; 5 = unfft
+	je	unfft
+
 	vmovsd	xmm8, Q [src2-88]	;; Load copy of input FFT word at halfway - 3
 	vmovsd	xmm9, Q [src2-80]	;; Load copy of input FFT word at halfway - 2
 	vmovsd	xmm10, Q [src2-72]	;; Load copy of input FFT word at halfway - 1
@@ -800,7 +804,6 @@ ymult7	MACRO	src1, src2
 	vmovsd	xmm13, Q [src2-56]	;; Load copy of input FFT word at halfway + 2
 	vmovsd	xmm14, Q [src2-64]	;; Load copy of input FFT word at halfway + 3
 
-	mov	al, mul4_opcode		;; Load gwmul4 opcode
 	and	al, 7fh			;; Mask out the save FFT results flag
 	jz	orig			;; Jump if not doing addmul or submul of fma
 	mov	r9, SRC2ARG		;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg from gwmuladd4 and gwmulsub4
@@ -964,6 +967,16 @@ mulsub:	vsubsd	xmm0, xmm7, xmm0		;; Subtract the addins
 	vsubsd	xmm4, xmm11, xmm4
 	vsubsd	xmm5, xmm12, xmm5
 	vsubsd	xmm6, xmm13, xmm6
+	jmp	short done
+
+unfft:	vmovsd	xmm0, xmm1, xmm1		;; Copy the ZPADs (mul by 1)
+	vmovsd	xmm1, xmm2, xmm2
+	vmovsd	xmm2, xmm3, xmm3
+	vmovsd	xmm3, xmm4, xmm4
+	vmovsd	xmm4, xmm5, xmm5
+	vmovsd	xmm5, xmm6, xmm6
+	vmovsd	xmm6, xmm7, xmm7
+	;;jmp	short done
 
 done:	vmovsd	ZPAD0, xmm0
 	vmovsd	ZPAD1, xmm1

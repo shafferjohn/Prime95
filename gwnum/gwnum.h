@@ -16,7 +16,7 @@
 | threads IF AND ONLY IF each uses a different gwhandle structure
 | initialized by gwinit.
 | 
-|  Copyright 2002-2021 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2002-2022 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 #ifndef _GWNUM_H
@@ -43,6 +43,9 @@ typedef struct gwhandle_struct gwhandle;
 /* data stored before the doubles.  See the internals section below if you really must know. */
 typedef double *gwnum;
 
+/* An array of gwnums data type.  In practice, there is data stored before the array. */
+typedef gwnum *gwarray;
+
 /*---------------------------------------------------------------------+
 |                     SETUP AND TERMINATION ROUTINES                   |
 +---------------------------------------------------------------------*/
@@ -52,9 +55,9 @@ typedef double *gwnum;
 /* are new prime95 versions without any changes in the gwnum code.  This version number is also embedded in the assembly code and */
 /* gwsetup verifies that the version numbers match.  This prevents bugs from accidentally linking in the wrong gwnum library. */
 
-#define GWNUM_VERSION		"30.7"
+#define GWNUM_VERSION		"30.8"
 #define GWNUM_MAJOR_VERSION	30
-#define GWNUM_MINOR_VERSION	7
+#define GWNUM_MINOR_VERSION	8
 
 /* Error codes returned by the three gwsetup routines */
 
@@ -209,6 +212,13 @@ void gwdone (
 /* NOTE: sum_inputs checking is only available in SSE2 FFTs and earlier.  Thus, using this option is not recommended. */
 #define gwset_sum_inputs_checking(h,b) ((h)->sum_inputs_checking = (char) (b))
 
+/* Prior to calling one of the gwsetup routines, you can tell the gwnum library that the polymult library will also be used. */
+#define gwset_using_polymult(h)		((h)->polymult = TRUE)
+
+/* Prior to calling one of the gwsetup routines, you can tell the gwnum library to do a faster partial setup.  You won't be able to do any math */
+/* operations, but you can call informational routines such as get FFT length, FFT description, gwnum size, etc. */
+#define gwset_information_only(h)	((h)->information_only = TRUE)
+
 /* Prior to calling one of the gwsetup routines, you can tell the library to use a hyperthread for memory prefetching. */
 /* Only implemented for AVX-512 FFTs.  Caller must ensure the compute thread and prefetching hyperthread are set to use */
 /* the same physical CPU core.  At present there are no known CPUs where this provides a benefit. */
@@ -233,6 +243,16 @@ gwnum gwalloc (
 void gwfree (
 	gwhandle *gwdata,	/* Handle initialized by gwsetup */
 	gwnum	val);		/* Gwnum to free */
+
+/* Allocate an array and fill it with gwnums.  Uses a little less memory than allocating an array and calling gwalloc many times. */
+gwarray gwalloc_array (		/* Pointer to an array of gwnums */
+	gwhandle *gwdata,	/* Handle initialized by gwsetup */
+	int	n);		/* Size of the array of gwnums */
+
+/* Free a previously allocated array of gwnums */
+void gwfree_array (
+	gwhandle *gwdata,	/* Handle initialized by gwsetup */
+	gwarray	array);		/* Array of gwnums to free */
 
 /* Free all previously allocated gwnums */
 void gwfreeall (
@@ -513,9 +533,12 @@ void gwsmalladd (gwhandle *gwdata, double addin, gwnum g);
 #define GWSMALLMUL_MAX		67108864.0		/* May allow more at a later date */
 void gwsmallmul (gwhandle *gwdata, double mult, gwnum g);
 
-/* Perform an inverse FFT.  This is inefficient!!  We call this to undo a forward FFT performed on a gwnum where we need unFFTed data. */
-/* In a perfect world, the forward FFT would not have been done in the first place. */
+/* Perform an inverse FFT.  This may be inefficient!!  Call this to undo a forward FFT performed on a gwnum where unFFTed data is needed. */
+/* In a perfect world, the forward FFT would not have been done in the first place.  However, there are counter examples.  Plus, the new */
+/* polymult library returns FFTed data that needs normalizing before it can be used in future operations.  In fact, polymult users may */
+/* benefit from using the GWMUL_STARTNEXTFFT option! */
 void gwunfft (gwhandle *, gwnum s, gwnum d);
+void gwunfft2 (gwhandle *, gwnum s, gwnum d, int options);
 
 /* Obscure routine to possibly keep a gwnum in the CPU caches by accessing it. */
 #define gwtouch(h,s)		gwcopy (h,s,s)
@@ -540,6 +563,9 @@ void gw_clear_maxerr (gwhandle *gwdata);
 /* For example, if percent is 0.1 and the FFT can handle 20 bits per FFT data word, then if there are more than 19.98 bits per FFT data */
 /* word this function will return TRUE. */
 int gwnear_fft_limit (gwhandle *gwdata, double pct);
+
+/* Returns true if the current FFT length satisfies the given safety margin (such as the value returned by polymult_safety_margin) */
+#define gw_passes_safety_margin(h,safetyval)	((h)->EXTRA_BITS/2.0+(h)->safety_margin > (safetyval))
 
 /*---------------------------------------------------------------------+
 |                    GWNUM MISC. INFORMATION ROUTINES                  |
@@ -597,7 +623,7 @@ unsigned long gwmemused (gwhandle *);
 
 /* Get the amount of memory required for the gwnum's raw FFT data.  This does not include the GW_HEADER_SIZE bytes for the header */
 /* or any pad bytes that might be allocated for alignment.  I see little need for a program to use this routine. */
-unsigned long gwnum_datasize (gwhandle *);
+#define gwnum_datasize(h)	(h)->datasize
 
 /*-----------------------------------------------------------------+
 |               ADVANCED GWADD_ and GWMUL_ options                 |
@@ -646,6 +672,22 @@ int gwiszero (gwhandle *, gwnum);
 /* Returns TRUE if number is zero, FALSE if number is not zero, and a negative error */
 /* code if a problem is found. */
 int gwequal (gwhandle *, gwnum, gwnum);
+
+/*---------------------------------------------------------------------+
+|                          CLONING ROUTINES                            |
++---------------------------------------------------------------------*/
+
+/* Experimental routine to clone a gwhandle.  The cloned handle uses less resources than a full gwsetup by sharing many data structures with */
+/* the original handle.  The cloned handle can be used in a limited way in another thread.  Valid operations in the cloned handle are single */
+/* threaded multiplication, addition, subtraction.  Other operations may work as well. */
+int gwclone (
+	gwhandle *cloned_gwdata,	/* Empty handle to be populated */
+	gwhandle *gwdata);		/* Handle to clone */
+
+/* Merge various stats (MAXERR, fft_count, etc.) back into the parent gwdata.  This routine does not do any locking to make sure the */
+/* parent gwdata is not busy nor are any other cloned gwdatas simultaneously merging stats.  Locking is the caller's responsibility. */
+void gwclone_merge_stats (
+	gwhandle *cloned_gwdata);	/* Handle for a cloned gwdata */
 
 /*---------------------------------------------------------------------+
 |                 ALTERNATIVE INTERFACES USING GIANTS                  |
@@ -983,7 +1025,8 @@ struct gwhandle_struct {
 	char	use_benchmarks;		/* Use benchmark data in gwnum.txt to select fastest FFT implementations */
 	char	will_hyperthread;	/* Set if FFTs will use hyperthreading (affects select of fastest FFT implementation from gwnum.txt) */
 	char	will_error_check;	/* Set if FFTs will error check (affects select of fastest FFT implementation from gwnum.txt) */
-	char	unused_setup_flags[3];
+	char	information_only;	/* Set if doing a faster partial setup */
+	char	unused_setup_flags[2];
 	int	bench_num_cores;	/* Set to expected number of cores that will FFT (affects select fastest FFT implementation) */
 	int	bench_num_workers;	/* Set to expected number of workers that will FFT (affects select fastest FFT implementation) */
 	/* End of variables affecting gwsetup */
@@ -1034,8 +1077,10 @@ struct gwhandle_struct {
 	char	FFT1_state;		/* 0 = FFT(1) needed for FMA but not yet allocated, 1 = FFT(1) needed for FMA and allocated, */
 					/* 2 = FFT(1) is not needed for FMA. */
 	char	FFT1_user_allocated;	/* TRUE if FFT(1) was allocated at user's request */
-	unsigned long saved_copyz_n;	/* Used to reduce COPYZERO calculations */
+	char	polymult;		/* Set this to true if gwnums might be used by polymult library */
+	char	UNUSED_CHAR;
 	char	GWSTRING_REP[60];	/* The gwsetup modulo number as a string. */
+	unsigned long saved_copyz_n;	/* Used to reduce COPYZERO calculations */
 	unsigned int NORMNUM;		/* The post-multiply normalize routine index */
 	int	GWERROR;		/* Set if an error is detected */
 	int	mulbyconst;		/* Current mul-by-const value */
@@ -1048,6 +1093,7 @@ struct gwhandle_struct {
 	void	*dd_data;		/* Memory allocated for gwdbldbl global data */
 	ghandle	gdata;			/* Structure that allows sharing giants and gwnum memory allocations */
 	double	*gwnum_memory;		/* Allocated memory */
+	unsigned long datasize;		/* Data size (including any cache pad lines) of a gwnum.  Does not include header before gwnum. */
 	unsigned long GW_ALIGNMENT;	/* How to align allocated gwnums */
 	unsigned long GW_ALIGNMENT_MOD; /* How to align allocated gwnums */
 	gwnum	*gwnum_alloc;		/* Array of allocated gwnums */
@@ -1056,9 +1102,10 @@ struct gwhandle_struct {
 	gwnum	*gwnum_free;		/* Array of available gwnums */
 	unsigned int gwnum_free_count;	/* Count of available gwnums */
 	unsigned int gwnum_max_free_count; /* Count of free gwnums that should be cached (default is 10) */
+	gwarray	array_list;		/* List of arrays allocated by gwalloc_array */
 	size_t	GW_BIGBUF_SIZE;		/* Size of the optional buffer */
 	char	*GW_BIGBUF;		/* Optional buffer to allocate gwnums in */
-	void	*large_pages_ptr;	/* Pointer to the lage pages memory block we allocated. */
+	void	*large_pages_ptr;	/* Pointer to the large pages memory block we allocated. */
 	void	*large_pages_gwnum;	/* Pointer to the one large pages gwnum */
 	void	(*thread_callback)(int, int, void *); /* Auxiliary thread callback routine letting */
 					/* the gwnum library user set auxiliary thread priority and affinity */
@@ -1100,6 +1147,7 @@ struct gwhandle_struct {
 	double	ZPAD_COPY7_ADJUST[7];	/* Adjustments for copying the 7 words around the halfway point of a zero pad FFT. */
 	double	ZPAD_0_6_ADJUST[7];	/* Adjustments for ZPAD0_6 in a r4dwpn FFT */
 	unsigned long wpn_count;	/* Count of r4dwpn pass 1 blocks that use the same ttp/ttmp grp multipliers */
+	gwhandle *clone_of;		/* If this is a cloned gwhandle, this points to the handle that was cloned */
 	gwhandle *to_radix_gwdata;	/* FFTs used in converting to base b from binary in nonbase2_gianttogw */
 	gwhandle *from_radix_gwdata;	/* FFTs used in converting from base b to binary in nonbase2_gwtogiant */
 };
@@ -1109,20 +1157,30 @@ struct gwhandle_struct {
 /* data-4:  integer containing number of unnormalized adds that have been */
 /*	    done.  After a certain number of unnormalized adds, the next add */
 /*	    must be normalized to avoid overflow errors during a multiply. */
-/* data-8:  integer containing number of bytes in data area. Used by gwcopy. */
+/* data-8:  Four unused bytes
 /* data-16: double containing the product of the two sums of the input FFT values. */
 /* data-24: double containing the sum of the output FFT values.  These two */
 /*	    values can be used as a sanity check when multiplying numbers. */
 /*	    The two values should be "reasonably close" to one another. */
 /* data-28: Flag indicating gwnum value has been partially FFTed. */
-/* data-32: Pointer returned by malloc - used to free memory when done. */
+/* data-32: Allocation flags - used to free memory when done. */
 /* data-88: Seven doubles (input FFT values near the halfway point when doing a zero-padded FFT). */
-/* data-96: Eight unused bytes */
+/* data-192: Thirteen doubles only used by the polymult library for zero-padded FFTs */
 /* typedef struct { */
 /*	char	pad[96];	   Used to track unnormalized add/sub and original address */
 /*	double	data[512];	   The big number broken into chunks.  This array is variably sized. */
 /* } *gwnum; */
-#define GW_HEADER_SIZE	96	/* Number of data bytes before a gwnum ptr */
+#define GW_SMALL_HEADER_SIZE	32	/* Number of data bytes before a gwnum ptr when not using zero-padded FFTs */
+#define GW_ZPAD_HEADER_SIZE	96	/* Number of data bytes before a gwnum ptr when using zero-padded FFTs */
+#define GW_LARGE_HEADER_SIZE	192	/* Number of data bytes before a gwnum ptr when using zero-padded FFTs and polymult */
+#define GW_HEADER_SIZE(h)	(!(h)->ZERO_PADDED_FFT ? GW_SMALL_HEADER_SIZE : !(h)->polymult ? GW_ZPAD_HEADER_SIZE : GW_LARGE_HEADER_SIZE)
+
+/* Define the hidden fields before an allocated gwarray */
+typedef struct {
+	int	flags;		// Flags such as how array was allocated
+	gwarray *prev;		// Prev pointer in doubly linked list
+	gwarray next;		// Next pointer in doubly linked list
+} gwarray_header;
 
 /* Some mis-named #defines that describe the maximum Mersenne number exponent that the gwnum routines can process. */
 #define MAX_PRIME	79300000L	/* Maximum number of x87 bits */
@@ -1160,6 +1218,7 @@ int is_big_word (gwhandle *, unsigned long);
 void bitaddr (gwhandle *, unsigned long, unsigned long *, unsigned long *);
 void specialmodg (gwhandle *, giant);
 #define gw_set_max_allocs(h,n)	if ((h)->gwnum_alloc==NULL) (h)->gwnum_alloc_array_size=n
+void init_FFT1 (gwhandle *);
 
 /* Specialized routines that let the internal giants code share the free memory pool used by gwnums. */
 void gwfree_temporarily (gwhandle *, gwnum);

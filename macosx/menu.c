@@ -1,4 +1,4 @@
-/* Copyright 1995-2021 Mersenne Research, Inc. */
+/* Copyright 1995-2022 Mersenne Research, Inc. */
 /* Author:  George Woltman */
 /* Email: woltman@alum.mit.edu */
 
@@ -146,6 +146,29 @@ loop:	get_line (buf);
 	if (min != 0.0 || max != 0.0) {
 		if (newval < min || newval > max) {
 			printf ("Please enter a value between %f and %f. ", min, max);
+			goto loop;
+		}
+	}
+	*val = newval;
+}
+
+/* Ask a number question */
+
+void askU64 (
+	const char *str,
+	uint64_t *val,
+	uint64_t min,
+	uint64_t max)
+{
+	char	buf[80];
+	uint64_t newval;
+	printf ("%s (%" PRIu64 "): ", str, *val);
+loop:	get_line (buf);
+	if (buf[0] == 0) return;
+	newval = (uint64_t) atof (buf);
+	if (min != 0.0 || max != 0.0) {
+		if (newval < min || newval > max) {
+			printf ("Please enter a value between %" PRIu64 " and %" PRIu64 ". ", min, max);
 			goto loop;
 		}
 	}
@@ -700,14 +723,15 @@ void advanced_pminus1 (void)
 {
 	unsigned long m_thread, m_b, m_n, m_num_curves;
 	long	m_c;
-	double	m_k, m_bound1, m_bound2;
+	double	m_k;
+	uint64_t m_bound1, m_bound2;
 
 	m_k = 1.0;
 	m_b = 2;
 	m_n = 0;
 	m_c = -1;
-	m_bound1 = 50000.0;
-	m_bound2 = 0.0;
+	m_bound1 = 50000;
+	m_bound2 = 0;
 
 	m_thread = 1;
 	if (NUM_WORKER_THREADS > 1)
@@ -717,8 +741,8 @@ void advanced_pminus1 (void)
 	askNum ("b in k*b^n+c", &m_b, 2, 1000000000);
 	askNumNoDflt ("n in k*b^n+c", &m_n, 100, 600000000);
 	askInt ("c in k*b^n+c", &m_c, -2000000000, 2000000000);
-	askDbl ("Bound #1", &m_bound1, 100.0, 1.0e15);
-	askDbl ("Bound #2", &m_bound2, 0.0, 1.0e15);
+	askU64 ("Bound #1", &m_bound1, 100.0, 1000000000000000);
+	askU64 ("Bound #2", &m_bound2, 0.0, 1000000000000000);
 
 	if (askOkCancel ()) {
 		struct work_unit w;
@@ -744,14 +768,15 @@ void advanced_ecm (void)
 {
 	unsigned long m_thread, m_b, m_n, m_num_curves;
 	long	m_c;
-	double	m_k, m_bound1, m_bound2;
+	double	m_k;
+	uint64_t m_bound1, m_bound2;
 
 	m_k = 1.0;
 	m_b = 2;
 	m_n = 0;
 	m_c = -1;
-	m_bound1 = 50000.0;
-	m_bound2 = 0.0;
+	m_bound1 = 250000;
+	m_bound2 = 0;
 	m_num_curves = 100;
 
 	m_thread = 1;
@@ -762,8 +787,8 @@ void advanced_ecm (void)
 	askNum ("b in k*b^n+c", &m_b, 2, 1000000000);
 	askNumNoDflt ("n in k*b^n+c", &m_n, 100, 600000000);
 	askInt ("c in k*b^n+c", &m_c, -2000000000, 2000000000);
-	askDbl ("Bound #1", &m_bound1, 100.0, 1.0e15);
-	askDbl ("Bound #2", &m_bound2, 0.0, 1.0e15);
+	askU64 ("Bound #1", &m_bound1, 100, 1000000000000000);
+	askU64 ("Bound #2", &m_bound2, 0, 1000000000000000);
 	askNum ("Curves to test", &m_num_curves, 1, 100000);
 
 	if (askOkCancel ()) {
@@ -1279,7 +1304,7 @@ void help_about (void)
 	printf ("GIMPS: Mersenne Prime Search\n");
 	printf ("Web site: http://mersenne.org\n");
 	printf ("%s\n", app_string);
-	printf ("Copyright 1996-2021 Mersenne Research, Inc.\n");
+	printf ("Copyright 1996-2022 Mersenne Research, Inc.\n");
 	printf ("Author: George Woltman\n");
 	printf ("Email:  woltman@alum.mit.edu\n");
 	askOK ();

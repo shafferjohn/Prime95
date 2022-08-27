@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2022 Mersenne Research, Inc.  All rights reserved
 +---------------------------------------------------------------------*/
 
 #ifndef _COMMONB_H
@@ -61,6 +61,7 @@ struct PriorityInfo {
 	uint32_t verbosity;		/* Output affinity messages to the worker window */
 	uint32_t aux_thread_num;	/* Set when gwnum launches auxiliary threads */
 	bool	aux_hyperthread;	/* Set when gwnum launches auxiliary prefetching hyperthread */
+	bool	aux_polymult;		/* Set when polymult launches auxiliary threads */
 	union {
 		struct {		/* Normal work info */
 			int	normal_work_hyperthreading;	/* True if worker will use hyperthreading */
@@ -224,15 +225,18 @@ void clear_restart_if_max_memory_change (int thread_num);
 
 int avail_mem_not_sufficient (int thread_num, unsigned long min_memory, unsigned long desired_memory);
 
-/* Handy macros to help in calling memory routines.  Macros tell */
-/* us how many gwnums fit in given megabytes AND how many megabytes */
-/* are used by a given number of gwnums.  We have to be real careful */
-/* as machines with more than 4GB are becoming commonplace.  We assume */
-/* code and other data will add 1MB or 2MB to our working set. */
+/* Handy macros to help in calling memory routines.  Macros tell us how many gwnums fit in given megabytes AND how many megabytes are used by a given */
+/* number of gwnums.  There are two versions, one for gwnums that are allocated individually, the other for gwnums that are allocated more densely using */
+/* gwarray routines.  We assume code and other data will add 1MB or 2MB to our working set. */
 
-#define cvt_mem_to_gwnums(g,m) ((unsigned long)(((double)(m)*1048576.0-1000000.0-(double)gwmemused(g))/(double)gwnum_size(g)))
-#define cvt_gwnums_to_mem(g,n) ((unsigned long)(((double)gwmemused(g)+2000000.0+(double)(n)*(double)gwnum_size(g))/1048576.0))
-#define cvt_mem_to_estimated_gwnums(m,k,b,n,c) ((unsigned long)(((double)(m)*1048576.0-1000000.0-(double)gwmap_to_memused(k,b,n,c))/(double)gwmap_to_estimated_size(k,b,n,c)))
+#define array_gwnum_size(g)			round_up_to_multiple_of((gwnum_datasize(g)+GW_HEADER_SIZE(g)),64)
+#define cvt_mem_to_gwnums(g,m)			cvt_mem_to_gwnums_adj(g,m,0.0)
+#define cvt_mem_to_gwnums_adj(g,m,a)		((unsigned long)(((double)((m)-1)*1048576.0-(double)gwmemused(g))/(double)array_gwnum_size(g)+(a)))
+#define cvt_gwnums_to_mem(g,n)			((unsigned long)(((double)gwmemused(g)+(double)(n)*(double)gwnum_size(g))/1048576.0)+2)
+#define cvt_mem_to_array_gwnums(g,m)		cvt_mem_to_array_gwnums_adj(g,m,0.0)
+#define cvt_mem_to_array_gwnums_adj(g,m,a)	((unsigned long)(((double)((m)-1)*1048576.0-(double)gwmemused(g))/(double)array_gwnum_size(g)+(a)))
+#define cvt_array_gwnums_to_mem(g,n)		((unsigned long)(((double)gwmemused(g)+(double)(n)*(double)array_gwnum_size(g))/1048576.0)+2)
+#define cvt_mem_to_estimated_gwnums(m,k,b,n,c)	((unsigned long)(((double)((m)-1)*1048576.0-(double)gwmap_to_memused(k,b,n,c))/(double)gwmap_to_estimated_size(k,b,n,c)))
 
 /* battery routines */
 
@@ -253,10 +257,9 @@ unsigned int active_workers_count (void);
 
 /* "pause while running" routines */
 
-extern char **PAUSE_WHILE_RUNNING;	/* An array of program names that, */
-					/* if running, prime95 should pause. */
-extern int PAUSE_WHILE_RUNNING_FREQ;	/* How often prime95 should check */
-					/* the pause-while-running list */
+extern int PAUSEABLE_WORKERS_RUNNING;	/* One or more workers are paused because another program is running */
+extern char **PAUSE_WHILE_RUNNING;	/* An array of program names that, if running, prime95 should pause. */
+extern int PAUSE_WHILE_RUNNING_FREQ;	/* How often prime95 should check the pause-while-running list */
 void read_pause_info (void);
 void checkPauseWhileRunning (void);
 void implement_pause (int thread_num);

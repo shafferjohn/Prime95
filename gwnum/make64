@@ -1,29 +1,51 @@
 # Makefile for Linux and FreeBSD (pre 10.0) 64-bit gwnum library
-#
+# Requires gcc 8 for avx512 support:
+#	scl enable devtoolset-8 bash
 
 CC = gcc
-CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -I/usr/local/include -DX86_64 -Wno-unused-result -O2
+CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -I/usr/local/include -std=gnu99 -DX86_64 -Wno-unused-result -O2
+#CFLAGS = -g -I.. -I../sqlite-amalgamation-3180000 -I/usr/local/include -std=gnu99 -DX86_64 -DGDEBUG -Wno-unused-result -O2
 
 CPP = g++
-CPPFLAGS = -I.. -I../qd -DX86_64 -O2
+CPPFLAGS = -I.. -I../qd -std=c++11 -DX86_64 -O2
+#CPPFLAGS = -g -I.. -I../qd -std=c++11 -DX86_64 -DGDEBUG -O2
 
 AR = ar
 
 LINUXOBJS = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o radix.o ecmstag1.o
+POLYOBJS = polymult.o polymult_sse2.o polymult_avx.o polymult_fma.o polymult_avx512.o 
 
 LIB = gwnum.a
+POLYLIB = polymult.a
 
 #########################################################################
+
+all:	$(LIB) $(POLYLIB)
 
 $(LIB): $(LINUXOBJS)
 	cp linux64/gwnum.a .
 	$(AR) -rs $(LIB) $(LINUXOBJS)
 
+$(POLYLIB): $(POLYOBJS)
+	$(AR) -rs $(POLYLIB) $(POLYOBJS)
+
 clean:
-	rm -f $(LINUXOBJS)
+	rm -f $(LINUXOBJS) $(POLYOBJS)
 
 distclean: clean
-	rm -f $(LIB)
+	rm -f $(LIB) $(POLYLIB)
+
+polymult_sse2.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DSSE2 -msse2 -c -o polymult_sse2.o polymult.c
+
+polymult_avx.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DAVX -mavx -c -o polymult_avx.o polymult.c
+
+polymult_fma.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DFMA -mfma -c -o polymult_fma.o polymult.c
+
+polymult_avx512.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DAVX512 -mavx512f -c -o polymult_avx512.o polymult.c
 
 .c.o:
 	$(CC) $(CFLAGS) -c $<

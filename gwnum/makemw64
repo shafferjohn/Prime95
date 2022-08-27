@@ -12,6 +12,7 @@ CPPFLAGS = -I.. -I../qd -DX86_64 -DWINDOWS64 -O2
 AR = ar
 
 WIN64O = mw64/cpuid.o mw64/gwnum.o mw64/gwtables.o mw64/gwthread.o mw64/gwini.o mw64/gwbench.o mw64/gwutil.o mw64/gwdbldbl.o mw64/giants.o mw64/radix.o mw64/ecmstag1.o
+WIN64POLYO = mw64/polymult.o mw64/polymult_sse2.o mw64/polymult_avx.o mw64/polymult_fma.o mw64/polymult_avx512.o 
 
 WIN64OBJS = amd64/xmult1ax.obj amd64/xmult2.obj amd64/xmult2a_core.obj amd64/xmult2a_k8.obj amd64/xmult2ax.obj \
 		 amd64/xmult3.obj amd64/xmult3a_core.obj amd64/xmult3a_k8.obj amd64/xmult3ax.obj \
@@ -26,25 +27,27 @@ WIN64OBJS = amd64/xmult1ax.obj amd64/xmult2.obj amd64/xmult2a_core.obj amd64/xmu
 		 amd64/ymult1ax_core.obj amd64/ymult1ax_fma3.obj \
 		 amd64/ymult3.obj amd64/ymult3a_core.obj amd64/ymult3a_fma3.obj amd64/ymult3ax.obj \
 		 amd64/yr4_core.obj amd64/yr4_fma3.obj \
-		 amd64/yr4dwpn_core.obj amd64/yr4dwpn_fma3.obj amd64/yr4dwpn3_core.obj amd64/yr4dwpn3_fma3.obj
+		 amd64/yr4dwpn_core.obj amd64/yr4dwpn_fma3.obj amd64/yr4dwpn3_core.obj amd64/yr4dwpn3_fma3.obj \
 		 amd64/yr4dwpn4_core.obj amd64/yr4dwpn4_fma3.obj amd64/yr4dwpn5_core.obj amd64/yr4dwpn5_fma3.obj \
 		 amd64/zmult3.obj amd64/zmult3a_skx.obj amd64/zmult3ax.obj \
 		 amd64/zr4dwpn_skx.obj amd64/zr4dwpn2_skx.obj \
 		 amd64/cpuidhlp.obj amd64/mult.obj amd64/gianthlp.obj amd64/timeit.obj
 
 LIB = gwnum.a
+POLYLIB = polymult.a
 WIN64LIB = mw64/gwnum.a
+WIN64POLYLIB = mw64/polymult.a
 OBJDIR = mw64
 
 #########################################################################
 
-all: $(WIN64LIB) $(LIB)
+all: $(WIN64LIB) $(LIB) $(WIN64POLYLIB) $(POLYLIB)
 
 clean:
-	rm -f $(WIN64O) $(WIN64LIB)
+	rm -f $(WIN64O) $(WIN64LIB) $(WIN64POLYO) $(WIN64POLYLIB)
 
 distclean: clean
-	rm -f $(LIB)
+	rm -f $(LIB) $(POLYLIB)
 
 $(LIB): $(WIN64O)
 	cp $(WIN64LIB) .
@@ -55,6 +58,17 @@ $(WIN64LIB): $(WIN64OBJS)
 	test -d $(OBJDIR) || mkdir $(OBJDIR)
 	rm -f $(WIN64LIB)
 	$(AR) -rs $(WIN64LIB) $(WIN64OBJS)
+
+$(POLYLIB): $(WIN64POLYO)
+	cp $(WIN64POLYLIB) .
+	$(AR) -rs $(POLYLIB) $(WIN64POLYO)
+
+$(WIN64POLYLIB): $(WIN64POLYO)
+	# make sure our destination directory exists
+	test -d $(OBJDIR) || mkdir $(OBJDIR)
+	rm -f $(WIN64POLYLIB)
+	$(AR) -rs $(WIN64POLYLIB) $(WIN64POLYO)
+
 
 # Compile C code for 64-bit
 
@@ -85,5 +99,21 @@ mw64/gwdbldbl.o: gwdbldbl.cpp gwdbldbl.h
 mw64/giants.o: giants.c giants.h
 	$(CC) $(CFLAGS) -o mw64/giants.o -c giants.c
 
+mw64/radix.o: radix.c radix.h
+	$(CC) $(CFLAGS) -o mw64/radix.o -c radix.c
+
 mw64/ecmstag1.o: ecmstag1.c gwnum.h
 	$(CC) $(CFLAGS) -o mw64/ecmstag1.o -c ecmstag1.c
+
+mw64/polymult_sse2.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DSSE2 -msse2 -c -o mw64/polymult_sse2.o polymult.c
+
+mw64/polymult_avx.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DAVX -mavx -c -o mw64/polymult_avx.o polymult.c
+
+mw64/polymult_fma.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DFMA -mfma -c -o mw64/polymult_fma.o polymult.c
+
+mw64/polymult_avx512.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DAVX512 -mavx512f -c -o mw64/polymult_avx512.o polymult.c
+

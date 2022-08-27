@@ -71,8 +71,8 @@ double *zr4dwpn_build_pass1_table (
 	if (gwdata->PASS1_SIZE == 0) {
 
 /* Output the 8 column multipliers and 8 inverse column multipliers used in real pass 1 wrapper routines. */
-/* Unlike two-pass FFTs, the 1/FFTLEN correction is applied in the inverse group multiplier rather than the */
-/* inverse column multiplier.  This lets us save one clock in the unfft wrapper. */
+/* We used to apply the 2/FFTLEN correction in the group multiplier rather than the inverse column multiplier saving one clock in the unfft wrapper. */
+/* However, this corrupted FFT(1) which is bad for gwmulmuladd and polymult. */
 
 		if (!gwdata->ALL_COMPLEX_FFT) {
 			double *weights, *inverse_weights;
@@ -80,7 +80,7 @@ double *zr4dwpn_build_pass1_table (
 			inverse_weights = weights + 8;
 			table = inverse_weights + 8;
 			for (i = 0; i < 8; i++) {
-				gwfft_weights3 (gwdata->dd_data, i, weights, inverse_weights, NULL);
+				gwfft_weights3 (gwdata->dd_data, i, weights, NULL, inverse_weights);
 				weights++;
 				inverse_weights++;
 			}
@@ -427,7 +427,7 @@ double *zr4dwpn_build_pass1_table (
 			N = N * 7;
 
 /* Output the sin/cos data for the complex sections, (the zr7_seven_complex_djbfft building block). */
-/* Use the special7 version which multiplies sine values by .434^(2/3) which saves 2 clocks in 14 reals building block. */
+/* Use the special7 version which multiplies sine values by .975 which saves 2 clocks in 14 reals building block. */
 
 			for (j = 0; j < N / 7; j += pass1_increment) {
 				for (i = 0; i < gwdata->PASS1_CACHE_LINES; i++) {
@@ -775,7 +775,7 @@ double *zr4_build_pass2_complex_table (
 
 /* If the pass 2 size is divisible by 7, then the initial levels do radix-7 steps which requires three sin/cos values. */
 /* The first levels in pass 2 have an upper_avx512_word of one.  Use the special7 version which multiplies sine values */
-/* by .434^(2/3) to save 2 clocks in 14 reals building block. */
+/* by .975 to save 2 clocks in 14 reals building block. */
 
 	while (N % 7 == 0) {
 		for (i = 0; i < N / 7; i += 8) {
@@ -938,8 +938,7 @@ double *zr4_build_pass2_real_table (
 		}
 	}
 
-/* Output sin/cos values for 14-real macros.  Use the special7 version which multiplies sine values */
-/* by .434^(2/3) to save 2 clocks in 14 reals building block. */
+/* Output sin/cos values for 14-real macros.  Use the special7 version which multiplies sine values by .975 to save 2 clocks in 14 reals building block. */
 
 	while (N % 7 == 0) {
 		for (j = 0; j < N / 7; j += 8) {
@@ -1309,14 +1308,12 @@ double *zr4dwpn_build_norm_table (
 
 //BUG				if (gwdata->ZERO_PADDED_FFT && grp >= gwdata->FFTLEN / 2) continue;
 
-/* Call quad-precision routine to compute group multipliers.  For one-pass FFTs, we save a multiply in the unfft wrapper */
-/* by shifting the multiplication by 2/FFTLEN to the group multiplier.  For two-pass all-complex FFTs, we save a multiply */
-/* by precomputing the group multiplier times the sine value of the roots-of-minus-one premultiplier. */
+/* Call quad-precision routine to compute group multipliers.  For one-pass FFTs, we used to save a multiply in the unfft wrapper */
+/* by shifting the multiplication by 2/FFTLEN to the group multiplier but this corrupts FFT(1) which is bad for gwmulmuladd and polymult. */
+/* For two-pass all-complex FFTs, we save a multiply by precomputing the group multiplier times the sine value of the roots-of-minus-one premultiplier. */
 
 				grp = i + j + k + avx512_word;
-				if (gwdata->PASS1_SIZE == 0)
-					ttp = gwfft_weight_over_sqrt_fftlen (gwdata->dd_data, grp);
-				else if (gwdata->PASS1_SIZE && gwdata->ALL_COMPLEX_FFT) {
+				if (gwdata->PASS1_SIZE && gwdata->ALL_COMPLEX_FFT) {
 					/* Compute the roots-of-minus-one premultiplier.  The root-of-minus-one */
 					/* premultiplier is for 2N, and a root-of-minus-one-of-2N is the same as */
 					/* a root unity for 4N (where N is the number of complex values = FFTLEN/2). */

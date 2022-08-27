@@ -216,18 +216,18 @@ void gen_data (gwhandle *gwdata, gwnum x, giant g)
 //	len = 1; g->n[0] = 30000;
 	g->sign = len;
 
-	// Read an LLR cert file
-	if (0) {
-		int fd;
-		fd = _open ("foo", _O_BINARY | _O_RDONLY);
-		if (fd > 0) {
+// Read an LLR cert file
+
+	int fd = _open ("foo", _O_BINARY | _O_RDONLY);
+	if (fd > 0) {
 		_read (fd, g->n, 16); //ignore 16 bytes
 		_read (fd, &len, 4); //length in bytes
 		_read (fd, g->n, len); //data
 		memset ((char*) g->n + len, 0, 8);
 		g->sign = divide_rounding_up (len, 4);
-		}
 	}
+
+// Convert to gwnum
 
 	specialmodg (gwdata, g);
 	gianttogw (gwdata, g, x);
@@ -430,8 +430,7 @@ void test_it_all (
 		gwsmalladd (&gwdata, GWSMALLADD_MAX, x);
 		gwsmallmul (&gwdata, GWSMALLMUL_MAX-1.0, x);
 
-/* Do some multiplies to make sure that the adds and subtracts above */
-/* normalized properly. */
+/* Do some multiplies to make sure that the adds and subtracts above normalized properly. */
 
 		gwfft (&gwdata, x, x);
 		gwfftfftmul (&gwdata, x, x, x);
@@ -534,7 +533,7 @@ void test_it (
 	num_inverses = IniSectionGetInt (INI_FILE, "QA", "NUM_INVERSES", 0);
 	compare_counter = 0;
 
-/* Alloc and init numbers */
+/* Alloc numbers */
 
 	x = gwalloc (gwdata);
 	x2 = gwalloc (gwdata);
@@ -614,6 +613,8 @@ void test_it (
 		specialmodg (gwdata, g);
 		compare_with_text_and_int (thread_num, gwdata, x, g, "ExtraTest", 4);
 	}
+
+/* Init with random starting QA values */
 
 	gen_data (gwdata, x, g);
 	if (CHECK_OFTEN) compare (thread_num, gwdata, x, g);
@@ -805,6 +806,17 @@ void test_it (
 	specialmodg (gwdata, g);
 	if (CHECK_OFTEN) compare_with_text (thread_num, gwdata, x, g, "mul mul-const careful");
 	gwsetnormroutine (gwdata, 0, 1, 0);
+
+/* Test gwunfft */
+
+	gwfft (gwdata, x, x);
+	gwunfft (gwdata, x, x);
+	if (CHECK_OFTEN) compare_with_text (thread_num, gwdata, x, g, "unfft1");
+	gwmul3 (gwdata, x, x, x, GWMUL_STARTNEXTFFT);
+	gwunfft (gwdata, x, x);
+	squaregi (&gwdata->gdata, g);
+	specialmodg (gwdata, g);
+	if (CHECK_OFTEN) compare_with_text (thread_num, gwdata, x, g, "unfft2");
 
 /* Test gwaddquick, gwsubquick */
 

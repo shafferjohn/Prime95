@@ -242,15 +242,15 @@ struct gwasm_data {
 		double	ZMM_P951;		/* Used in 5-complex, 10-real, 10-complex, 20-real macros */
 		double	ZMM_P588_P951;		/* Used in 5-complex, 10-real, 10-complex, 20-real macros */
 
-		double	ZMM_P623;		/* Used in 7-complex, 14-real macros */
-		double	ZMM_P901;		/* Used in 7-complex, 14-real macros */
-		double	ZMM_P975;		/* Used in 7-complex, 14-real macros */
-		double	ZMM_P223;		/* Used in 7-complex, 14-real macros */
+		double	UNUSED_P623;
+		double	UNUSED_P901;
+		double	UNUSED_P975;
+		double	UNUSED_P223;
 		double	ZMM_P434_P975;		/* Used in 7-complex, 14-real macros */
 		double	ZMM_P782_P975;		/* Used in 7-complex, 14-real macros */
-		double	ZMM_P901_P975;		/* Used in 14-real macros */
-		double	ZMM_P623_P975;		/* Used in 14-real macros */
-		double	ZMM_P223_P975;		/* Used in 14-real macros */
+		double	ZMM_P901_P975;		/* Used in 7-complex, 14-real macros */
+		double	ZMM_P623_P975;		/* Used in 7-complex, 14-real macros */
+		double	ZMM_P223_P975;		/* Used in 7-complex, 14-real macros */
 		double	ZMM_P1_P975;		/* Used in 7-complex, 14-real macros */
 
 		double	ZMM_B;			/* Used in first and last levels of two pass FFT */

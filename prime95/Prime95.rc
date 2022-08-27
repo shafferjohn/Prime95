@@ -1,6 +1,6 @@
 // Microsoft Visual C++ generated resource script.
 //
-// Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
+// Copyright 1995-2022 Mersenne Research, Inc.  All rights reserved
 //
 
 #include "resource.h"
@@ -260,7 +260,7 @@ BEGIN
     LTEXT           "GIMPS: Mersenne Prime Search",IDC_STATIC,40,9,155,8,SS_NOPREFIX
     LTEXT           "Web site: http://mersenne.org",IDC_LINK,40,19,114,10
     LTEXT           "app string",IDC_APP_STRING,40,31,185,8
-    LTEXT           "Copyright © 1996-2021 Mersenne Research, Inc.",IDC_STATIC,40,41,179,8
+    LTEXT           "Copyright © 1996-2022 Mersenne Research, Inc.",IDC_STATIC,40,41,179,8
     LTEXT           "Author: George Woltman",IDC_STATIC,40,51,128,8
     LTEXT           "Email:  woltman@alum.mit.edu",IDC_STATIC,40,61,161,8
     DEFPUSHBUTTON   "OK",IDOK,199,7,32,14,WS_GROUP
@@ -642,8 +642,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 30,7,1,0
- PRODUCTVERSION 30,7,0,0
+ FILEVERSION 30,8,1,0
+ PRODUCTVERSION 30,8,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -659,12 +659,12 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "FileDescription", "PRIME95 Application"
-            VALUE "FileVersion", "30, 7, 1, 0"
+            VALUE "FileVersion", "30, 8, 1, 0"
             VALUE "InternalName", "PRIME95"
-            VALUE "LegalCopyright", "Copyright © 1996-2021, Mersenne Research Inc."
+            VALUE "LegalCopyright", "Copyright © 1996-2022, Mersenne Research Inc."
             VALUE "OriginalFilename", "PRIME95.EXE"
             VALUE "ProductName", "PRIME95 Application"
-            VALUE "ProductVersion", "30, 7, 0, 0"
+            VALUE "ProductVersion", "30, 8, 0, 0"
         END
     END
     BLOCK "VarFileInfo"

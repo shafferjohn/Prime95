@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2022 Mersenne Research, Inc.  All rights reserved
 |
 | This file contains routines and global variables that are common for
 | all operating systems the program has been ported to.  It is included
@@ -11,6 +11,7 @@
 +---------------------------------------------------------------------*/
 
 #include "ecm.h"
+#include "exponentiate.h"
 
 /* Globals for error messages */
 
@@ -507,11 +508,16 @@ void SetPriority (
 /* If total num worker cores < num compute cores we will give each worker its own CPU.  There is some weak anecdotal */
 /* evidence that CPU 0 is reserved for interrupt processing on some OSes and architectures without efficiency cores, */
 /* so we leave CPU #0 unused (hoping hwloc assigns CPU numbers the same way the OS does). */
+/* This post, https://www.mersenneforum.org/showpost.php?p=599873&postcount=387, reports downsides to reserving core 0 for OS use. */
+/* Basically, reserving core 0 might cause a worker to be spread across multiple L2 caches rather than a single shared L2 cache. */
+/* In version 30.8 build 11, I've switched to making reserving core 0 optional rather than the default. */
 
-		if (worker_core_count < HW_NUM_COMPUTE_CORES && HW_NUM_COMPUTE_CORES == HW_NUM_CORES) {
+		if (worker_core_count < HW_NUM_COMPUTE_CORES && HW_NUM_COMPUTE_CORES == HW_NUM_CORES && IniGetInt (INI_FILE, "ReserveCore0", 0)) {
 			bind_type = 0;			// Set affinity to a specific physical CPU core
-			// Map prime95 core number and auxiliary thread number to hwloc core number
-			core = map_aux_to_core (cores_used_by_lower_workers + 1, info->aux_thread_num, info->normal_work_hyperthreading);
+			// Map prime95 core number and auxiliary thread number to hwloc core number.
+			// Normally this works great, but now P-1 can request extra threads (in case hyperthreading helps in polymult) which lets
+			// aux_thread_num exceed the number of cores.  Thus, we do a modulo to make the core numbering work out OK.
+			core = map_aux_to_core (cores_used_by_lower_workers + 1, info->aux_thread_num % HW_NUM_CORES, info->normal_work_hyperthreading);
 			break;
 		}
 
@@ -519,8 +525,10 @@ void SetPriority (
 
 		if (worker_core_count <= HW_NUM_CORES) {
 			bind_type = 0;			// Set affinity to a specific physical CPU core
-			// Map prime95 core number and auxiliary thread number to hwloc core number
-			core = map_aux_to_core (cores_used_by_lower_workers, info->aux_thread_num, info->normal_work_hyperthreading);
+			// Map prime95 core number and auxiliary thread number to hwloc core number.
+			// Normally this works great, but now P-1 can request extra threads (in case hyperthreading helps in polymult) which lets
+			// aux_thread_num exceed the number of cores.  Thus, we do a modulo to make the core numbering work out OK.
+			core = map_aux_to_core (cores_used_by_lower_workers, info->aux_thread_num % HW_NUM_CORES, info->normal_work_hyperthreading);
 			break;
 		}
 
@@ -542,7 +550,7 @@ void SetPriority (
 /*	(3,5,7),(4,6)	Run main worker thread on logical CPUs #3, #5, & #7, run aux thread on logical CPUs #4 & #6 */
 /*	[3,5-7],(4,6)	Run main worker thread on logical CPUs #3, #5, #6, & #7, run aux thread on logical CPUs #4 & #6 */
 
-	if (bind_type == 2) {		// Find the subset of the logical CPU string for this auxillary thread
+	if (bind_type == 2) {		// Find the subset of the logical CPU string for this auxilary thread
 		uint32_t i;
 		const char *p;
 		for (i = 0, p = logical_CPU_string; i <= info->aux_thread_num && *p; i++) {
@@ -579,6 +587,7 @@ void SetPriority (
 
 	if (HW_NUM_CORES > 1 && info->verbosity >= 1) {
 		if (info->aux_hyperthread) sprintf (buf, "Setting affinity to run prefetching hyperthread on ");
+		else if (info->aux_polymult) sprintf (buf, "Setting affinity to run polymult helper thread on ");
 		else if (info->aux_thread_num == 0) strcpy (buf, "Setting affinity to run worker on ");
 		else sprintf (buf, "Setting affinity to run helper thread %d on ", info->aux_thread_num);
 		if (bind_type == 0) sprintf (buf+strlen(buf), "CPU core #%d\n", core+1);
@@ -701,17 +710,18 @@ void SetAuxThreadPriority (int aux_thread_num, int action, void *data)
 
 /* Handle thread start and hyperthread start action.  Set the thread priority. */
 
-	if (action == 0 || action == 10) {
+	if (action == 0 || action == 10 || action == 20) {
 		struct PriorityInfo sp_info;
 		memcpy (&sp_info, data, sizeof (struct PriorityInfo));
 		sp_info.aux_thread_num = aux_thread_num;
 		sp_info.aux_hyperthread = (action == 10);
+		sp_info.aux_polymult = (action == 20);
 		SetPriority (&sp_info);
 	}
 
 /* Handle thread terminate and hyperthread terminate action.  Remove thread handle from list of active worker threads. */
 
-	if (action == 1 || action == 11) {
+	if (action == 1 || action == 11 || action == 21) {
 		registerThreadTermination ();
 	}
 }
@@ -1122,9 +1132,9 @@ void read_mem_info (void)
 		p = p + 6;
 	}
 
-/* Get the maximum number of workers that can use lots of memory.  Default is AVAIL_MEM / 1GB rounded off. */
+/* Get the maximum number of workers that can use lots of memory.  Default is one. */
 
-	MAX_HIGH_MEM_WORKERS = IniGetTimedInt (LOCALINI_FILE, "MaxHighMemWorkers", (AVAIL_MEM + 500) / 1000, &seconds);
+	MAX_HIGH_MEM_WORKERS = IniGetTimedInt (LOCALINI_FILE, "MaxHighMemWorkers", 1, &seconds);
 	if (seconds && (seconds_until_reread == 0 || seconds < seconds_until_reread)) seconds_until_reread = seconds;
 	if (MAX_HIGH_MEM_WORKERS < 1) MAX_HIGH_MEM_WORKERS = 1;
 
@@ -1179,9 +1189,7 @@ void set_default_memory_usage (
 	MEM_RESTART_FLAGS[thread_num] &= ~MEM_RESTART_IF_MORE;
 }
 
-/* Set flag that restarts worker if max mem changes. */
-/* Needed for Pfactor so that we can compute new bounds */
-/* should max mem change. */
+/* Set flag that restarts worker if max mem changes.  Needed for Pfactor so that we can compute new bounds should max mem change. */
 
 void set_restart_if_max_memory_change (
 	int	thread_num)
@@ -1189,9 +1197,7 @@ void set_restart_if_max_memory_change (
 	MEM_RESTART_FLAGS[thread_num] |= MEM_RESTART_MAX_MEM_CHANGE;
 }
 
-/* Set flag that restarts worker if max mem changes. */
-/* Needed for Pfactor so that we can compute new bounds */
-/* should max mem change. */
+/* Clear flag that restarts worker if max mem changes.  Needed for Pfactor so that we can compute new bounds should max mem change. */
 
 void clear_restart_if_max_memory_change (
 	int	thread_num)
@@ -1234,30 +1240,28 @@ int avail_mem_not_sufficient (
 	return (STOP_NOT_ENOUGH_MEM);
 }
 
-/* Internal routine that returns TRUE if other threads are using lots of */
-/* the available memory.  We use this to delay ECM and P-1 stage 2 while other */
-/* stage 2's are running. */
+/* Internal routine that returns TRUE if other threads are using lots of available memory.  */
+/* We use this to delay ECM and P-1 stage 2 while other stage 2's are running. */
 
 int are_threads_using_lots_of_memory (
 	int	thread_num)
 {
 	int	max_high_mem, i;
+	unsigned int high_mem_threshold;
 
-/* Get the user configurable count of workers that are allowed to use */
-/* lots of memory.  If this equals the number of workers (default) then */
-/* there is no need to scan the workers */
+/* Get the user configurable count of workers that are allowed to use lots of memory. */
+/* If this equals the number of workers then there is no need to scan the workers. */
 
 	max_high_mem = MAX_HIGH_MEM_WORKERS;
 	if (max_high_mem >= (int) NUM_WORKER_THREADS) return (FALSE);
 
 /* If there are enough threads with variable memory usage, then return TRUE. */
-/* To guard against an ECM stage 2 that really isn't using a whole lot of */
-/* memory, also require the thread to be using 50MB. */
 
+	high_mem_threshold = IniGetInt (LOCALINI_FILE, "HighMemThreshold", 250);
 	for (i = 0; i < (int) NUM_WORKER_THREADS; i++)
 		if (i != thread_num &&
-		    (MEM_FLAGS[i] & MEM_VARIABLE_USAGE || MEM_FLAGS[i] & MEM_WILL_BE_VARIABLE_USAGE) &&
-		    MEM_IN_USE[i] >= (unsigned int) IniGetInt (LOCALINI_FILE, "HighMemThreshold", 50)) {
+		    ((MEM_FLAGS[i] & MEM_WILL_BE_VARIABLE_USAGE) ||
+		     (MEM_FLAGS[i] & MEM_VARIABLE_USAGE && MEM_IN_USE[i] >= high_mem_threshold))) {
 			max_high_mem--;
 			if (max_high_mem == 0) return (TRUE);
 		}
@@ -1275,8 +1279,7 @@ int are_threads_using_lots_of_memory (
 
 int set_memory_usage (
 	int	thread_num,
-	int	flags,		/* Valid values are MEM_VARIABLE_USAGE */
-				/* and MEM_USAGE_NOT_SET */
+	int	flags,		/* Valid values are MEM_VARIABLE_USAGE and MEM_USAGE_NOT_SET */
 	unsigned long memory)	/* Memory in use (in MB) */
 {
 	int	i, best_thread, worst_thread, all_threads_set;
@@ -1326,9 +1329,9 @@ int set_memory_usage (
 
 /* If we have allocated more than the maximum allowable, then stop a thread to free up some memory.  We also make sure we are using */
 /* significantly more memory than we should be so that minor fluctuations in memory usage by the fixed threads do not cause needless restarts. */
-/* The 64MB threshold is arbitrary. */
+/* The 250MB threshold is arbitrary. */
 
-	if (mem_usage > AVAIL_MEM + 64) {
+	if (mem_usage > AVAIL_MEM + 250) {
 
 /* If the current thread is the worst thread (should only happen if there has */
 /* been a wild change in other thread's memory usage between the call to */
@@ -1401,12 +1404,12 @@ int set_memory_usage (
 
 /* If a worker is waiting for a reduction in the number of workers */
 /* using lots of memory, then check to see if it can run now. */
-/* The 32 is an arbitrary figure that makes sure a significant amount */
+/* The 100 is an arbitrary figure that makes sure a significant amount */
 /* of new memory is available before restarting worker threads. */
 /* Be careful subtracting from AVAIL_MEM.  Since it is an unsigned long */
 /* if it goes negative it will become a large positive value instead */	
 
-	if (all_threads_set && AVAIL_MEM > mem_usage + 32 ) {
+	if (all_threads_set && AVAIL_MEM > mem_usage + 100) {
 		for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
 			if (! (MEM_RESTART_FLAGS[i] & MEM_RESTART_TOO_MANY_HIGHMEM)) continue;
 			if (are_threads_using_lots_of_memory (i)) continue;
@@ -1419,7 +1422,7 @@ int set_memory_usage (
 /* then if we have enough free memory restart a work unit that could use */
 /* more memory. */
 
-	if (all_threads_set && AVAIL_MEM > mem_usage + 32) {
+	if (all_threads_set && AVAIL_MEM > mem_usage + 100) {
 		best_thread = -1;
 		for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
 			if (MEM_RESTART_FLAGS[i] & MEM_RESTART_IF_MORE &&
@@ -1436,7 +1439,7 @@ int set_memory_usage (
 /* then if we have enough free memory restart a thread that couldn't */
 /* run a work unit due to lack of available memory. */
 
-	if (all_threads_set && AVAIL_MEM > mem_usage + 32) {
+	if (all_threads_set && AVAIL_MEM > mem_usage + 100) {
 		best_thread = -1;
 		for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
 			if (MEM_RESTART_FLAGS[i] & MEM_RESTART_MORE_AVAIL &&
@@ -1487,8 +1490,6 @@ unsigned long max_mem (
 
 /* Return memory (in MB) now available for a variable usage thread. */
 /* This routine takes into account the memory used by other worker threads. */
-/* NOTE: caller is expected to have called are_threads_using_lots_of_memory */
-/* to make sure too many workers don't become high memory users. */
 
 int avail_mem (
 	int	thread_num,
@@ -1514,17 +1515,18 @@ int avail_mem (
 		return (STOP_NOT_ENOUGH_MEM);
 	}
 
-/* Check if we must wait for more memory to become available.  This happens when we reach the maximum allowable number of threads using a lot of memory. */
-
-	if (are_threads_using_lots_of_memory (thread_num)) {
-		OutputStr (thread_num, "Exceeded limit on number of workers that can use lots of memory.\n");
-		MEM_RESTART_FLAGS[thread_num] |= MEM_RESTART_TOO_MANY_HIGHMEM;
-		return (STOP_NOT_ENOUGH_MEM);
-	}
-
 /* Obtain lock before accessing memory global variables */
 
 	gwmutex_lock (&MEM_MUTEX);
+
+/* Check if we must wait for more memory to become available.  This happens when we reach the maximum allowable number of threads using a lot of memory. */
+
+	if (are_threads_using_lots_of_memory (thread_num)) {
+		MEM_RESTART_FLAGS[thread_num] |= MEM_RESTART_TOO_MANY_HIGHMEM;
+		gwmutex_unlock (&MEM_MUTEX);
+		OutputStr (thread_num, "Exceeded limit on number of workers that can use lots of memory.\n");
+		return (STOP_NOT_ENOUGH_MEM);
+	}
 
 /* Set flag saying this will be a variable usage thread.  Remember the */
 /* "good enough" value as it will be helpful in determining the best */
@@ -2229,8 +2231,7 @@ void checkPauseWhileRunning (void)
 
 	checkPauseListCallback ();
 
-/* Examine pause info entries to see if a period of forced low memory usage */
-/* should be in effect. */
+/* Examine pause info entries to see if a period of forced low memory usage should be in effect. */
 
 	lowmem = NULL;
 	for (p = PAUSE_DATA; p != NULL; p = p->next) {
@@ -2241,10 +2242,14 @@ void checkPauseWhileRunning (void)
 	STOP_FOR_LOW_MEMORY = lowmem;
 	if (p == NULL && STOP_FOR_LOW_MEMORY != NULL) {
 		char	buf[150];
-		sprintf (buf, "Entering a period of low memory usage because %s is running.\n",
-			 lowmem->matching_program);
+		sprintf (buf, "Entering a period of low memory usage because %s is running.\n", lowmem->matching_program);
 		OutputStr (MAIN_THREAD_NUM, buf);
 		stop_high_memory_workers ();
+	}
+	if (p != NULL && STOP_FOR_LOW_MEMORY != NULL && p != STOP_FOR_LOW_MEMORY) {
+		char	buf[150];
+		sprintf (buf, "Now using little memory because %s is running.\n", lowmem->matching_program);
+		OutputStr (MAIN_THREAD_NUM, buf);
 	}
 	if (p != NULL && STOP_FOR_LOW_MEMORY == NULL) {
 		restart_high_memory_workers ();
@@ -2283,6 +2288,11 @@ void checkPauseWhileRunning (void)
 	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
 		p = STOP_FOR_PAUSE[i];
 		STOP_FOR_PAUSE[i] = workers_to_pause[i];
+		if (p != NULL && STOP_FOR_PAUSE[i] != NULL && p != STOP_FOR_PAUSE[i]) {
+			char	buf[140];
+			sprintf (buf, "Now paused because %s is running.\n", STOP_FOR_PAUSE[i]->matching_program);
+			OutputStr (i, buf);
+		}
 		if (p != NULL && STOP_FOR_PAUSE[i] == NULL)
 			restart_one_waiting_worker (i, RESTART_END_PAUSE);
 	}
@@ -2297,8 +2307,7 @@ void checkPauseWhileRunning (void)
 }
 
 /* This routine is called by the OS-specific routine that gets the process */
-/* list.  It returns TRUE if an active process is in the pause-while-running */
-/* list. */
+/* list.  It returns TRUE if an active process is in the pause-while-running list. */
 
 void isInPauseList (
 	char	*program_name)
@@ -2309,8 +2318,8 @@ void isInPauseList (
 	strcpy (buf, program_name);
 	strupper (buf);
 	for (p = PAUSE_DATA; p != NULL; p = p->next) {
-		if (p->program_name != NULL &&
-		    strstr (buf, p->program_name) != NULL) {
+		if (p->program_name != NULL && p->matching_program[0] == 0 && strstr (buf, p->program_name) != NULL) {
+			strcpy (buf, program_name);		// Undo the strupper
 			buf[sizeof(p->matching_program)-1] = 0;
 			strcpy (p->matching_program, buf);
 		}
@@ -5467,10 +5476,12 @@ begin:	factor_found = 0;
 	    unsigned int end_bits;
 	    unsigned long iters, iters_r, iters_just_processed;
 
-/* Advance one bit at a time to minimize wasted time looking for a */
-/* second factor after a first factor is found. */
+/* Advance one bit at a time to minimize wasted time looking for a second factor after a first factor is found. */
+/* 2022-03-17:  Changed from 2^50 to 2^60 for one-bit-at-a-time advancement.  The change to multi-threaded TF had the unintended */
+/* side effect of a single call factorChunk testing multiple bit levels for large Mersennes.  As a result a found factor was */
+/* reported multiple times when not stopping on a found factor. */
 
-	    end_bits = (bits < 50) ? 50 : bits + 1;
+	    end_bits = (bits < 60) ? 60 : bits + 1;
 	    if (end_bits > test_bits) end_bits = test_bits;
 	    sprintf (w->stage, "TF%d", end_bits);
 
@@ -9528,7 +9539,7 @@ int primeBenchMultipleWorkersInternal (
 					if (node == HW_NUM_COMPUTE_THREADING_NODES) {
 						nodes_left += HW_NUM_THREADING_NODES - HW_NUM_COMPUTE_THREADING_NODES;
 						cores_left += HW_NUM_CORES - HW_NUM_COMPUTE_CORES;
-						unused_cores_left += HW_NUM_CORES - cpus;
+						if (cpus > (int) HW_NUM_COMPUTE_CORES) unused_cores_left += HW_NUM_CORES - cpus;
 						workers_left += efficiency_workers;
 						if (efficiency_workers == 0 && cpus > (int) HW_NUM_COMPUTE_CORES) nodes_to_use = nodes_left;
 					}
@@ -9540,7 +9551,7 @@ int primeBenchMultipleWorkersInternal (
 
 				// Assign nodeset cores to the nodeset workers
 				for ( ; workers_this_nodeset; workers_this_nodeset--) {
-				    int	cores_to_use = cores_this_nodeset / workers_this_nodeset;
+				    int	cores_to_use = (cores_this_nodeset - unused_cores_this_nodeset) / workers_this_nodeset;
 				    info[worker_num].main_thread_num = thread_num;
 				    info[worker_num].fftlen = fftlen;
 				    info[worker_num].plus1 = plus1;
@@ -10602,7 +10613,6 @@ abort_proof:
 	ps->proof_power = 0;
 }
 
-#include "exponentiate.c"
 #include "proof_hash.c"
 
 // Read a residue from the big residues file or emergency memory

@@ -8,11 +8,11 @@
 | multiplications.  However, you can use these routines without using
 | the rest of the gwnum package if you so desire.
 |
-| NOTE:  MFC users may not be able to use the thread creation routines as
+| NOTE:  MFC users may not be able to use the thread creation routines
 | because we call the C runtime library thread create rather than the
 | MFC thread create routine. 
 |
-|  Copyright 2006 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2006-2021 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 #ifndef _GWTHREAD_H
@@ -32,9 +32,9 @@ extern "C" {
 typedef void *gwmutex;			/* Definition of a mutex */
 
 void gwmutex_init (gwmutex *mutex);	/* Mutex to init */
-void gwmutex_lock (gwmutex *mutex);	/* Mutex to lock */
-void gwmutex_unlock (gwmutex *mutex);	/* Mutex to unlock */
-void gwmutex_destroy (gwmutex *mutex);	/* Mutex to destroy */
+void gwmutex_lock (gwmutex *mutex);	/* Mutex to lock.  This is a no-op if *mutex is null. */
+void gwmutex_unlock (gwmutex *mutex);	/* Mutex to unlock.  This is a no-op if *mutex is null. */
+void gwmutex_destroy (gwmutex *mutex);	/* Mutex to destroy.  This is a no-op if *mutex is null. */
 
 typedef void *gwevent;			/* Definition of an event handle */
 
