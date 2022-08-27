@@ -100,7 +100,7 @@ func main() {
 		data = append(data, p)
 	})
 
-	content := "\n" + caption + "\n"
+	content := "\n" + caption + "\n\n"
 	content += "|" + strings.Join(ths, "|") + "|\n"
 	for i := 0; i < len(ths); i++ {
 		content += "|----"
