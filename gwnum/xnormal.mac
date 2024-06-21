@@ -1,4 +1,4 @@
-; Copyright 2000-2016 - Mersenne Research, Inc.  All rights reserved.
+; Copyright 2000-2024 - Mersenne Research, Inc.  All rights reserved.
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -1364,6 +1364,21 @@ xnorm012_1d_zpad MACRO const, base2
 	;; to the lower FFT data later (after multiplying by -c).
 const	mulsd	xmm3, Q XMM_MULCONST
 
+	;; Work on zero-pad addin value.
+	movsd	xmm4, Q ADDIN_VALUE		;; Load the add in value
+const	mulsd	xmm4, Q XMM_MULCONST		;; Multiply the add in value by the small mul const
+	addsd	xmm4, POSTADDIN_VALUE		;; Add the post-mul-by-const addin value
+	;; when c = -1, 1 = b^n
+	;; when c = 1, -1 = b^n, 1 = -b^n
+	;; when c = -3, 3 = b^n, 1 = b^n - 2
+	;; when c = 3, -3 = b^n, 3 = -b^n, 1 = -b^n - 2
+	;; The "- 2" has been precomputed in ZPAD_LSW_ADJUST.  Add ADDIN_VALUE * mul-by-const * ZPAD_LSW_ADJUST into the least significant FFT word
+	mov	rsi, DESTARG			;; Address of squared number
+	movsd	xmm0, Q ZPAD_LSW_ADJUST
+	mulsd	xmm0, xmm4
+	addsd	xmm0, [rsi]
+	movsd	[rsi], xmm0
+
 	;; Multiply ZPAD0 through ZPAD6 by const * -c.  This, in essense,
 	;; wraps this data from above the FFT data area to the halfway point.
 	;; Later on we'll divide this by K to decide which data needs wrapping
@@ -1375,11 +1390,11 @@ const	mulsd	xmm3, Q XMM_MULCONST
 
 	movzx	rax, BYTE PTR [rdi]	;; Load big vs. little flags
 	movsd	xmm0, ZPAD0		;; Load values1
-	addsd	xmm0, ADDIN_VALUE	;; Add in the requested value
 	subsd	xmm5, xmm5		;; Create a zero high FFT data carry
 	single_split_lower_zpad_word base2, xmm0, xmm5, xmm1, rax
 no const mulsd	xmm0, Q XMM_MINUS_C
 const	mulsd	xmm0, Q XMM_MINUS_C_TIMES_MULCONST
+	addsd	xmm0, xmm4		;; Apply rest of ADDIN_VALUE * mul-by-const here (the FFT half way point)
 	round_zpad7_word base2, xmm0, xmm2, xmm1, rax
 	movsd	ZPAD0, xmm0
 
@@ -3111,6 +3126,21 @@ xnorm012_2d_zpad_part1_cmn MACRO const, base2
 	;; to the lower FFT data later (after multiplying by -c).
 const	mulsd	xmm3, Q XMM_MULCONST
 
+	;; Work on zero-pad addin value.
+	movsd	xmm4, Q ADDIN_VALUE		;; Load the add in value
+const	mulsd	xmm4, Q XMM_MULCONST		;; Multiply the add in value by the small mul const
+	addsd	xmm4, POSTADDIN_VALUE		;; Add the post-mul-by-const addin value
+	;; when c = -1, 1 = b^n
+	;; when c = 1, -1 = b^n, 1 = -b^n
+	;; when c = -3, 3 = b^n, 1 = b^n - 2
+	;; when c = 3, -3 = b^n, 3 = -b^n, 1 = -b^n - 2
+	;; The "- 2" has been precomputed in ZPAD_LSW_ADJUST.  Add ADDIN_VALUE * mul-by-const * ZPAD_LSW_ADJUST into the least significant FFT word
+	mov	rsi, DESTARG			;; Address of squared number
+	movsd	xmm0, Q ZPAD_LSW_ADJUST
+	mulsd	xmm0, xmm4
+	addsd	xmm0, [rsi]
+	movsd	[rsi], xmm0
+
 	;; Multiply ZPAD0 through ZPAD6 by const * -C.  This, in essense,
 	;; wraps this data from above the FFT data area to the halfway point.
 	;; Later on we'll divide this by K to decide which data needs wrapping
@@ -3122,11 +3152,11 @@ const	mulsd	xmm3, Q XMM_MULCONST
 
 	movzx	rax, BYTE PTR [rdi]	;; Load big vs. little flags
 	movsd	xmm0, ZPAD0		;; Load values1
-	addsd	xmm0, ADDIN_VALUE	;; Add in the requested value
 	subsd	xmm5, xmm5		;; Create a zero high FFT carry to add in
 	single_split_lower_zpad_word base2, xmm0, xmm5, xmm1, rax
 no const mulsd	xmm0, Q XMM_MINUS_C
 const	mulsd	xmm0, Q XMM_MINUS_C_TIMES_MULCONST
+	addsd	xmm0, xmm4		;; Apply rest of ADDIN_VALUE * mul-by-const here (the FFT half way point)
 	round_zpad7_word base2, xmm0, xmm2, xmm1, rax
 	movsd	ZPAD0, xmm0
 
@@ -4784,6 +4814,21 @@ xnorm012_wpn_zpad_part1_cmn MACRO const, base2
 	;; to the lower FFT data later (after multiplying by -c).
 const	mulsd	xmm3, Q XMM_MULCONST
 
+	;; Work on zero-pad addin value.
+	movsd	xmm4, Q ADDIN_VALUE		;; Load the add in value
+const	mulsd	xmm4, Q XMM_MULCONST		;; Multiply the add in value by the small mul const
+	addsd	xmm4, POSTADDIN_VALUE		;; Add the post-mul-by-const addin value
+	;; when c = -1, 1 = b^n
+	;; when c = 1, -1 = b^n, 1 = -b^n
+	;; when c = -3, 3 = b^n, 1 = b^n - 2
+	;; when c = 3, -3 = b^n, 3 = -b^n, 1 = -b^n - 2
+	;; The "- 2" has been precomputed in ZPAD_LSW_ADJUST.  Add ADDIN_VALUE * mul-by-const * ZPAD_LSW_ADJUST into the least significant FFT word
+	mov	rsi, DESTARG			;; Address of squared number
+	movsd	xmm0, Q ZPAD_LSW_ADJUST
+	mulsd	xmm0, xmm4
+	addsd	xmm0, [rsi]
+	movsd	[rsi], xmm0
+
 	;; Multiply ZPAD0 through ZPAD6 by const * -C.  This, in essense,
 	;; wraps this data from above the FFT data area to the halfway point.
 	;; Later on we'll divide this by K to decide which data needs wrapping
@@ -4795,11 +4840,11 @@ const	mulsd	xmm3, Q XMM_MULCONST
 
 	movzx	rax, BYTE PTR [rdi+1]	;; Load big vs. little flags
 	movsd	xmm0, ZPAD0		;; Load values1
-	addsd	xmm0, ADDIN_VALUE	;; Add in the requested value
 	subsd	xmm5, xmm5		;; Create a zero high FFT carry to add in
 	single_split_lower_zpad_word base2, xmm0, xmm5, xmm1, rax*4
 no const mulsd	xmm0, Q XMM_MINUS_C
 const	mulsd	xmm0, Q XMM_MINUS_C_TIMES_MULCONST
+	addsd	xmm0, xmm4		;; Apply rest of ADDIN_VALUE * mul-by-const here (the FFT half way point)
 	round_zpad7_word base2, xmm0, xmm2, xmm1, rax*4
 	movsd	ZPAD0, xmm0
 
@@ -5761,46 +5806,6 @@ xnorm_addsub_1d_cleanup MACRO
 	movsd	Q [rbp+32], xmm1	;; Save new value2
 	ENDM
 
-; *************** 1D normalized smalladd macro ******************
-; This macro adds a small constant, then propagates the carry
-; xmm7 = addin value
-; rsi = pointer to destination
-; rbp = pointer two-to-phi multipliers
-; rdi = pointer to array of big vs. little flags
-; rax = big vs. little word flag #1
-
-xnorm_smalladd_1d MACRO base2
-	movzx	rax, BYTE PTR [rdi]	;; First biglit flag
-	movsd	xmm0, Q [rsi]		;; Load value1
-	addsd	xmm0, xmm7		;; Add in carry
-	addsd	xmm0, Q XMM_BIGVAL
-	single_rounding base2, xmm0, xmm2, xmm4, rax
-	movsd	Q [rsi], xmm0		;; Save value1
-
-	movzx	rax, BYTE PTR [rdi+1]	;; Load big vs. little flags
-	movsd	xmm0, Q [rsi+16]	;; Load FFT data
-	mulsd	xmm0, Q [rbp+32]	;; Mul values2 by two-to-minus-phi
-	mulsd	xmm0, Q XMM_NORM012_FF	;; Mul by FFTLEN/2
-	addsd	xmm0, xmm2		;; x2 = value + carry
-	single_rounding base2, xmm0, xmm2, xmm4, rax
-	mulsd	xmm0, Q [rbp+48]	;; new value2 = val * two-to-phi
-	movsd	Q [rsi+16], xmm0	;; Save value2
-
-	movzx	rax, BYTE PTR [rdi+4]	;; Load big vs. little flags
-	movsd	xmm0, Q [rsi+64]	;; Load FFT data
-	mulsd	xmm0, Q [rbp+128]	;; Mul values3 by two-to-minus-phi
-	mulsd	xmm0, Q XMM_NORM012_FF	;; Mul by FFTLEN/2
-	addsd	xmm0, xmm2		;; x3 = value + carry
-	single_rounding base2, xmm0, xmm2, xmm4, rax
-	mulsd	xmm0, Q [rbp+128+16]	;; new value3 = val * two-to-phi
-	movsd	Q [rsi+64], xmm0	;; Save value3
-
-	subsd	xmm2, Q XMM_BIGVAL
-	mulsd	xmm2, Q [rbp+128+48]	;; carry *= two-to-phi
-	addsd	xmm2, Q [rsi+64+16]	;; Add in FFT data
-	movsd	Q [rsi+64+16], xmm2	;; Save value4
-	ENDM
-
 ; *************** 1D normalized smallmul macro ******************
 ; This macro multiplies by a small constant, then "normalizes" eight FFT
 ; data values.
@@ -6719,20 +6724,6 @@ ttp	bump	rdi, 4			;; Next flags ptr
 ttp	bump	rax, 32			;; Next column two-to-phi ptr
 	bump	rsi, 64			;; Next dest ptr
 	bump	rbp, 64			;; Next dest ptr
-	ENDM
-
-; *************** 2D normalized small add macro ******************
-; This macro finishes the smallmul normalize process by adding the final
-; two carries back into the appropriate FFT values at the start of the fft.
-; rsi = pointer to FFT data
-; rbp = pointer two-to-phi group multipliers
-; rbx = pointer two-to-phi col multipliers
-; rdi = pointer to big/little flags
-; xmm7 = add in value
-
-xnorm_smalladd_2d MACRO base2
-	addsd	xmm7, Q XMM_BIGVAL
-	xnorm_smallmul_2d_prop4 base2, rsi+0*16, 0, rbp+0*32, rbx, rdi+0*1, xmm7, xmm2, xmm3
 	ENDM
 
 ; *************** 2D normalized small mul macro ******************
@@ -7798,19 +7789,6 @@ ttp	mulpd	xmm7, [rbx+3*XMM_GMD+XMM_GMD/2][rax*8] ;; value2 *= fudged grp two-to-
 ttp	bump	rdi, 2			;; Next flags ptr
 	bump	rsi, 64			;; Next dest ptr
 	bump	rbp, 64			;; Next dest ptr
-	ENDM
-
-; *************** WPN normalized small add macro ******************
-; This macro finishes the smallmul normalize process by adding the final
-; two carries back into the appropriate FFT values at the start of the fft.
-; rsi = pointer to FFT data
-; rbp = pointer two-to-phi group multipliers
-; rdi = pointer to big/little flags
-; xmm7 = add in value
-
-xnorm_smalladd_wpn MACRO base2
-	addsd	xmm7, Q XMM_BIGVAL
-	xnorm_smallmul_wpn_prop4 base2, rsi+0*16, 0, rbp+0*XMM_GMD, rdi, 0, xmm7, xmm2, xmm3
 	ENDM
 
 ; *************** WPN normalized small mul macro ******************

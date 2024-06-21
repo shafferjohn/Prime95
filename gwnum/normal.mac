@@ -1,4 +1,4 @@
-; Copyright 1995-2012 - Mersenne Research, Inc.  All rights reserved.
+; Copyright 1995-2023 - Mersenne Research, Inc.  All rights reserved.
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -632,6 +632,7 @@ const	fmul	MULCONST
 	fxch	st(1)			;; lowbits,hibits,c1,c2,sumout,maxerr
 no const fmul	MINUS_C
 const	fmul	MINUS_C_TIMES_MULCONST
+	fadd	POSTADDIN_VALUE
 	faddp	st(2), st		;; Add in traditional carry
 	fld	BIGBIGVAL		;; Big word rounding constant
 	fadd	st, st(2)		;; Round to multiple of big word

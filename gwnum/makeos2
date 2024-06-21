@@ -1,0 +1,115 @@
+# Makefile for OS/2 32-bit gwnum library
+#
+# Created 2023 by Karl L. Brennan, aka Generic Username 3485
+#
+# Requires OS/2 Warp 4 or later with RPM/YUM unix stuff installed.
+#
+# Last updated 2023-10-07
+
+# Only tested with v30.18b2, later versions may require changes.
+
+# [from "compile"]
+# Uasm is a MASM-compatible assembler that is supported much better than MASM.
+# It can be downloaded at http://www.terraspace.co.uk/uasm.html
+# [notes]
+# George Woltman uses Uasm v2.48 https://www.mersenneforum.org/showpost.php?p=639493&postcount=5
+# Uasm v2.48 source: https://github.com/Terraspace/UASM/tree/v2.48_final
+
+# I use the pentium4 architecture for RPM/YUM, it'll be a pain to switch to i686 if necessary, so I'll keep it like this for now.
+
+CC = gcc
+CFLAGS = -Zomf -Zbin-files -I.. -I../sqlite-amalgamation-3420000 -I/usr/local/include -std=gnu99 -Wno-unused-result -march=pentium4 -malign-double -O2
+#CFLAGS = -g -Zomf -Zbin-files -I.. -I../sqlite-amalgamation-3420000 -I/usr/local/include -std=gnu99 -Wno-unused-result -march=pentium4 -malign-double -DGDEBUG -O2
+
+CPP = g++
+CPPFLAGS = -Zomf -Zbin-files -I.. -I../qd -std=c++11 -O2 -march=pentium4 -malign-double
+#CPPFLAGS = -g -Zomf -Zbin-files -I.. -I../qd -std=c++11 -O2 -march=pentium4 -malign-double -DGDEBUG
+
+AR = ar
+EMXOMFAR = emxomfar
+objconv = ../../objconv/objconv.exe -fomf32
+uasm = ../../uasm/uasm248.exe -c -omf -safeseh
+
+# This is a mess... But it works!
+# I can't put them all in one .a file, because it exceeds some kind of limit.
+COFFASMOBJS1 = mult.obj mult1.obj mult1aux.obj mult2.obj mult2p.obj mult2a.obj mult2aux.obj
+COFFASMOBJS2 = mult3.obj mult3p.obj mult3a.obj mult3ap.obj mult4.obj mult4p.obj gianthlp.obj cpuidhlp.obj hyperhlp.obj xmult1ax.obj
+COFFASMOBJS3 = xmult2.obj xmult2a_core.obj xmult2a_k8.obj xmult2ax.obj xmult3.obj xmult3a_core.obj xmult3a_k8.obj xmult3ax.obj
+COFFASMOBJS4 = hg_blend.obj hg_core.obj hg_p4.obj hg_p4tp.obj hg_k8.obj hg_k10.obj r4_core.obj r4_p4.obj r4_p4tp.obj r4_k8.obj r4_k10.obj r4delay_p4tp.obj r4delay5_p4tp.obj r4dwpn_core.obj r4dwpn_p4.obj r4dwpn_p4tp.obj r4dwpn_k8.obj r4dwpn_k10.obj r4dwpn3_core.obj r4dwpn3_p4.obj r4dwpn3_p4tp.obj r4dwpn3_k8.obj r4dwpn3_k10.obj r4dwpn5_core.obj r4dwpn5_p4.obj r4dwpn5_p4tp.obj r4dwpn5_k8.obj r4dwpn5_k10.obj
+COFFASMOBJS5 = ymult1ax_core.obj yr4_core.obj ymult3.obj ymult3a_core.obj ymult3ax.obj yr4dwpn_core.obj yr4dwpn3_core.obj yr4dwpn4_core.obj yr4dwpn5_core.obj timeit.obj
+
+ASMOBJS1 = mult.o mult1.o mult1aux.o mult2.o mult2p.o mult2a.o mult2aux.o
+ASMOBJS2 = mult3.o mult3p.o mult3a.o mult3ap.o mult4.o mult4p.o gianthlp.o cpuidhlp.o hyperhlp.o xmult1ax.o
+ASMOBJS3 = xmult2.o xmult2a_core.o xmult2a_k8.o xmult2ax.o xmult3.o xmult3a_core.o xmult3a_k8.o xmult3ax.o
+ASMOBJS4 = hg_blend.o hg_core.o hg_p4.o hg_p4tp.o hg_k8.o hg_k10.o r4_core.o r4_p4.o r4_p4tp.o r4_k8.o r4_k10.o r4dwpn_core.o r4dwpn_p4.o r4dwpn_p4tp.o r4dwpn_k8.o r4dwpn_k10.o r4delay_p4tp.o r4delay5_p4tp.o r4dwpn3_core.o r4dwpn3_p4.o r4dwpn3_p4tp.o r4dwpn3_k8.o r4dwpn3_k10.o r4dwpn5_core.o r4dwpn5_p4.o r4dwpn5_p4tp.o r4dwpn5_k8.o r4dwpn5_k10.o
+ASMOBJS5 = ymult1ax_core.o yr4_core.o ymult3.o ymult3a_core.o ymult3ax.o yr4dwpn_core.o yr4dwpn3_core.o yr4dwpn4_core.o yr4dwpn5_core.o timeit.o
+
+OS2OBJS  = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o radix.o ecmstag1.o
+POLYOBJS = polymult.o polymult_sse2.o polymult_avx.o polymult_fma.o
+
+LIB1 = gwnum_1.a
+LIB2 = gwnum_2.a
+LIB3 = gwnum_3.a
+LIB4 = gwnum_4.a
+LIB5 = gwnum_5.a
+LIB6 = gwnum_6.a
+POLYLIB = polymult.a
+
+#########################################################################
+
+all:	$(LIB1) $(LIB2) $(LIB3) $(LIB4) $(LIB5) $(LIB6) $(POLYLIB)
+
+$(LIB1): $(COFFASMOBJS1)
+	$(AR) r $(LIB1)__ $(COFFASMOBJS1)
+	$(objconv) $(LIB1)__ $(LIB1)
+	rm $(LIB1)__
+
+$(LIB2): $(COFFASMOBJS2)
+	$(AR) r $(LIB2)__ $(COFFASMOBJS2)
+	$(objconv) $(LIB2)__ $(LIB2)
+	rm $(LIB2)__
+
+$(LIB3): $(COFFASMOBJS3)
+	$(AR) r $(LIB3)__ $(COFFASMOBJS3)
+	$(objconv) $(LIB3)__ $(LIB3)
+	rm $(LIB3)__
+
+$(LIB4): $(COFFASMOBJS4)
+	$(AR) r $(LIB4)__ $(COFFASMOBJS4)
+	$(objconv) $(LIB4)__ $(LIB4)
+	rm $(LIB4)__
+
+$(LIB5): $(COFFASMOBJS5)
+	$(AR) r $(LIB5)__ $(COFFASMOBJS5)
+	$(objconv) $(LIB5)__ $(LIB5)
+	rm $(LIB5)__
+
+$(LIB6): $(OS2OBJS)
+	$(EMXOMFAR) r $(LIB6) $(OS2OBJS)
+
+$(POLYLIB): $(POLYOBJS)
+	$(EMXOMFAR) r $(POLYLIB) $(POLYOBJS)
+
+clean:  cleanasm
+	rm -f $(OS2OBJS) $(POLYOBJS)
+
+cleanasm: 
+	rm -f $(ASMOBJS1) $(ASMOBJS2) $(ASMOBJS3) $(ASMOBJS4) $(ASMOBJS5)
+
+distclean: clean
+	rm -f $(LIB1) $(LIB2) $(LIB3) $(LIB4) $(LIB5) $(LIB6) $(POLYLIB)
+
+polymult_sse2.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DSSE2 -msse2 -c -o polymult_sse2.o polymult.c
+
+polymult_avx.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DAVX -mavx -c -o polymult_avx.o polymult.c
+
+polymult_fma.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DFMA -mfma -c -o polymult_fma.o polymult.c
+
+.c.o:
+	$(CC) $(CFLAGS) -c $<
+
+.cpp.o:
+	$(CPP) $(CPPFLAGS) -c $<

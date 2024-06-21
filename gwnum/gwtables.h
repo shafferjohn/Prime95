@@ -1,8 +1,7 @@
 /*----------------------------------------------------------------------
-| This file contains various utility routines that may be used by gwnum
-| setup.
+| This file contains various utility routines that may be used by gwnum setup.
 |
-|  Copyright 2011-2021 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2011-2023 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 #ifndef _GWTABLES_H
@@ -53,25 +52,25 @@ struct gwasm_data {
 	uint32_t NUMARG;		/* Gwcopyzero assembly arg */
 	uint32_t FFTLEN;		/* The FFT size we are using */
 	double	MAXERR;			/* Convolution error in a multiplication */
-	char	ALL_COMPLEX_FFT;	/* True if doing an all-complex FFT */
+	char	NEGACYCLIC_FFT;		/* True if doing a negacyclic FFT */
 	char	B_IS_2;			/* True is doing a base-2 FFT */
 	char	RATIONAL_FFT;		/* True if bits per FFT word is integer */
 	char	ZERO_PADDED_FFT;	/* True if doing a zero pad FFT */
 	char	ZPAD_TYPE;		/* 1,2,or 3 words in k (used by zero pad) */
 	char	ffttype;		/* Type of fft (1, 2=square, 3, or 4) */
-	char	TOP_CARRY_NEEDS_ADJUSTING; /* True when carry out of top word */
-					/* needs adjusting */
+	char	TOP_CARRY_NEEDS_ADJUSTING; /* True when carry out of top word needs adjusting */
 	char	SPREAD_CARRY_OVER_EXTRA_WORDS; /* AVX: True when carries must be spread over more than 4 words. */
 					/* X87,SSE2: True when carries must be spread over more than 2 words. */
 	char	zero_fft;		/* TRUE if zero upper half in normalize */
 	char	const_fft;		/* TRUE if mul-by-const in normalize */
 	char	add_sub_smallmul_op;	/* TRUE if we are processing carries from an add/sub/smallmul operation */
 	char	mul4_opcode;		/* 0 for normal gwmul3, 1 for gwaddmul4, 2 for gwsubmul4 */
-	char	UNUSED_CHARS[4];
+	char	aux_initialized;	/* Set to TRUE when an auxiliary thread's asm_data has been initialized */
+	char	UNUSED_CHARS[3];
 	uint32_t ADDIN_ROW;		/* For adding a constant after multiply */
 	uint32_t ADDIN_OFFSET;
-	double	ADDIN_VALUE;		/* Value to add in after a multiply */
-	double	ttmp_ff_inv;		/* Inverse FFT adjust (2/FFTLEN) */
+	double	ADDIN_VALUE;		/* Value to add in after a multiply and before a mul-by-const */
+	double	POSTADDIN_VALUE;	/* Value to add in after a multiply and after a mul-by-const */
 
 	int32_t	thread_num;		/* Thread num - to differentiate main thread from auxiliary threads */
 	uint32_t this_block;		/* Block currently being processed */
@@ -122,8 +121,8 @@ struct gwasm_data {
 	void	*sincos3;
 	void	*sincos4;
 	void	*sincos5;
-	gwthread hyperthread_id;	/* Thread ID of prefetching hyperthread */
-	gwevent hyperthread_work_to_do;	/* Event to signal hyperthread to begin prefetching */
+	gwthread UNUSED_hyperthread_id;	/* Thread ID of prefetching hyperthread */
+	gwevent UNUSED_hyperthread_work_to_do;	/* Event to signal hyperthread to begin prefetching */
 	void	*SRC3ARG;		/* Function argument */
 	uint32_t *ASM_TIMERS;		/* Timers used for optimizing code */
 
@@ -182,7 +181,10 @@ struct gwasm_data {
 	double	ZPAD_SHIFT1;
 
 	double	ZPAD0_6[7];		/* 7 ZPAD doubles */
-	double	UNUSED_DOUBLES[1];
+	double	ZPAD_LSW_ADJUST;	/* Multiplier for ADDIN_VALUE when ZERO_PADDED k=1, abs(c)!=1 */
+
+	double	ttmp_ff_inv;		/* Inverse FFT adjust (2/FFTLEN) */
+	double	UNUSED_DOUBLES[7];
 
 	union {
 	    struct zmm_data {
@@ -310,7 +312,7 @@ struct gwasm_data {
 		double	UNUSED_YMM_DOUBLES2[4];
 		double	YMM_P924_P383[4]; /* Used in FMA versions of 16-reals macros */
 
-		double	YMM_P383[4];	/* Used in one-pass all-complex premultipliers */
+		double	YMM_P383[4];	/* Used in one-pass negacyclic premultipliers */
 		double	YMM_P924[4];	/* and in the sixteen reals macros. */
 
 		double	YMM_P866[4];	/* Used in three-complex building blocks */

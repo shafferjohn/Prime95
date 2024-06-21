@@ -1,37 +1,58 @@
 # Makefile for Mac OS X gwnum library
 #
 
-ENVP= MACOSX_DEPLOYMENT_TARGET=10.3
+# This line was used to make a Mac OS X prime95 that was backward compatible to most OSX versions
+# This no longer works as I get error messages that include file <atomic> cannot be found
+#ENVP= MACOSX_DEPLOYMENT_TARGET=10.3
 
 CC = gcc
-CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -O2 -m32 -march=i686 -fno-exceptions
-CFLAGSD = -I.. -I../sqlite-amalgamation-3180000 -g -DGDEBUG -m32 -march=i686 -fno-exceptions
-CFLAGS64 = -I.. -I../sqlite-amalgamation-3180000 -O2 -DX86_64 -m64 -fno-exceptions
-CFLAGS64D = -I.. -I../sqlite-amalgamation-3180000 -g -DGDEBUG -DX86_64 -m64 -fno-exceptions
+CFLAGS = -I.. -I../sqlite-amalgamation-3420000 -O2 -m32 -std=gnu99 -march=i686 -fno-exceptions
+CFLAGSD = -I.. -I../sqlite-amalgamation-3420000 -g -DGDEBUG -std=gnu99 -m32 -march=i686 -fno-exceptions
+CFLAGS64 = -I.. -I../sqlite-amalgamation-3420000 -O2 -std=gnu99 -DX86_64 -m64 -fno-exceptions
+CFLAGS64D = -I.. -I../sqlite-amalgamation-3420000 -g -DGDEBUG -std=gnu99 -DX86_64 -m64 -fno-exceptions
 
 CPP = g++
-CPPFLAGS = -I.. -I../qd -O2 -m32 -march=i686 -fno-exceptions -fno-rtti -Wno-stdlibcxx-not-found
-CPPFLAGSD = -I.. -I../qd -g -DGDEBUG -m32 -march=i686 -fno-exceptions -fno-rtti -Wno-stdlibcxx-not-found
-CPPFLAGS64 = -I.. -I../qd -O2 -DX86_64 -m64 -fno-exceptions -fno-rtti -Wno-stdlibcxx-not-found
-CPPFLAGS64D = -I.. -I../qd -g -DGDEBUG -DX86_64 -m64 -fno-exceptions -fno-rtti -Wno-stdlibcxx-not-found
+CPPFLAGS = -I.. -I../qd -O2 -std=c++11 -m32 -march=i686 -fno-exceptions -fno-rtti -Wno-stdlibcxx-not-found
+CPPFLAGSD = -I.. -I../qd -g -DGDEBUG -std=c++11 -m32 -march=i686 -fno-exceptions -fno-rtti -Wno-stdlibcxx-not-found
+CPPFLAGS64 = -I.. -I../qd -O2 -DX86_64 -std=c++11 -m64 -fno-exceptions -fno-rtti -Wno-stdlibcxx-not-found
+CPPFLAGS64D = -I.. -I../qd -g -DGDEBUG -DX86_64 -std=c++11 -m64 -fno-exceptions -fno-rtti -Wno-stdlibcxx-not-found
 
 AR = ar
 
 MACOBJS = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o radix.o ecmstag1.o
+POLYOBJS = polymult.o polymult_sse2.o polymult_avx.o polymult_fma.o polymult_avx512.o 
 
 LIB = gwnum.a
+POLYLIB = polymult.a
 
 #########################################################################
+
+all:	$(LIB) $(POLYLIB)
 
 $(LIB): $(MACOBJS)
 	cp macosx64/gwnum.a .
 	$(AR) -rs $(LIB) $(MACOBJS)
 
+$(POLYLIB): $(POLYOBJS)
+	$(AR) -rs $(POLYLIB) $(POLYOBJS)
+
 clean:
-	rm -f $(MACOBJS)
+	rm -f $(MACOBJS) $(POLYOBJS)
 
 distclean: clean
-	rm -f $(LIB)
+	rm -f $(LIB) $(POLYLIB)
+
+polymult_sse2.o: polymult.c polymult.h
+	$(ENVP) $(CC) $(CFLAGS64) -DSSE2 -msse2 -c -o polymult_sse2.o polymult.c
+
+polymult_avx.o: polymult.c polymult.h
+	$(ENVP) $(CC) $(CFLAGS64) -DAVX -mavx -c -o polymult_avx.o polymult.c
+
+polymult_fma.o: polymult.c polymult.h
+	$(ENVP) $(CC) $(CFLAGS64) -DFMA -mfma -c -o polymult_fma.o polymult.c
+
+polymult_avx512.o: polymult.c polymult.h
+	$(ENVP) $(CC) $(CFLAGS64) -DAVX512 -mavx512f -c -o polymult_avx512.o polymult.c
 
 .c.o:
 	$(ENVP) $(CC) $(CFLAGS64) -c $<

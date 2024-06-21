@@ -4,7 +4,7 @@
 | This file contains the C routines for radix conversion when required
 | by gianttogw or gwtogiant.
 | 
-|  Copyright 2020-2021 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2020-2023 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 /* Include files */
@@ -70,6 +70,7 @@ int nonbase2_gianttogw (	/* Returns an error code or zero for success */
 		int	exp, fftlen;			/* Exponent and fft length used to setup new_gwdata */
 		int	num_pairs;
 		int	b_per_mult;			/* Number of radix b that must appear in each half-pair multiply result */
+		int	radix_bigwords_per_mult;	/* Expected number of bigwords in the FFT */
 
 		// Allocate the work_gwdata
 		work_gwdata = (gwhandle *) malloc (sizeof (gwhandle));
@@ -86,10 +87,15 @@ int nonbase2_gianttogw (	/* Returns an error code or zero for success */
 			double	words_per_mult;		/* Number of FFT words a specific FFT uses to hold a partial multiply result */
 			int	option;
 
+			// Use a negative safety margin to find a small FFT that we are unlikely to use because of possible roundoff errors.
+			// Since radix conversion data has more zeroes than random data and we might find a rational FFT to use, a negative safety
+			// margin is justified.  We'll work our way up from there finding the smallest usable FFT size.
 			gwinit (work_gwdata);
-			gwset_safety_margin (work_gwdata, -0.15);  // More zeroes in radix-conversion multiplies than in random data, 0.15 value may not be correct -- needs fine tuning?
+			gwset_maxmulbyconst (work_gwdata, 1);
+			gwset_safety_margin (work_gwdata, -4.00);
 			gwset_minimum_fftlen (work_gwdata, fftlen);
-			err_code = gwinfo (work_gwdata, 1.0, gwdata->b, exp = num_pairs * b_per_mult, -1);
+			work_gwdata->radix_bigwords = exp = num_pairs * b_per_mult;
+			err_code = gwinfo (work_gwdata, 1.0, gwdata->b, exp, -1);
 			if (err_code) {			// On error, try for a small rational FFT
 				ASSERTG (fftlen == 0);
 				fftlen = exp - 1;	// This will find smallest possible FFT
@@ -99,10 +105,6 @@ int nonbase2_gianttogw (	/* Returns an error code or zero for success */
 			fftlen = work_gwdata->FFTLEN;
 			if (exp < fftlen) exp = fftlen;		// Rational FFTs have lower roundoff error
 			words_per_mult = (double) b_per_mult * (double) fftlen / (double) exp;
-
-			// Do we have an FFT we can use?  FFT words per mult must be an integer so that every partial multiplication
-			// result has the same bigword/smallword pattern.  And the FFT must be large enough to hold all our pairs.
-			if (words_per_mult == ceil (words_per_mult) && fftlen >= num_pairs * (int) words_per_mult) break;
 
 			// To make words_per_mult an integer we have 3 options.  We can increase b_per_mult or exp to
 			// reduce the words_per_mult.  Or we can increase word_per_mult as long as we can still store
@@ -116,8 +118,12 @@ int nonbase2_gianttogw (	/* Returns an error code or zero for success */
 				int newbpm = round_up_to_multiple_of (b_per_mult, newwpm / (int) intgcd (fftlen, newwpm));
 				if (newwpm > newbpm) newwpm = newbpm;		// When base is large, use rational FFT one b per FFT word
 				if (fftlen >= num_pairs * newwpm) {
+					int non_zeros_per_newwpm = (int) ceil ((double) b_per_mult / ((double) newbpm / (double) newwpm));
+					radix_bigwords_per_mult = ((b_per_mult - 1) % non_zeros_per_newwpm) + 1;
 					gwinit (work_gwdata);
-					gwset_safety_margin (work_gwdata, -0.15);  // More zeroes in radix-conversion multiplies than in random data
+					gwset_maxmulbyconst (work_gwdata, 1);
+					gwset_minimum_fftlen (work_gwdata, fftlen);
+					work_gwdata->radix_bigwords = num_pairs * radix_bigwords_per_mult;
 					err_code = gwinfo (work_gwdata, 1.0, gwdata->b, exp = newbpm * fftlen / newwpm, -1);
 					if (err_code == 0 && fftlen >= (int) work_gwdata->FFTLEN) option = 99;	// Winner!
 				}
@@ -127,11 +133,13 @@ int nonbase2_gianttogw (	/* Returns an error code or zero for success */
 			// Option 3: Try a larger FFT length
 		}
 		gwinit (work_gwdata);
-		gwset_safety_margin (work_gwdata, -0.15);  // More zeroes in radix-conversion multiplies than in random data
+		gwset_maxmulbyconst (work_gwdata, 1);
+		gwset_minimum_fftlen (work_gwdata, fftlen);
+		work_gwdata->radix_bigwords = num_pairs * radix_bigwords_per_mult;
 		if (gwdata->num_threads > 1) gwset_num_threads (work_gwdata, gwdata->num_threads);
-		gwset_specific_fftlen (work_gwdata, fftlen);
 		err_code = gwsetup (work_gwdata, 1.0, gwdata->b, exp, -1);
 		if (err_code != 0) goto err;
+		ASSERTG (fftlen == work_gwdata->FFTLEN);
 		// Cache the work_gwdata for repeated use
 		gwdata->to_radix_gwdata = work_gwdata;
 	}
@@ -617,6 +625,7 @@ int nonbase2_gwtogiant (	/* Returns an error code or zero for success */
 			int	option;
 
 			gwinit (work_gwdata);
+			gwset_maxmulbyconst (work_gwdata, 1);
 			gwset_minimum_fftlen (work_gwdata, fftlen);
 			err_code = gwinfo (work_gwdata, 1.0, 2, exp = num_pairs * bits_per_mult, -1);
 			if (err_code) goto err;		// On error, try for a small rational FFT
@@ -640,6 +649,8 @@ int nonbase2_gwtogiant (	/* Returns an error code or zero for success */
 				int newbpm = round_up_to_multiple_of (bits_per_mult, newwpm / (int) intgcd (fftlen, newwpm));
 				if (fftlen >= num_pairs * newwpm) {
 					gwinit (work_gwdata);
+					gwset_maxmulbyconst (work_gwdata, 1);
+					gwset_minimum_fftlen (work_gwdata, fftlen);
 					err_code = gwinfo (work_gwdata, 1.0, 2, exp = newbpm * fftlen / newwpm, -1);
 					if (err_code == 0 && fftlen >= (int) work_gwdata->FFTLEN) option = 99;	// Winner!
 				}
@@ -649,10 +660,12 @@ int nonbase2_gwtogiant (	/* Returns an error code or zero for success */
 			// Option 3: Try a larger FFT length
 		}
 		gwinit (work_gwdata);
+		gwset_maxmulbyconst (work_gwdata, 1);
+		gwset_minimum_fftlen (work_gwdata, fftlen);
 		if (gwdata->num_threads > 1) gwset_num_threads (work_gwdata, gwdata->num_threads);
-		gwset_specific_fftlen (work_gwdata, fftlen);
 		err_code = gwsetup (work_gwdata, 1.0, 2, exp, -1);
 		if (err_code) goto err;
+		ASSERTG (fftlen == work_gwdata->FFTLEN);
 		// Cache the work_gwdata for repeated use
 		gwdata->from_radix_gwdata = work_gwdata;
 	}
@@ -686,7 +699,7 @@ int nonbase2_gwtogiant (	/* Returns an error code or zero for success */
 // Calc the first powb_multiplier b^b_per_uint64
 
 	{
-		stackgiant(tmpg,2);
+		stackgiant (tmpg, 3);				// If b is a power of 2 then tmpg may need to hold 2^64 which requires three 32-bit words
 		ultog (gwdata->b, tmpg);
 		power (tmpg, b_per_uint64);
 		gianttogw (work_gwdata, tmpg, powb_multiplier);
@@ -781,57 +794,51 @@ int nonbase2_gwtogiant (	/* Returns an error code or zero for success */
 	gwfree (work_gwdata, t3);
 
 /* Finally, write the converted result (t1) to a giant.  We cannot simply call gwtogiant as that may write to too many words in the */
-/* giant (work_gwdata->bit_length may be significantly larger than gwdata->bit_length).  So, we copied much of the gwtogiant code which */
+/* giant (work_gwdata->bit_length may be significantly larger than gwdata->bit_length).  So, we copied much of the k=1, b=2, c=-1 gwtogiant code which */
 /* also lets us perform a few optimizations. */
 
 	{
-		long	val;
-		int	bits, bitsout, carry;
-		unsigned long i, limit;
+		gwiter	iter;
+		int32_t	val;
+		int64_t accum;
+		int	bits, accumbits;
+		unsigned long limit;
 		uint32_t *outptr;
 
 /* Collect bits until we have all of them */
 
-		carry = 0;
-		bitsout = 0;
+		accum = 0;
+		accumbits = 0;
 		outptr = g->n;
-		*outptr = 0;
 		limit = divide_rounding_up ((int) ceil (gwdata->bit_length), 32) + 1;
-		for (i = 0; ; i++) {
-			if (i < (int) work_gwdata->FFTLEN) {
-				err_code = get_fft_value (work_gwdata, t1, i, &val);
+		for (gwiter_init_zero (work_gwdata, &iter, t1); ; ) {
+			if (gwiter_index (&iter) < (int) work_gwdata->FFTLEN) {
+				err_code = gwiter_get_fft_value (&iter, &val);
 				if (err_code) goto err;
-			} else
-				val = 0;
-			bits = work_gwdata->NUM_B_PER_SMALL_WORD + ((big_word_flags >> (i % num_big_word_flags)) & 1);
-			val += carry;
-
-			carry = (val >> bits);
-			val -= (carry << bits);
-			*outptr += (val << bitsout);
-			bitsout += bits;
-			if (bitsout >= 32) {
-				bitsout -= 32;
-				*++outptr = (val >> (bits - bitsout));
-				if (outptr == g->n + limit) break;
+				bits = work_gwdata->NUM_B_PER_SMALL_WORD;
+				if (gwiter_is_big_word (&iter)) bits++;
+				accum += ((int64_t) val) << accumbits;
+				accumbits += bits;
+				gwiter_next (&iter);
+				if (accumbits < 32) continue;
 			}
+			*outptr++ = (uint32_t) accum;
+			accum >>= 32;
+			accumbits -= 32;
+			if (outptr == g->n + limit) break;
 		}
-		ASSERTG (carry == 0 || carry == -1);
+		ASSERTG (accum == 0 || accum == -1);
 
 /* Set the length */
 
 		g->sign = (long) (outptr - g->n);
 		while (g->sign && g->n[g->sign-1] == 0) g->sign--;
 
-/* If carry is -1, the gwnum is negative.  Ugh.  Flip the bits and sign. */
+/* Divide the upper bits by k, leave the remainder in the upper bits and multiply the quotient by c and subtract that from the lower bits. */
 
-		if (carry == -1) {
-			int	j;
-			for (j = 0; j < g->sign; j++) g->n[j] = ~g->n[j];
-			while (g->sign && g->n[g->sign-1] == 0) g->sign--;
-			iaddg (1, g);
-			g->sign = -g->sign;
-		}
+		stackgiant(upper,5);					// Upper bits shouldn't be much more than k^2 (100 bits)
+		gtogshiftrightsplit (work_gwdata->n, g, upper, accum);	// Split v at bit n into two giants optionally negating upper bits
+		if (!isZero (upper)) addg (upper, g);			// Lower bits minus upper bits * c
 	}
 
 /* Finish cleanup */

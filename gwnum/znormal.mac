@@ -1,4 +1,4 @@
-; Copyright 2011-2019 - Mersenne Research, Inc.  All rights reserved.
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved.
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -1458,7 +1458,7 @@ znorm_wpn_const_echk_ttp MACRO zero
 
 
 ;
-; These are common constants for add/sub/addsub/smalladd/smallmul macros both with and without zero-padding.
+; These are common constants for add/sub/addsub/smallmul macros both with and without zero-padding.
 ;
 
 znorm_common_op_wpn_preload MACRO ttp
@@ -2054,62 +2054,6 @@ znorm_addsub_wpn_save_carries MACRO
 	zstore	[rbp+2*128+64], zmm13		; Save carry out of high word
 	zstore	[rbp+3*128], zmm11		; Save carry out of low word
 	zstore	[rbp+3*128+64], zmm15		; Save carry out of high word
-	ENDM
-
-
-; *************** WPN normalized small add macro ******************
-; This macro implements the smalladd with normalization feature by adding the
-; provided small value to the first FFT word and propagating any carries.
-; xmm5 = addin value
-; rsi = pointer to destination
-; NOTE: caller can assume xmm6,xmm7 are left untouched (for better prolog/epilog handling)
-
-;;BUG  -  convert smalladd to use the common_op preloads.  round values the same way add/sub/addsub do rather than using zrounding_single
-;;  (reconcile differences in which registers constants are loaded into)
-;; Then delete zrounding macros
-
-znorm_smalladd_wpn_preload MACRO ttp
-	vbroadcastsd zmm30, ZMM_RNDVAL				;; Load the rounding value
-ttp	vbroadcastsd zmm27, ZMM_LARGE_BASE			;; large_word_base
-	vbroadcastsd zmm26, ZMM_SMALL_BASE			;; small_word_base
-ttp	vbroadcastsd zmm25, ZMM_LARGE_BASE_INVERSE		;; 1 / large_word_base
-	vbroadcastsd zmm24, ZMM_SMALL_BASE_INVERSE		;; 1 / small_word_base
-ttp	vbroadcastsd zmm23, ZMM_RNDVAL_TIMES_LARGE_BASE		;; RNDVAL * large_word_base - RNDVAL
-	vbroadcastsd zmm22, ZMM_RNDVAL_TIMES_SMALL_BASE		;; RNDVAL * small_word_base - RNDVAL
-ttp	vbroadcastsd zmm21, ZMM_RNDVAL_OVER_LARGE_BASE		;; RNDVAL / large_word_base - RNDVAL
-	vbroadcastsd zmm20, ZMM_RNDVAL_OVER_SMALL_BASE		;; RNDVAL / small_word_base - RNDVAL
-	ENDM
-
-znorm_smalladd_wpn MACRO ttp
-
-ttp	kmovw	k1, WORD PTR ZMM_FIRST_BIGLIT_VALUES ;; Load 8 big vs. little flags
-	vaddsd	xmm0, xmm5, [rsi]		;; x1 = value1 + smalladd value
-	vaddsd	xmm0, xmm0, xmm30
-	zrounding_single ttp, zmm0, zmm2, k1
-	vmovsd	Q [rsi], xmm0			;; Save value1
-
-	add	rsi, ZMM_SRC_INCR		;; Next source pointer
-ttp	kshiftrw k1, k1, 1			;; Next big vs. little flag
-	vaddsd	xmm0, xmm2, [rsi]		;; x2 = FFT data + carry
-	zrounding_single ttp, zmm0, zmm2, k1
-	vmovsd	Q [rsi], xmm0			;; Save value2
-
-	add	rsi, ZMM_SRC_INCR		;; Next source pointer
-ttp	kshiftrw k1, k1, 1			;; Next big vs. little flag
-	vaddsd	xmm0, xmm2, [rsi]		;; x3 = FFT data + carry
-	zrounding_single ttp, zmm0, zmm2, k1
-	vmovsd	Q [rsi], xmm0			;; Save value3
-
-	add	rsi, ZMM_SRC_INCR		;; Next source pointer
-ttp	kshiftrw k1, k1, 1			;; Next big vs. little flag
-	vaddsd	xmm0, xmm2, [rsi]		;; x4 = FFT data + carry
-	zrounding_single ttp, zmm0, zmm2, k1
-	vmovsd	Q [rsi], xmm0			;; Save value4
-
-	add	rsi, ZMM_SRC_INCR		;; Next source pointer
-	vsubsd	xmm2, xmm2, xmm30		;; Remove RNDVAL from carry
-	vaddsd	xmm0, xmm2, [rsi]		;; new value5 = FFT data + carry
-	vmovsd	Q [rsi], xmm0			;; Save value5
 	ENDM
 
 

@@ -1,4 +1,4 @@
-; Copyright 2011-2020 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -238,7 +238,7 @@ build421 ,			,			,			yr4dwpn_pass1sc2048 12800K, 6400
 ;build421 ,			,			,			yr4dwpn_pass1sc4096 25M, 6400
 ENDIF
 
-	; The all-complex 12 levels variants (2304, 3072, 3840, 4096, 5120, 6400)
+	; The negacyclic 12 levels variants (2304, 3072, 3840, 4096, 5120, 6400)
 
 IFNDEF X86_64
 build421 ,			,			,			yr4dwpn_pass1sc128ac 288K, 2304

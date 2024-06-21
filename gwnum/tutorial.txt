@@ -56,8 +56,8 @@ Termination is easy:
 	gwdone (&gwdata);
 
 
-Allocating, initiaizing, and freeing
-------------------------------------
+Allocating, initializing, and freeing
+-------------------------------------
 
 Before you can to use the library to do arithmetic, one must allocate and initialize numbers.  These numbers are stored in a "gwnum".
 This example allocates a gwnum for later use:
@@ -492,6 +492,12 @@ We set mularg2_safe using the same mul_safe arguments as in the original example
 unnormalized add count because we know that mularg2 will be normalized if necessary which clears the unnormalized add count for mularg2.
 The astute reader will note that mul_safe (&gwdata, 1, 0) is always TRUE.  
 
+A final warning.  The mul_safe arguments assume "random" numbers as input.  The round off error from (x + a + b) * y is different than
+the round off error from (x + a + a) * y.  This makes sense when one considers what's going on.  A gwnum array is an array of doubles.
+Round off errors come from the absolute value of elements in the gwnum array getting larger thus requiring more bits to represent the value.
+Using more bits for the value leaves fewer bits to represent the fractional part during computations and thus more round off error.
+Adding b to x + a will sometimes increase and sometimes decrease the "damage" done to gwnum elements when a was added to x.  Adding a
+to x + a will always increase the "damage" done to gwnum elements when a was added to x.
 
 Yet another combo routine!
 --------------------------
@@ -514,8 +520,8 @@ We've seen that some operations after an unnormalized add can be safe.  Thus, we
 	FFT(c)
 	FFT(d)
 	FFT(c*d) = point-wise multiplication of FFT(c) and FFT(d)
-	FFT(res) = FFT(a*b) + FFT(c*d)
-	res = inverse FFT
+	FFT(result) = FFT(a*b) + FFT(c*d)
+	result = inverse FFT
 Even better, several reads and writes are saved because the addition takes place while FFT data is already in CPU registers.
 Futhermore, the result is fully normalized whereas in the first method the result is unnormalized.
 

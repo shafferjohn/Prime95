@@ -2,8 +2,8 @@
 #
 
 CC = gcc
-CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -I/usr/local/include -std=gnu99 -Wno-unused-result -march=i486 -malign-double -O2
-#CFLAGS = -g -I.. -I../sqlite-amalgamation-3180000 -I/usr/local/include -std=gnu99 -Wno-unused-result -march=i486 -malign-double -DGDEBUG -O2
+CFLAGS = -I.. -I../sqlite-amalgamation-3420000 -I/usr/local/include -std=gnu99 -Wno-unused-result -march=i486 -malign-double -O2
+#CFLAGS = -g -I.. -I../sqlite-amalgamation-3420000 -I/usr/local/include -std=gnu99 -Wno-unused-result -march=i486 -malign-double -DGDEBUG -O2
 
 CPP = g++
 CPPFLAGS = -I.. -I../qd -std=c++11 -O2 -march=i486 -malign-double
@@ -35,7 +35,7 @@ distclean: clean
 	rm -f $(LIB) $(POLYLIB)
 
 polymult_sse2.o: polymult.c polymult.h
-	$(CC) $(CFLAGS) -Dsse2 -msse2 -c -o polymult_sse2.o polymult.c
+	$(CC) $(CFLAGS) -DSSE2 -msse2 -c -o polymult_sse2.o polymult.c
 
 polymult_avx.o: polymult.c polymult.h
 	$(CC) $(CFLAGS) -DAVX -mavx -c -o polymult_avx.o polymult.c

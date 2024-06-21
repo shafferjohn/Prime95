@@ -1,4 +1,4 @@
-; Copyright 2011-2019 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 
@@ -736,32 +736,6 @@ as2rzp:	znorm_addsub_wpn_zpad noexec		; Add & subtract and normalize four low/hi
 gwzaddsubrzp3 ENDP
 
 ;;
-;; Add in a small number with carry propagation (four different versions)
-;;
-
-	; Irrational version
-PROCFL	gwzadds3
-	ad_prolog 0,0,rbx,rsi
-	mov	rsi, DESTARG		; Address of destination
-	vmovsd	xmm5, DBLARG		; Small addin value
-	znorm_common_op_wpn_preload exec ; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
-	znorm_smalladd_wpn_preload exec
-	znorm_smalladd_wpn exec
-	ad_epilog 0,0,rbx,rsi
-gwzadds3 ENDP
-
-	; Rational version
-PROCFL	gwzaddsr3
-	ad_prolog 0,0,rbx,rsi
-	mov	rsi, DESTARG		; Address of destination
-	vmovsd	xmm5, DBLARG		; Small addin value
-	znorm_common_op_wpn_preload noexec ; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
-	znorm_smalladd_wpn_preload noexec
-	znorm_smalladd_wpn noexec
-	ad_epilog 0,0,rbx,rsi
-gwzaddsr3 ENDP
-
-;;
 ;; Multiply a number by a small value with carry propagation (four different versions)
 ;;
 
@@ -940,7 +914,6 @@ gwzmulsrzp3 ENDP
 ;; Do final carry propagation for add/sub/addsub/smallmul operations
 ;;
 
-	; Irrational version
 PROCFL	gwz3_apply_carries
 	ad_prolog 0,0,rbx,rbp,rsi,rdi,r8,r9,r10,r12,r13,r14,r15,zmm6,zmm7,zmm8,zmm9,zmm10,zmm11,zmm12,zmm13,zmm14,zmm15
 	mov	rax, ZMM_OP_CARRIES_ROUTINE

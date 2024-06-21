@@ -1,7 +1,50 @@
-; Copyright 2011-2018 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
+
+
+
+
+
+
+
+NOT USED
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 	TITLE   setup
 
@@ -89,7 +132,7 @@ PROCFL	gwzadd1
 	mov	rdx, SRC2ARG		; Address of second number
 	mov	rsi, DESTARG		; Address of destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_op_1d_preload exec	; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 	mov	rbp, norm_col_mults	; Address of the multipliers
@@ -131,7 +174,7 @@ PROCFL	gwzaddr1
 	mov	rdx, SRC2ARG		; Address of second number
 	mov	rsi, DESTARG		; Address of destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_op_1d_preload noexec	; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 raddsec:mov	loopcount2, ZMM_NORM1_PAD_GRPS ; Number of subsections (padding groups)
@@ -166,7 +209,7 @@ PROCFL	gwzaddzp1
 	mov	rdx, SRC2ARG		; Address of second number
 	mov	rsi, DESTARG		; Address of destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_op_1d_zpad_preload exec	; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 	mov	rbp, norm_col_mults	; Address of the multipliers
@@ -211,7 +254,7 @@ PROCFL	gwzaddrzp1
 	mov	rdx, SRC2ARG		; Address of second number
 	mov	rsi, DESTARG		; Address of destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_op_1d_zpad_preload noexec	; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 rzpaddsec:
@@ -294,7 +337,7 @@ PROCFL	gwzsub1
 	mov	rdx, SRC2ARG		; Address of second number
 	mov	rsi, DESTARG		; Address of destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_op_1d_preload exec	; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 	mov	rbp, norm_col_mults	; Address of the multipliers
@@ -336,7 +379,7 @@ PROCFL	gwzsubr1
 	mov	rdx, SRC2ARG		; Address of second number
 	mov	rsi, DESTARG		; Address of destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_op_1d_preload noexec	; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 rsubsec:mov	loopcount2, ZMM_NORM1_PAD_GRPS ; Number of subsections (padding groups)
@@ -371,7 +414,7 @@ PROCFL	gwzsubzp1
 	mov	rdx, SRC2ARG		; Address of second number
 	mov	rsi, DESTARG		; Address of destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_op_1d_zpad_preload exec	; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 	mov	rbp, norm_col_mults	; Address of the multipliers
@@ -416,7 +459,7 @@ PROCFL	gwzsubrzp1
 	mov	rdx, SRC2ARG		; Address of second number
 	mov	rsi, DESTARG		; Address of destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_op_1d_zpad_preload noexec	; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 rzpsubsec:
@@ -511,7 +554,7 @@ PROCFL	gwzaddsub1
 	mov	rsi, DESTARG		; Address of add destination
 	mov	r14, DEST2ARG	  	; Address of sub destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_addsub_1d_preload exec	; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 	mov	rbp, norm_col_mults	; Address of the ttp/ttmp multipliers
@@ -568,7 +611,7 @@ PROCFL	gwzaddsubr1
 	mov	rsi, DESTARG		; Address of add destination
 	mov	r14, DEST2ARG	  	; Address of sub destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_addsub_1d_preload noexec	; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 raddsubsec:
@@ -617,7 +660,7 @@ PROCFL	gwzaddsubzp1
 	mov	rsi, DESTARG		; Address of add destination
 	mov	r14, DEST2ARG	  	; Address of sub destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_addsub_1d_zpad_preload exec ; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 	mov	rbp, norm_col_mults	; Address of the ttp/ttmp multipliers
@@ -671,7 +714,7 @@ PROCFL	gwzaddsubrzp1
 	mov	rsi, DESTARG		; Address of add destination
 	mov	r14, DEST2ARG	  	; Address of sub destination
 	mov	r12, ZMM_QUARTER_DIST	; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
-	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_addsub_1d_zpad_preload noexec ; Preload constants
 	mov	loopcount1, ZMM_NORM1_SECTIONS ; Load loop counter (4 sections)
 	mov	rbp, norm_col_mults	; Address of the ttp/ttmp multipliers
@@ -760,31 +803,6 @@ noload:	vmovapd	zmm0 {k1}{z}, [rsi]	; Load source data
 gwzcopyzero1 ENDP
 
 ;;
-;; Add in a small number with carry propagation
-;;
-
-PROCFL	gwzadds1
-	ad_prolog 0,0,rbx,rbp,rsi
-	mov	rsi, DESTARG		; Address of destination
-	vmovsd	xmm5, DBLARG		; Small addin value
-	mov	rbp, norm_col_mults	; Address of the two-to-phi multipliers
-	znorm_common_op_1d_preload exec	; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
-	znorm_smalladd_1d_preload exec
-	znorm_smalladd_1d exec
-	ad_epilog 0,0,rbx,rbp,rsi
-gwzadds1 ENDP
-
-PROCFL	gwzaddsr1
-	ad_prolog 0,0,rbx,rsi
-	mov	rsi, DESTARG		; Address of destination
-	vmovsd	xmm5, DBLARG		; Small addin value
-	znorm_common_op_1d_preload noexec ; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
-	znorm_smalladd_1d_preload noexec
-	znorm_smalladd_1d noexec
-	ad_epilog 0,0,rbx,rsi
-gwzaddsr1 ENDP
-
-;;
 ;; Multiply a number by a small value (four versions)
 ;;
 
@@ -794,7 +812,7 @@ PROCFL	gwzmuls1
 	mov	rsi, DESTARG			; Address of destination
 	mov	r12, ZMM_QUARTER_DIST		; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
 	vbroadcastsd zmm31, DBLARG		; Load small multiplier value
-	znorm_common_op_1d_preload exec		; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload exec		; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_smallmul_1d_preload exec		; Preload constants, init carry to zero
 	mov	loopcount1, ZMM_NORM1_SECTIONS	; Load loop counter (4 sections)
 	mov	rbp, norm_col_mults		; Address of the ttp/ttmp multipliers
@@ -838,7 +856,7 @@ PROCFL	gwzmulsr1
 	mov	rsi, DESTARG			; Address of destination
 	mov	r12, ZMM_QUARTER_DIST		; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
 	vbroadcastsd zmm31, DBLARG		; Load small multiplier value
-	znorm_common_op_1d_preload noexec	; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload noexec	; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_smallmul_1d_preload noexec	; Preload constants, init carry to zero
 	mov	loopcount1, ZMM_NORM1_SECTIONS	; Load loop counter (4 sections)
 rmulsec:mov	loopcount2, ZMM_NORM1_PAD_GRPS	; Number of subsections (padding groups)
@@ -871,7 +889,7 @@ PROCFL	gwzmulszp1
 	mov	rsi, DESTARG			; Address of destination
 	mov	r12, ZMM_QUARTER_DIST		; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
 	vbroadcastsd zmm31, DBLARG		; Load small multiplier value
-	znorm_common_op_1d_preload exec		; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload exec		; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_smallmul_1d_zpad_preload exec	; Preload constants, init carry to zero
 	mov	loopcount1, ZMM_NORM1_SECTIONS	; Load loop counter (4 sections)
 	mov	rbp, norm_col_mults		; Address of the ttp/ttmp multipliers
@@ -917,7 +935,7 @@ PROCFL	gwzmulsrzp1
 	mov	rsi, DESTARG			; Address of destination
 	mov	r12, ZMM_QUARTER_DIST		; Distance to FFTLEN/4 FFT word -- independent set of FFT data to work on
 	vbroadcastsd zmm31, DBLARG		; Load small multiplier value
-	znorm_common_op_1d_preload noexec	; Preload constants common to add,sub,addsub,smalladd,smallmul,with and without zpad
+	znorm_common_op_1d_preload noexec	; Preload constants common to add,sub,addsub,smallmul,with and without zpad
 	znorm_smallmul_1d_zpad_preload noexec	; Preload constants, init carry to zero
 	mov	loopcount1, ZMM_NORM1_SECTIONS	; Load loop counter (4 sections)
 	mov	rbp, norm_col_mults		; Address of the ttp/ttmp multipliers
@@ -1043,6 +1061,11 @@ echk	vmovapd	zmm27, ZMM_MAXERR	;; Restore maximum error BUG/OPT - leave maxerr i
 
 	sub	loopcount1, 1		;; Test section counter
 	jnz	ilp0
+no zero	mov	rsi, DESTARG		;; Addr of multiplied number
+no zero	mov	edi, ADDIN_OFFSET	;; Get address to add value into
+no zero	vmovsd	xmm0, POSTADDIN_VALUE	;; Get the addin value
+no zero	vaddsd	xmm0, xmm0, Q [rsi][rdi] ;; Add in the FFT value
+no zero	vmovsd	Q [rsi][rdi], xmm0	;; Save the new value
 ;;echk	zstore	ZMM_MAXERR, zmm27	;; Save maximum error		BUG/OPT - leave maxerr in zmm27 for common code
 									;; Better yet, ditch common code and do sumout / maxerr here
 zero ttp	jmp	zdn		;; Go to zero upper half irrational end code

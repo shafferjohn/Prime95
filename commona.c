@@ -8,7 +8,7 @@
 | Commonb contains information used only during execution
 | Commonc contains information used during setup and execution
 |
-| Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2023 Mersenne Research, Inc.  All rights reserved
 +---------------------------------------------------------------------*/
 
 /* Routine to eliminate odd puctuation characters from user ID */
@@ -43,14 +43,13 @@ void rangeStatusMessage (
 	double	prob, est;
 	char	*orig_buf;
 
-/* Just in case the user hand added work to the worktodo file, reread it */
-/* now if the worker threads and communication threads are not active. */
+/* Just in case the user hand added work to the worktodo file, reread it now if the workers and communication thread are not active. */
 
-	if (! WORKER_THREADS_ACTIVE && !COMMUNICATION_THREAD) readIniFiles ();
+	if (! WORKERS_ACTIVE && !COMMUNICATION_THREAD) readIniFiles ();
 
 /* Init.  Default is 32 lines in a 2000 character buffer */
 
-	lines_per_worker = (unsigned int) IniGetInt (INI_FILE, "StatusLines", buflen / 62) / NUM_WORKER_THREADS;
+	lines_per_worker = (unsigned int) IniGetInt (INI_FILE, "StatusLines", buflen / 62) / NUM_WORKERS;
 	if (lines_per_worker < 3) lines_per_worker = 3;
 	orig_buf = buf;
 	ll_and_prp_cnt = 0;
@@ -59,9 +58,9 @@ void rangeStatusMessage (
 	strcpy (buf, STAT0);
 	buf += strlen (buf);
 
-/* Loop over all worker threads */
+/* Loop over all workers */
 
-	for (tnum = 0; tnum < NUM_WORKER_THREADS; tnum++) {
+	for (tnum = 0; tnum < NUM_WORKERS; tnum++) {
 	    struct work_unit *w;
 	    unsigned int lines_output;
 	    int truncated_status_msg;
@@ -71,10 +70,10 @@ void rangeStatusMessage (
 	    lines_output = 0;
 	    truncated_status_msg = FALSE;
 
-/* Output thread id */
+/* Output worker num */
 
-	    if (NUM_WORKER_THREADS > 1) {
-		sprintf (buf, "[Worker thread #%d]\n", tnum+1);
+	    if (NUM_WORKERS > 1) {
+		sprintf (buf, "[Worker #%d]\n", tnum+1);
 		buf += strlen (buf);
 		lines_output++;
 	    }
@@ -138,17 +137,22 @@ void rangeStatusMessage (
 
 /* Add the exponent to the output message */
 
-		gw_as_string (buf, w->k, w->b, w->n, w->c);
-		buf += strlen (buf);
-		if (w->work_type == WORK_PRP && w->known_factors) {
-			strcpy (buf, "/known_factors");
+		if (w->n) {
+			gw_as_string (buf, w->k, w->b, w->n, w->c);
+			buf += strlen (buf);
+			if (w->work_type == WORK_PRP && w->known_factors) {
+				strcpy (buf, "/known_factors");
+				buf += strlen (buf);
+			}
+			strcpy (buf, ", ");
 			buf += strlen (buf);
 		}
-		strcpy (buf, ", ");
-		buf += strlen (buf);
 
-		if (w->work_type == WORK_ECM)
-			sprintf (buf, "ECM %d curve%s B1=%" PRIu64, w->curves_to_do, w->curves_to_do == 1 ? "" : "s", w->B1);
+		if (w->work_type == WORK_ECM) {
+			if (w->gmp_ecm_file) sprintf (buf, "ECM stage 2 on file %s", w->gmp_ecm_file);
+			else sprintf (buf, "ECM %d curve%s B1=%" PRIu64, w->curves_to_do, w->curves_to_do == 1 ? "" : "s",
+				      w->B1 * IniGetInt (INI_FILE, "ECMBoundsMultiplier", 1));
+		}
 		else if (w->work_type == WORK_PMINUS1)
 			sprintf (buf, "P-1 B1=%" PRIu64, w->B1);
 		else if (w->work_type == WORK_PPLUS1)

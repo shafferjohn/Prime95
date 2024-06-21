@@ -2,7 +2,7 @@
 #
 
 CC ?= cc
-CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -O2 -march=i486
+CFLAGS = -I.. -I../sqlite-amalgamation-3420000 -O2 -march=i486
 
 CXX ?= cc
 CXXFLAGS = -I.. -I../qd -O2 -march=i486

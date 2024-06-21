@@ -1,4 +1,4 @@
-; Copyright 1995-2011 Mersenne Research, Inc.  All rights reserved
+; Copyright 1995-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -350,6 +350,11 @@ ttp	lea	ebx, [ebx+128]		;; Next set of 8 multipliers
 ttp	lea	edi, [edi+4]		;; Next big/lit array ptr
 	sub	ecx, 8			;; Test loop counter
 	jnz	ilp			;; Loop til done
+no zero	mov	esi, DESTARG		;; Address of multiplied number
+no zero	mov	edi, ADDIN_OFFSET	;; Get address to add value into
+no zero	fld	QWORD PTR [esi][edi]	;; Get the value
+no zero	fadd	POSTADDIN_VALUE		;; Add in the requested value
+no zero	fstp	QWORD PTR [esi][edi]	;; Save the new value
 zero	jmp	zdn			;; Go to zero upper half end code
 no zero	jmp	idn			;; Go to normal end code
 &lab	ENDP

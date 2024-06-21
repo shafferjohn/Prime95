@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2023 Mersenne Research, Inc.  All rights reserved
 | Author:  George Woltman
 | Email: woltman@alum.mit.edu
 |
@@ -29,7 +29,7 @@
 #if defined (__HAIKU__)
 #include <unistd.h>
 #endif
-#if defined (__linux__) || defined (__FreeBSD__) || defined (__APPLE__) || defined (__HAIKU__)
+#if defined (__linux__) || defined (__FreeBSD__) || defined (__APPLE__) || defined (__HAIKU__) || defined (__EMX__)
 #include <sys/time.h>
 #endif
 #include "cpuid.h"
@@ -549,10 +549,12 @@ static	char *	BRAND_NAMES[] = {	/* From Intel Ap-485 */
 			 (family == 6 && model == 126) ||		// Core i3/i5/i7, Ice Lake
 			 (family == 6 && model == 143) ||		// Core i3/i5/i7, Sapphire Rapids
 			 (family == 6 && model == 140) ||		// Core i3/i5/i7, Tiger Lake
-			 (family == 6 && model == 141) ||		// Core i3/i5/i7, Rocket Lake
-			 (family == 6 && model == 167) ||		// Core i3/i5/i7, Tiger Lake
+			 (family == 6 && model == 141) ||		// Core i3/i5/i7, Tiger Lake
+			 (family == 6 && model == 167) ||		// Core i3/i5/i7, Rocket Lake
 			 (family == 6 && model == 154) ||		// Core i3/i5/i7, Alder Lake
-			 (family == 6 && model == 151))			// Core i3/i5/i7, Alder Lake
+			 (family == 6 && model == 151) ||		// Core i3/i5/i7, Alder Lake
+			 (family == 6 && model == 183) ||		// Core i3/i5/i7/i9, Raptor Lake
+			 (family == 6 && model == 186))			// Core i3/i5/i7/i9, Raptor Lake
 			CPU_ARCHITECTURE = CPU_ARCHITECTURE_CORE_I7;
 		else if ((family == 6 && model == 28) ||
 			 (family == 6 && model == 38) ||

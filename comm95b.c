@@ -5,7 +5,7 @@
  * Comm95b contains information used only during execution
  * Comm95c contains information used during setup and execution
  *
- * Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
+ * Copyright 1995-2023 Mersenne Research, Inc.  All rights reserved
  *
  */ 
 
@@ -61,8 +61,7 @@ void setOsThreadPriority (
 	SetThreadPriorityBoost (h, TRUE);
 }
 
-/* Register a thread termination.  We remove the thread handle from the */
-/* list of active worker threads. */
+/* Register a thread termination.  We remove the thread handle from the list of active workers. */
 
 void registerThreadTermination (void)
 {
@@ -79,11 +78,9 @@ void registerThreadTermination (void)
 	}
 }
 
-/* When stopping or exiting we raise the priority of all worker threads */
-/* so that they can terminate in a timely fashion even if there are other */
-/* CPU bound tasks running. */
+/* When stopping or exiting we raise the priority of all workers so that they can terminate in a timely fashion even if there are other CPU bound tasks running. */
 
-void raiseAllWorkerThreadPriority (void)
+void raiseAllWorkersPriority (void)
 {
 	int	i;
 

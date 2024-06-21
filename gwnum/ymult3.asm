@@ -1,4 +1,4 @@
-; Copyright 2011-2012 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2022 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -44,7 +44,7 @@ PROCFL	ygw_carries_wpn3
 	mov	biglit_incr, rax	; Save biglit increment
 
 	mov	rsi, carries		; Addr of the carries
-	ynorm012_wpn_part1 exec
+	ynorm012_wpn_part1 exec, exec
 
 	mov	rbp, DATA_ADDR		; Addr of the FFT data
 	mov	rdi, norm_ptr1		; Addr of the big/little flags array
@@ -72,7 +72,7 @@ PROCFL	ygw_carries_wpnr3
 	int_prolog 5*SZPTR+8,0,0
 
 	mov	rsi, carries		; Addr of the carries
-	ynorm012_wpn_part1 exec
+	ynorm012_wpn_part1 noexec, exec
 
 	mov	rbp, DATA_ADDR		; Addr of the FFT data
 	mov	eax, addcount1		; Load count of pass 1 blocks
@@ -146,7 +146,7 @@ PROCFL	ygw_carries_wpnn3
 	mov	biglit_incr, rax	; Save biglit increment
 
 	mov	rsi, carries		; Addr of the carries
-	ynorm012_wpn_part1 noexec
+	ynorm012_wpn_part1 exec, noexec
 
 	mov	rbp, DATA_ADDR		; Addr of the FFT data
 	mov	rdi, norm_ptr1		; Addr of the big/little flags array
@@ -174,7 +174,7 @@ PROCFL	ygw_carries_wpnnr3
 	int_prolog 5*SZPTR+8,0,0
 
 	mov	rsi, carries		; Addr of the carries
-	ynorm012_wpn_part1 noexec
+	ynorm012_wpn_part1 noexec, noexec
 
 	mov	rbp, DATA_ADDR		; Addr of the FFT data
 	mov	eax, addcount1		; Load count of pass 1 blocks

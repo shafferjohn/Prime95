@@ -236,7 +236,7 @@ facinv2_in_memory	EQU	QWORD PTR [AD_BASE+416*8]
 ; Global variables
 ;
 
-_GWDATA SEGMENT PAGE
+_GWDATA SEGMENT ALIGN(128)
 	align 8
 smfacendpt		DQ	100000000000h					; Limit for brute force factoring code (2^44)
 

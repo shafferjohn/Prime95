@@ -10,7 +10,7 @@
 | on the end user machine looking for an FFT implementation that is faster than the
 | default selection.
 |
-| Copyright 2017-2018 Mersenne Research, Inc.  All rights reserved.
+| Copyright 2017-2024 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 #ifndef _GWBENCH_H
@@ -25,10 +25,11 @@ extern "C" {
 
 /* Defines */
 
-#define GWNUMINI_FILE	"gwnum.txt"		/* Name of the INI file */
+#define GWNUMINI_FILE	"gwnum.txt"			/* Name of the INI file */
 
-#define GWNUM_FFT_IMPL_VERSION	"29.2"		/* This version number changes whenever FFT implementations change - meaning */
-						/* we need to toss benchmarking data from older gwnum versions. */
+#define GWNUM_FFT_IMPL_VERSION		"30.16"		/* This version number changes whenever FFT implementations change - meaning */
+							/* we need to toss benchmarking data from older gwnum versions. */
+#define GWNUM_FFT_IMPL_VERSION_BAD_SSE2	"29.2"		/* This version number is compatible with current version except for SSE2 data */
 
 /******************************************************************************
 *                                 Globals                                     *
@@ -58,18 +59,17 @@ struct gwbench_add_struct {
 };
 void gwbench_add_data (gwhandle *, struct gwbench_add_struct *);
 void gwbench_write_data (void);
-void gwbench_get_num_benchmarks (double, unsigned long, unsigned long, signed long, unsigned long, int, int, int, int,
-				 unsigned long *, unsigned long *, int *, int *);
+void gwbench_get_num_benchmarks (double, unsigned long, unsigned long, signed long, unsigned long, int, int, int, int, unsigned long *, int *, int *);
 
 /******************************************************************************
 *                             Internal Routines                               *
 ******************************************************************************/
 
-void gwbench_read_data (void);
+void gwbench_read_data (int);
 int gwbench_implementation_id (gwhandle *, int);
 int internal_implementation_id (int, int, int, int, int, int, int, int, int);
 int internal_implementation_ids_match (int, int, int, int, int, int, int, int);
-void gwbench_get_max_throughput (int, int, int, int, int, int, int, int, int *, double *);
+void gwbench_get_max_throughput (int, int, int, int, int, int, int, int *, double *);
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,4 @@
-; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved.
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved.
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -1638,7 +1638,9 @@ section_restart:
 		ystore	YMM_TMP4, ymm4
 		mov	edx, count1			;; Count of cache lines in section or padded group
 
-section_loop:
+section_loop:	inc	dh				;; Count propagations in the section
+		cmp	dh, 10				;; Only propagate carry for 10 words in the section (only pathological cases should ever get this high)
+		je	force_done			;; Force the final carry
 
 base2		vmovapd	ymm1, YMM_BIGVAL		;; Load comparison value
 no base2	vxorpd	ymm1, ymm1, ymm1		;; Create comparison value
@@ -1670,7 +1672,7 @@ no zero		ystore	[rsi+32], ymm1			;; Save new value2
 ttp		bump	rdi, 2				;; Advance pointers
 		bump	rsi, 64
 ttp		bump	rbp, 128
-		sub	rdx, 1				;; Test cache line counter
+		sub	dl, 1				;; Test cache line counter
 		jnz	section_loop			;; More cache lines in section, go add carry in
 
 	;; Section ended.  Rotate carries and stay in the current section or
@@ -1696,7 +1698,6 @@ ttp		mov	rbp, PPTR YMM_TMP3
 		jmp	section_restart			;; Do the section again
 
 new_section:
-
 	;; There is a bizarre case where adding a zero carry causes a carry (example: 10^114+1, a data
 	;; value of 500 becomes -500 with a carry of 1 -- add zero again and it becomes -500 with a carry
 	;; of -1).  This means that even though we have shifted the carries 4 times, the carries may not
@@ -1729,6 +1730,7 @@ done:		vmovapd	ymm3, YMM_TMP5			;; Reload any rotated carries
 		vmovapd	ymm2, YMM_TMP4
 		mov	rsi, PPTR YMM_TMP7		;; Restore next section pointers
 ttp		mov	rbp, PPTR YMM_TMP8
+
 force_done:
 base2		vsubpd	ymm3, ymm3, YMM_BIGVAL		;; Subtract rounding constant from carry
 base2		vsubpd	ymm2, ymm2, YMM_BIGVAL
@@ -1759,6 +1761,20 @@ base2	vsubsd	xmm2, xmm2, Q YMM_BIGVAL	;; Integerize traditional carry
 	;; to the lower FFT data later (after multiplying by -c).
 const	vmulsd	xmm3, xmm3, Q YMM_MULCONST
 
+	;; Work on zero-pad addin value.
+	vmovsd	xmm4, ADDIN_VALUE		;; Load the add in value
+const	vmulsd	xmm4, xmm4, YMM_MULCONST	;; Multiply the add in value by the small mul const
+	vaddsd	xmm4, xmm4, POSTADDIN_VALUE	;; Add the post-mul-by-const addin value
+	;; when c = -1, 1 = b^n
+	;; when c = 1, -1 = b^n, 1 = -b^n
+	;; when c = -3, 3 = b^n, 1 = b^n - 2
+	;; when c = 3, -3 = b^n, 3 = -b^n, 1 = -b^n - 2
+	;; The "- 2" has been precomputed in ZPAD_LSW_ADJUST.  Add ADDIN_VALUE * mul-by-const * ZPAD_LSW_ADJUST into the least significant FFT word
+	mov	rsi, DESTARG			;; Address of squared number
+	vmulsd	xmm0, xmm4, ZPAD_LSW_ADJUST
+	vaddsd	xmm0, xmm0, [rsi]
+	vmovsd	[rsi], xmm0
+
 	;; Multiply ZPAD0 through ZPAD6 by const * -c.  This, in essense,
 	;; wraps this data from above the FFT data area to the halfway point.
 	;; Later on we'll divide this by K to decide which data needs wrapping
@@ -1773,10 +1789,11 @@ const	vmulsd	xmm3, xmm3, Q YMM_MULCONST
 
 	movzx	rax, BYTE PTR [rdi]		;; Load big vs. little flags
 	vmovsd	xmm0, ZPAD0			;; Load value
-	vmovsd	xmm5, ADDIN_VALUE		;; Use ADDIN_VALUE as the initial carry to add in
+	vsubsd	xmm5, xmm5, xmm5
 	single_split_lower_zpad_word base2, xmm0, xmm5, xmm1, rax*2
 no const vmulsd	xmm0, xmm0, Q YMM_MINUS_C
 const	vmulsd	xmm0, xmm0, Q YMM_MINUS_C_TIMES_MULCONST
+	vaddsd	xmm0, xmm0, xmm4		;; Apply rest of ADDIN_VALUE * mul-by-const here (the FFT half way point)
 	round_zpad7_word base2, xmm0, xmm2, xmm1, rax*2
 	vmovsd	ZPAD0, xmm0
 
@@ -2227,10 +2244,19 @@ ynorm_top_carry_wpn MACRO ttp, base2
 	ynorm_top_carry_cmn base2, rsi, xmm7, 1
 	ENDM
 
+; The multi-pass add/sub/smallmul case.  The top carry from the carries array is in xmm1.  No scratch area.
+ynorm_top_carry_op_wpn MACRO ttp, base2
+	ynorm_top_carry_cmn base2, rsi, xmm2, 2		;; We'll copy the incoming carry in xmm1 to xmm2
+	ENDM
+
 ynorm_top_carry_cmn MACRO base2, srcreg, xreg, twopass
 	LOCAL	kok
 	cmp	TOP_CARRY_NEEDS_ADJUSTING, 1 ;; Does top carry need work?
 	jne	kok			;; Skip this code if K is 1
+
+	IF twopass EQ 0
+	ystore	YMM_TMP6, ymm3		;; Save the full carry register
+	ENDIF
 
 	IF twopass EQ 1			;; Two pass case - load the carry
 	mov	rdi, carries		;; Addr of the carries
@@ -2238,11 +2264,13 @@ ynorm_top_carry_cmn MACRO base2, srcreg, xreg, twopass
 	shl	rax, 6			;; Compute addr of the high carries
 	add	rdi, rax
 	vmovsd	xreg, Q [rdi-8]		;; Load very last carry
+	vmovsd	Q YMM_TMP6, xreg	;; Save the carry for later use
 	ENDIF
 
-	IF twopass EQ 0
-	ystore	YMM_TMP6, ymm3		;; Save the full carry register
-	ELSE
+	IF twopass EQ 2			;; Two pass add/sub/smallmul case
+	mov	rsi, DESTARG		;; Load destination
+	vmovsd	xmm3, xmm0, xmm0	;; Preserve xmm0
+	vmovsd	xmm2, xmm1, xmm1	;; Move carry to xmm2
 	vmovsd	Q YMM_TMP6, xreg	;; Save the carry for later use
 	ENDIF
 
@@ -2294,6 +2322,26 @@ base2	vsubsd	xreg, xreg, Q YMM_BIGVAL	;; Convert top carry from int+BIGVAL state
 	vsubsd	xmm0, xmm0, xmm1		;; Fractional part of shifted remainder
 	vmulsd	xmm1, xmm1, CARRY_ADJUST3	;; Weight integer part
 
+	;; Single pass case
+	IF twopass EQ 0
+	mov	eax, HIGH_WORD1_OFFSET		;; Add integer part to top word
+	vaddsd	xmm1, xmm1, Q [srcreg][rax]
+	vmovsd	Q [srcreg][rax], xmm1
+	vmulsd	xmm0, xmm0, CARRY_ADJUST4	;; Shift fractional part
+	vroundsd xmm1, xmm0, xmm0, 0		;; Integer part of shifted fractional
+	vsubsd	xmm0, xmm0, xmm1		;; Fractional part
+	vmulsd	xmm1, xmm1, CARRY_ADJUST5	;; Weight integer part
+	mov	eax, HIGH_WORD2_OFFSET		;; Add frac part to top-1 word
+	vaddsd	xmm1, xmm1, Q [srcreg][rax]
+	vmovsd	Q [srcreg][rax], xmm1
+	vmulsd	xmm0, xmm0, CARRY_ADJUST6	;; Shift fractional part
+	vroundsd xmm0, xmm0, xmm0, 0
+	vmulsd	xmm0, xmm0, CARRY_ADJUST7	;; Weight fractional part
+	mov	eax, HIGH_WORD3_OFFSET		;; Add frac part to top-2 word
+	vaddsd	xmm0, xmm0, Q [srcreg][rax]
+	vmovsd	Q [srcreg][rax], xmm0
+	ENDIF
+
 	;; Two pass scratch area case
 	IF twopass EQ 1
 	mov	eax, HIGH_SCRATCH1_OFFSET	;; Add integer part to top word
@@ -2320,26 +2368,6 @@ base2	vsubsd	xreg, xreg, Q YMM_BIGVAL	;; Convert top carry from int+BIGVAL state
 	vmovsd	Q [srcreg][rax], xmm0
 	ENDIF
 
-	;; Single pass case
-	IF twopass EQ 0
-	mov	eax, HIGH_WORD1_OFFSET		;; Add integer part to top word
-	vaddsd	xmm1, xmm1, Q [srcreg][rax]
-	vmovsd	Q [srcreg][rax], xmm1
-	vmulsd	xmm0, xmm0, CARRY_ADJUST4	;; Shift fractional part
-	vroundsd xmm1, xmm0, xmm0, 0		;; Integer part of shifted fractional
-	vsubsd	xmm0, xmm0, xmm1		;; Fractional part
-	vmulsd	xmm1, xmm1, CARRY_ADJUST5	;; Weight integer part
-	mov	eax, HIGH_WORD2_OFFSET		;; Add frac part to top-1 word
-	vaddsd	xmm1, xmm1, Q [srcreg][rax]
-	vmovsd	Q [srcreg][rax], xmm1
-	vmulsd	xmm0, xmm0, CARRY_ADJUST6	;; Shift fractional part
-	vroundsd xmm0, xmm0, xmm0, 0
-	vmulsd	xmm0, xmm0, CARRY_ADJUST7	;; Weight fractional part
-	mov	eax, HIGH_WORD3_OFFSET		;; Add frac part to top-2 word
-	vaddsd	xmm0, xmm0, Q [srcreg][rax]
-	vmovsd	Q [srcreg][rax], xmm0
-	ENDIF
-
 base2	vaddsd	xreg, xreg, Q YMM_BIGVAL	;; Restore carry to int+BIGVAL state
 
 	IF twopass EQ 0
@@ -2348,6 +2376,11 @@ base2	vaddsd	xreg, xreg, Q YMM_BIGVAL	;; Restore carry to int+BIGVAL state
 
 	IF twopass EQ 1
 	vmovsd	Q [rdi-8], xreg			;; Save very last carry
+	ENDIF
+
+	IF twopass EQ 2
+	vmovsd	xmm0, xmm3, xmm3 		;; Restore xmm0
+	vmovsd	xmm1, xreg, xreg		;; Return carry in xmm1
 	ENDIF
 
 kok:
@@ -4114,8 +4147,8 @@ ENDIF
 ; This macro does initial prep work by shuffling the carries from the last pass 1 block.
 ; rsi = start of the carries array
 
-ynorm012_wpn_part1 MACRO base2
-	LOCAL	shuflp, done
+ynorm012_wpn_part1 MACRO ttp, base2
+	LOCAL	shuflp, no_adjust, done
 	cmp	THIS_BLOCK, 0		;; Are we carrying into the first data block?
 	jne	done			;; If not, skip wrapping carries and negating the last carry
 	mov	eax, addcount1		;; Load count of cache lines in the carries array
@@ -4138,12 +4171,22 @@ shuflp:	vmovsd	xmm4, Q [rsi+0*32]	;; Shift 3 carry words up
 	bump	rsi, 64			;; Next carry cache line
 	dec	rax			;; Decrement count of cache lines
 	jnz	short shuflp
+
+	;; Because of POSTFFT, squaring and multiply operations adjust the top carry while the data is in the scratch area.
+	;; For add/sub/addsub/smallmul operations, we adjust the top carry here.
+ttp	cmp	add_sub_smallmul_op, 0		;; If this is an add/sub/smallmul operation, not a square/multiply, do top carry adjust
+ttp	je	no_adjust			;; Jump if not an add/sub/smallmul operation
+ttp	ynorm_top_carry_op_wpn ttp, base2	;; Adjust carry in xmm1 if k > 1
+no_adjust:
+
 base2	vsubsd	xmm1, xmm1, Q YMM_BIGVAL
 	vmulsd	xmm1, xmm1, Q YMM_MINUS_C ;; Negate the very last carry
 base2	vaddsd	xmm1, xmm1, Q YMM_BIGVAL
+
 	mov	rsi, carries		;; Reload carries array pointer
 	vmovsd	Q [rsi+0*32], xmm1	;; Move last cache line's high carries into first cache line
 	vmovsd	Q [rsi+1*32], xmm0
+
 done:
 	ENDM
 
@@ -4295,7 +4338,7 @@ done:
 
 ;; On input, xmm2 and xmm3 contain high carries from the last carries array row
 ynorm012_wpn_zpad_part1_cmn MACRO ttp, base2, const
-	LOCAL	smallk, mediumk, div_k_done
+	LOCAL	zsetdn, nomulc, smallk, mediumk, div_k_done
 
 	;; Strip BIGVAL from the traditional carry, we'll add the traditional
 	;; carry in later when we are working on the ZPAD0 - ZPAD6 values.
@@ -4305,6 +4348,48 @@ base2	vsubsd	xmm2, xmm2, Q YMM_BIGVAL ;; Integerize traditional carry
 	;; by k, we multiply FFT high carry by const and we'll add it
 	;; to the lower FFT data later (after multiplying by -c).
 const	vmulsd	xmm3, xmm3, Q YMM_MULCONST
+
+	;; If this is an add/sub/smallmul operation, set ZPAD0-6 to the value to be divided by k (FFT words above halfway point)
+	;; This lets add/sub/smallmul share carry code with square/multiply
+no const cmp	add_sub_smallmul_op, 0		;; If this is an add/sub/smallmul operation, not a square/multiply, then copy data
+no const je	zsetdn				;; Jump if not an add/sub/smallmul operation
+no const vaddsd	xmm0, xmm2, [rsi+32] 		;; Copy value1 + low carry
+no const vmovsd	ZPAD0, xmm0
+no const add	rsi, YMM_SRC_INCR1		;; Next source pointer
+no const vmovsd	xmm0, [rsi+32]	 		;; Copy value2
+no const vmovsd	ZPAD1, xmm0
+no const add	rsi, YMM_SRC_INCR2		;; Next source pointer
+no const vmovsd	xmm0, [rsi+32]	 		;; Copy value3
+no const vmovsd	ZPAD2, xmm0
+no const add	rsi, YMM_SRC_INCR3		;; Next source pointer
+no const vmovsd	xmm0, [rsi+32]	 		;; Copy value4
+no const vmovsd	ZPAD3, xmm0
+no const add	rsi, YMM_SRC_INCR4		;; Next source pointer
+no const vmovsd	xmm0, [rsi+32]	 		;; Copy value5
+no const vmovsd	ZPAD4, xmm0
+no const add	rsi, YMM_SRC_INCR5		;; Next source pointer
+no const vmovsd	xmm0, [rsi+32]	 		;; Copy value6
+no const vmovsd	ZPAD5, xmm0
+no const add	rsi, YMM_SRC_INCR6		;; Next source pointer
+no const vmovsd	xmm0, [rsi+32]	 		;; Copy value7
+no const vmovsd	ZPAD6, xmm0
+no const mov	rsi, DESTARG			;; Restore source pointer
+no const jmp	nomulc				;; Skip over the mul by -C
+zsetdn:
+
+	;; Work on zero-pad addin value.
+	vmovsd	xmm4, ADDIN_VALUE		;; Load the add in value
+const	vmulsd	xmm4, xmm4, YMM_MULCONST	;; Multiply the add in value by the small mul const
+	vaddsd	xmm4, xmm4, POSTADDIN_VALUE	;; Add the post-mul-by-const addin value
+	;; when c = -1, 1 = b^n
+	;; when c = 1, -1 = b^n, 1 = -b^n
+	;; when c = -3, 3 = b^n, 1 = b^n - 2
+	;; when c = 3, -3 = b^n, 3 = -b^n, 1 = -b^n - 2
+	;; The "- 2" has been precomputed in ZPAD_LSW_ADJUST.  Add ADDIN_VALUE * mul-by-const * ZPAD_LSW_ADJUST into the least significant FFT word
+	mov	rsi, DESTARG			;; Address of squared number
+	vmulsd	xmm0, xmm4, ZPAD_LSW_ADJUST
+	vaddsd	xmm0, xmm0, [rsi]
+	vmovsd	[rsi], xmm0
 
 	;; Multiply ZPAD0 through ZPAD6 by const * -C.  This, in essense,
 	;; wraps this data from above the FFT data area to the halfway point.
@@ -4317,10 +4402,11 @@ const	vmulsd	xmm3, xmm3, Q YMM_MULCONST
 
 ttp	movzx	rax, BYTE PTR [rdi]		;; Load big vs. little flags
 	vmovsd	xmm0, ZPAD0			;; Load value
-	vmovsd	xmm5, ADDIN_VALUE		;; Use ADDIN_VALUE as the initial carry to add in
+	vsubsd	xmm5, xmm5, xmm5
 	new_single_split_lower_zpad_word ttp, base2, xmm0, xmm5, xmm1, rax*8
 no const vmulsd	xmm0, xmm0, Q YMM_MINUS_C
 const	vmulsd	xmm0, xmm0, Q YMM_MINUS_C_TIMES_MULCONST
+	vaddsd	xmm0, xmm0, xmm4		;; Apply rest of ADDIN_VALUE * mul-by-const here (the FFT half way point)
 	new_round_zpad7_word ttp, base2, xmm0, xmm2, xmm1, rax*8
 	vmovsd	ZPAD0, xmm0
 
@@ -4382,7 +4468,7 @@ const	vmulsd	xmm0, xmm0, Q YMM_MINUS_C_TIMES_MULCONST
 	;; K is between one and 2 big words in size.  And K is more than
 	;; 2 big words in size.
 
-	cmp	ZPAD_TYPE, 2		;; Are we dealing with case 1,2,or 3
+nomulc:	cmp	ZPAD_TYPE, 2		;; Are we dealing with case 1,2,or 3
 	jl	smallk			;; One word case
 	je	mediumk			;; Two word case
 
@@ -5534,66 +5620,6 @@ ttp	vmulpd	ymm7, ymm7, [rbx+32]			;; carry2 *= two-to-phi
 	vmovapd	ymm7, ymm5				;; Install next section's carry
 	ENDM
 
-; *************** 1D normalized smalladd macro ******************
-; This macro adds a small constant, then propagates the carry
-; xmm7 = addin value
-; rsi = pointer to destination
-; rbp = pointer two-to-phi multipliers
-; rdi = pointer to array of big vs. little flags
-; rax = big vs. little word flag #1
-
-ynorm_smalladd_1d MACRO base2
-	lea	rdi, YMM_FIRST_BIGLIT_VALUES	;; Address of first big/little flags
-	mov	rbp, norm_col_mults		;; Address of the multipliers
-
-	movzx	rax, BYTE PTR [rdi]		;; First biglit flag
-	vmovsd	xmm0, Q [rsi]			;; Load value1
-	vaddsd	xmm0, xmm0, xmm7		;; Add in carry
-base2	vaddsd	xmm0, xmm0, Q YMM_BIGVAL
-	single_rounding base2, xmm0, xmm2, xmm4, rax*2
-	vmovsd	Q [rsi], xmm0			;; Save value1
-
-	add	rbp, YMM_NORM_INCR1		;; Next ttp/ttmp pointer
-	add	rsi, YMM_SRC_INCR1		;; Next source pointer
-	movzx	rax, BYTE PTR [rdi+1]		;; Load big vs. little flags
-	vmovsd	xmm0, Q [rsi]			;; Load FFT data
-	vmulsd	xmm0, xmm0, Q [rbp]		;; Mul values2 by two-to-minus-phi
-	vmulsd	xmm0, xmm0, Q YMM_NORM012_FF	;; Mul by FFTLEN/2
-	vaddsd	xmm0, xmm0, xmm2		;; x2 = value + carry
-	single_rounding base2, xmm0, xmm2, xmm4, rax*2
-	vmulsd	xmm0, xmm0, Q [rbp+32]		;; new value2 = val * two-to-phi
-	vmovsd	Q [rsi], xmm0			;; Save value2
-
-	add	rbp, YMM_NORM_INCR2		;; Next ttp/ttmp pointer
-	add	rsi, YMM_SRC_INCR2		;; Next source pointer
-	movzx	rax, BYTE PTR [rdi+2]		;; Load big vs. little flags
-	vmovsd	xmm0, Q [rsi]			;; Load FFT data
-	vmulsd	xmm0, xmm0, Q [rbp]		;; Mul values3 by two-to-minus-phi
-	vmulsd	xmm0, xmm0, Q YMM_NORM012_FF	;; Mul by FFTLEN/2
-	vaddsd	xmm0, xmm0, xmm2		;; x3 = value + carry
-	single_rounding base2, xmm0, xmm2, xmm4, rax*2
-	vmulsd	xmm0, xmm0, Q [rbp+32]		;; new value3 = val * two-to-phi
-	vmovsd	Q [rsi], xmm0			;; Save value3
-
-	add	rbp, YMM_NORM_INCR3		;; Next ttp/ttmp pointer
-	add	rsi, YMM_SRC_INCR3		;; Next source pointer
-	movzx	rax, BYTE PTR [rdi+3]		;; Load big vs. little flags
-	vmovsd	xmm0, Q [rsi]			;; Load FFT data
-	vmulsd	xmm0, xmm0, Q [rbp]		;; Mul values2 by two-to-minus-phi
-	vmulsd	xmm0, xmm0, Q YMM_NORM012_FF	;; Mul by FFTLEN/2
-	vaddsd	xmm0, xmm0, xmm2		;; x4 = value + carry
-	single_rounding base2, xmm0, xmm2, xmm4, rax*2
-	vmulsd	xmm0, xmm0, Q [rbp+32]		;; new value4 = val * two-to-phi
-	vmovsd	Q [rsi], xmm0			;; Save value4
-
-	add	rbp, YMM_NORM_INCR4		;; Next ttp/ttmp pointer
-	add	rsi, YMM_SRC_INCR4		;; Next source pointer
-base2	vsubsd	xmm2, xmm2, Q YMM_BIGVAL
-	vmulsd	xmm2, xmm2, Q [rbp+32]		;; carry *= two-to-phi
-	vaddsd	xmm2, xmm2, Q [rsi]		;; Add in FFT data
-	vmovsd	Q [rsi], xmm2			;; Save value5
-	ENDM
-
 ; *************** 1D normalized smallmul macro ******************
 ; This macro multiplies by a small constant, then "normalizes" eight FFT
 ; data values.
@@ -6287,6 +6313,40 @@ ttp		vmulpd	ymm1, ymm1, [rbp+0*YMM_GMD+YMM_GMD/2][rcx] ;; value2 *= fudged grp t
 		ystore	[rsi+rbx+1*32], ymm1		;; Save new value2
 	ENDM
 
+;; Final step in the ynorm_op process.  Write carries to the carries array (to be processed later)
+
+ynorm_op_wpn_save_carries MACRO
+	mov	rbp, DATA_ADDR			; Address of carries array
+	ystore	[rbp], ymm2			; Save carry out of low word
+	ystore	[rbp+32], ymm3			; Save carry out of high word
+	ENDM
+
+ynorm_op_wpn_save_carries2 MACRO
+	mov	rbp, DATA_ADDR			; Address of carries #1 array
+	ystore	[rbp], ymm2			; Save carry out of low word
+	ystore	[rbp+32], ymm3			; Save carry out of high word
+	mov	rbp, PREMULT_ADDR		; Address of carries #2 array
+	ystore	[rbp], ymm6			; Save carry out of low word
+	ystore	[rbp+32], ymm7			; Save carry out of high word
+	ENDM
+
+ynorm_op_wpn_save_carries_zpad MACRO
+	mov	rbp, DATA_ADDR			; Address of carries array
+	ystore	[rbp], ymm2			; Save carry out of low word
+	vxorpd	ymm0, ymm0, ymm0		; High carry should be zero (BIGVAL)
+	ystore	[rbp+32], ymm0			; Store high carry not in BIGVAL format
+	ENDM
+
+ynorm_op_wpn_save_carries2_zpad MACRO
+	mov	rbp, DATA_ADDR			; Address of carries #1 array
+	ystore	[rbp], ymm2			; Save carry out of low word
+	vxorpd	ymm0, ymm0, ymm0		; High carry should be zero (BIGVAL)
+	ystore	[rbp+32], ymm0			; Store high carry not in BIGVAL format
+	mov	rbp, PREMULT_ADDR		; Address of carries #2 array
+	ystore	[rbp], ymm6			; Save carry out of low word
+	ystore	[rbp+32], ymm0			; Save carry out of high word
+	ENDM
+
 ; *************** WPN followup macros ******************
 ; This macro finishes the normalize add/sub process by adding three carry values
 ; from the two carry registers from the end of a pass 1 block back to the start
@@ -6339,7 +6399,7 @@ ttp	vmulpd	carry1, carry1, [rbp+0*YMM_GMD+YMM_GMD/2][rcx] ;; carry1 *= fudged gr
 ynorm_op_wpn_final MACRO ttp, base2, carry1, carry2
 	LOCAL	cloop, last_iter, done
 
-	ynorm_top_carry_cmn base2, rsi, carry2, 2
+xxx	ynorm_top_carry_cmn base2, rsi, carry2, 2
 
 base2	vsubsd	carry2, carry2, Q YMM_BIGVAL	;; Remove BIGVAL
 	vmulsd	carry2, carry2, Q YMM_MINUS_C	;; mul wrap around carry by -c
@@ -6509,58 +6569,6 @@ ttp		vmulpd	ymm5, ymm5, [rbp+0*YMM_GMD+YMM_GMD/2][rcx] ;; value2 *= fudged grp t
 		ystore	[rsi+0*32], ymm4		;; Save new value1
 		ystore	[rsi+1*32], ymm5		;; Save new value1
 		sub	rsi, dist_to_dest2		;; Change back to a pointer into the first input number
-	ENDM
-
-; *************** WPN normalized small add macro ******************
-; This macro implements the smalladd with normalization feature by adding the
-; provided small value to the first FFT word and propagating any carries.
-; NOTE: caller can assume xmm6,xmm7 are left untouched (for better prolog/epilog handling)
-
-ynorm_smalladd_wpn MACRO ttp, base2
-	LOCAL	clmloop, cloop, done
-
-	mov	rsi, DESTARG			;; Address of destination
-	vmovsd	xmm2, DBLARG			;; Small addin value
-base2	vaddsd	xmm2, xmm2, Q YMM_BIGVAL
-ttp	mov	rbp, norm_grp_mults		;; Addr of the group multipliers
-ttp	mov	rdi, norm_biglit_array		;; Addr of the big/little flags array
-
-clmloop:
-ttp	mov	edx, cache_line_multiplier	;; We must increment rdi by a funky amount every 4*clm cache lines
-no ttp	sub	rdx, rdx			;; Init loop counter
-
-cloop:
-ttp	movzx	rbx, WORD PTR [rdi]		;; Load big vs. little flags
-ttp	movzx	eax, bh				;; Big/lit flags 1-2
-ttp	and	rbx, 0e0h			;; Fudge flags 1
-
-	vmovsd	xmm0, Q [rsi]			;; Load value
-ttp	vmulsd	xmm0, xmm0, Q [rbp+0*YMM_GMD][rbx] ;; Mul values by fudged two-to-minus-phi
-	vaddsd	xmm0, xmm0, xmm2		;; x = values + carry
-	new_single_rounding ttp, base2, xmm0, xmm2, xmm4, rax*8
-ttp	vmulsd	xmm0, xmm0, Q [rbp+0*YMM_GMD+YMM_GMD/2][rbx] ;; value = rounded value * fudged grp two-to-phi
-	vmovsd	Q [rsi], xmm0			;; Save new value
-
-base2	vmovsd	xmm1, Q YMM_BIGVAL		;; Load comparison value
-no base2 vxorpd	xmm1, xmm1, xmm1		;; Create comparison value
-	vcmpsd	xmm0, xmm2, xmm1, 0Ch		;; Test for non-zero carry
-	vmovmskpd rax, xmm0			;; Extract comparison bit
-	or	rax, rax			;; Is bit on?
-	jz	short done			;; No, we are done
-
-ttp	bump	rdi, 2				;; Advance pointers
-	add	rsi, pass2blkdst		;; Next FFT data ptr
- 	add	dl, 256/4			;; Special increment needed every 4th iteration
-	jnc	cloop				;; Loop if not 4th iteration
-	sub	rsi, pass1blkdst		;; Each pass1 block consists of 4 pass 2 blocks
-	bump	rsi, 64				;; Next cache line
-ttp	sub	dl, 4				;; Do we need to bump rdi yet?
-ttp	jnz	cloop				;; No, repeat carry propagation loop
-ttp	add	rdi, normval2			;; Adjust ptr to little/big flags
-ttp	jmp	clmloop				;; Yes, reload 4*clm counter and propagate
-no ttp	jmp	cloop				;; No, repeat carry propagation loop
-
-done:	
 	ENDM
 
 ; *************** WPN normalized small mul macro ******************
@@ -6747,7 +6755,7 @@ done:	vmovapd	ymm2, YMM_TMP1			;; Set next block's carry
 ynorm_smallmul_wpn_final MACRO ttp, base2
 	LOCAL	clmloop, cloop, done
 
-	ynorm_top_carry_cmn base2, rsi, xmm3, 2
+xxx	ynorm_top_carry_cmn base2, rsi, xmm3, 2
 
 base2	vsubsd	xmm3, xmm3, Q YMM_BIGVAL	;; Remove BIGVAL
 	vmulsd	xmm3, xmm3, Q YMM_MINUS_C	;; mul wrap around carry by -c

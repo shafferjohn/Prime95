@@ -1,4 +1,4 @@
-; Copyright 2011-2019 - Mersenne Research, Inc.  All rights reserved.
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved.
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -1251,8 +1251,7 @@ znorm_smallmul_wpn_zpad_save_carries MACRO
 ;;
 ;; Note: We eliminate multiplying the low carry by k because it is later divided by k in the wrap high half of FFT step.
 
-
-;; How does the final low and high carry propagation work in a add/sub/addsub/smallmul?  This roughly explains the operations involved.
+;; How does the final low and high carry propagation work in add/sub/addsub/smallmul?  This roughly explains the operations involved.
 ;; The high half of the FFT has 4 words of data.  The high carry is zero.  The low carry is a traditional carry that
 ;; is added into the 4 words of high FFT data.
 ;; To wrap high half of FFT:		divide by k  -> leave remainder in high half of FFT
@@ -1903,17 +1902,27 @@ ttp	vmovsd	xmm23, ZMM_RNDVAL_TIMES_LARGE_BASE ;; RNDVAL * large_word_base - RNDV
 ttp	vmovsd	xmm21, ZMM_RNDVAL_OVER_LARGE_BASE  ;; RNDVAL / large_word_base - RNDVAL
 	vmovsd	xmm20, ZMM_RNDVAL_OVER_SMALL_BASE  ;; RNDVAL / small_word_base - RNDVAL
 	vmovsd	xmm19, ZMM_MINUS_C		;; -c
+	vmovsd	xmm1, ADDIN_VALUE		;; Load the add in value
 	cmp	const_fft, 0			;; Are we multiplying result by a constant?
 	je	short noncon			;; Jump if not const
 	vmovsd	xmm19, ZMM_MINUS_C_TIMES_MULCONST ;; -c * small mul const
-noncon:
+	vmulsd	xmm1, xmm1, ZMM_MULCONST	;; Multiply the add in value by the small mul const
+noncon:	vaddsd	xmm1, xmm1, POSTADDIN_VALUE	;; Add the post-mul-by-const addin value
+
+	;; when c = -1, 1 = b^n
+	;; when c = 1, -1 = b^n, 1 = -b^n
+	;; when c = -3, 3 = b^n, 1 = b^n - 2
+	;; when c = 3, -3 = b^n, 3 = -b^n, 1 = -b^n - 2
+	;; The "- 2" has been precomputed in ZPAD_LSW_ADJUST.  Add ADDIN_VALUE * mul-by-const * ZPAD_LSW_ADJUST into the least significant FFT word
+	vmovsd	xmm0, [rsi]
+	zfmaddsd xmm0, xmm1, ZPAD_LSW_ADJUST, xmm0
+	vmovsd	[rsi], xmm0
+	vaddsd	xmm1, xmm1, [rsi+64]		;; We will apply rest of ADDIN_VALUE * mul-by-const at the half way point (saved high carry)
 
 ttp	kmovw	k1, ZMM_FIRST_BIGLIT_VALUES	;; Load first 8 big vs. little flags
-	vmovsd	xmm3, ZPAD0			;; Load value
-	vaddsd	xmm3, xmm3, ADDIN_VALUE		;; Add the optional ADDIN_VALUE here
-	vaddsd	xmm3, xmm3, xmm30
+	vaddsd	xmm3, xmm30, ZPAD0		;; Load value
 	split_first_zpad7_word ttp, xmm3, xmm0
-	zfmaddsd xmm3, xmm3, xmm19, [rsi+64]	;; Mul by -c * optional small mul const, add saved high carry
+	zfmaddsd xmm3, xmm3, xmm19, xmm1 	;; Mul by -c * optional small mul const, add saved high carry and ADDIN_VALUE * mul-by-const
 	split_first_zpad7_word ttp, xmm3, xmm1
 
 ttp	kshiftrw k1, k1, 1			;; Next big vs. little flag

@@ -1,4 +1,4 @@
-; Copyright 1995-2007 Mersenne Research, Inc.  All rights reserved
+; Copyright 1995-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -26,13 +26,12 @@ _TEXT SEGMENT
 ;; Macros to do the code common to all pass 2 routines
 ;;*****************************************************
 
-;; Entry point for real FFTs: do one real and count1 complex blocks, also
-;; entry point for all-complex FFTs: do count1 complex blocks
+;; Entry point for real FFTs: do one real and count1 complex blocks, also entry point for negacyclic FFTs: do count1 complex blocks
 
 pass2_entry MACRO complex_start
 	int_prolog 0,0,0
-	cmp	ALL_COMPLEX_FFT, 1	;; Test if there is a real-data block
-	je	complex_start		;; Jump to process all-complex blocks
+	cmp	NEGACYCLIC_FFT, 1	;; Test if there is a real-data block
+	je	complex_start		;; Jump to process complex blocks
 	ENDM
 
 ;; Exit code for pass2 routines

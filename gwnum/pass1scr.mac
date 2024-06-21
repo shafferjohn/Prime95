@@ -1,4 +1,4 @@
-; Copyright 1998-2011 - Mersenne Research, Inc.  All rights reserved
+; Copyright 1998-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -726,7 +726,7 @@ fftdn1:	end_timer 1
 	ENDM
 
 
-;; Perform a 12K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 12K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 6 levels, pass 2 uses common code to perform the last 8 levels.
 
 pass1levels6complex3 MACRO pass2_macro, p2cl, clmarg
@@ -1745,7 +1745,7 @@ fftdn1:	end_timer 1
 	ENDM
 
 
-;; Perform a 16K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 16K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 6 levels, pass 2 uses common code to perform the last 8 levels.
 
 pass1levels6complex4 MACRO pass2_macro, p2cl, clmarg
@@ -2772,7 +2772,7 @@ fftdn1:	end_timer 1
 	ENDM
 
 
-;; Perform a 24K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 24K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 7 levels, pass 2 uses common code to perform the last 8 levels.
 
 pass1levels7complex3 MACRO pass2_macro, p2cl, clmarg
@@ -3799,7 +3799,7 @@ fftdn1:	end_timer 1
 	ENDM
 
 
-;; Perform a 32K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 32K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 7 levels, pass 2 uses common code to perform the last 8 levels.
 
 pass1levels7complex4 MACRO pass2_macro, p2cl, clmarg
@@ -4976,7 +4976,7 @@ fftdn1:	end_timer 1
 	ENDM
 
 
-;; Perform a 48K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 48K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 8 levels, pass 2 uses common code to perform the last 8 levels.
 
 pass1levels8complex3 MACRO pass2_macro, p2cl, clmarg
@@ -6223,7 +6223,7 @@ fftdn1:	end_timer 1
 	ENDM
 
 
-;; Perform a 64K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 64K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 8 levels, pass 2 uses common code to perform the last 8 levels.
 
 pass1levels8complex4 MACRO pass2_macro, p2cl, clmarg
@@ -7493,7 +7493,7 @@ fftdn1:	end_timer 1
 	ENDM
 
 
-;; Perform a 96K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 96K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 9 levels, pass 2 uses common code to perform the last 8 levels.
 
 pass1levels9complex3 MACRO pass2_macro, p2cl, clmarg
@@ -8774,7 +8774,7 @@ fftdn1:	end_timer 1
 	ENDM
 
 
-;; Perform a 128K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 128K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 9 levels, pass 2 uses common code to perform the last 8 levels.
 
 pass1levels9complex4 MACRO pass2_macro, p2cl, clmarg
@@ -10244,7 +10244,7 @@ fftdn1:	end_timer 1
 	ENDM
 
 
-;; Perform a 192K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 192K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 10 levels, pass 2 uses common code to perform the last 8 levels.
 
 pass1levels10complex3 MACRO pass2_macro, p2cl, clmarg
@@ -11779,7 +11779,7 @@ fftdn1:	end_timer 1
 	ENDM
 
 
-;; Perform a 256K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 256K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 10 levels, pass 2 uses common code to perform the last 8 levels.
 
 pass1levels10complex4 MACRO pass2_macro, p2cl, clmarg

@@ -11,14 +11,13 @@
 | ALSO NOTE:  Sorry, memory allocation errors are not handled properly and
 | documentation is incredibly poor.
 |
-|  Copyright 2016-2017 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2016-2023 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 #ifndef _GWINI_H
 #define _GWINI_H
 
-/* This is a C library.  If used in a C++ program, don't let the C++ */
-/* compiler mangle names. */
+/* This is a C library.  If used in a C++ program, don't let the C++ compiler mangle names. */
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,13 +38,16 @@ void IniSectionGetNthTimedString (const char *, const char *, const char *, int,
 
 long IniGetInt (const char *, const char *, long);
 long IniSectionGetInt (const char *, const char *, const char *, long);
-
 long IniGetTimedInt (const char *, const char *, long, unsigned int *);
 long IniSectionGetTimedInt (const char *, const char *, const char *, long, unsigned int *);
 
+int64_t IniGetInt64 (const char *, const char *, int64_t);
+int64_t IniSectionGetInt64 (const char *, const char *, const char *, int64_t);
+int64_t IniGetTimedInt64 (const char *, const char *, int64_t, unsigned int *);
+int64_t IniSectionGetTimedInt64 (const char *, const char *, const char *, int64_t, unsigned int *);
+
 float IniGetFloat (const char *, const char *, float);
 float IniSectionGetFloat (const char *, const char *, const char *, float);
-
 float IniGetTimedFloat (const char *, const char *, float, unsigned int *);
 float IniSectionGetTimedFloat (const char *, const char *, const char *, float, unsigned int *);
 
@@ -56,6 +58,9 @@ void IniSectionWriteNthString (const char *, const char *, const char *, int, co
 
 void IniWriteInt (const char *, const char *, long);
 void IniSectionWriteInt (const char *, const char *, const char *, long);
+
+void IniWriteInt64 (const char *, const char *, int64_t);
+void IniSectionWriteInt64 (const char *, const char *, const char *, int64_t);
 
 void IniWriteFloat (const char *, const char *, float);
 void IniSectionWriteFloat (const char *, const char *, const char *, float);

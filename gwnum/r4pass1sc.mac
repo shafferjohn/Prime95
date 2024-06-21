@@ -1,4 +1,4 @@
-; Copyright 2009-2012 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2009-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -2066,7 +2066,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 32 doubles.
+;; Perform a pass 1 negacyclic FFT of length 32 doubles.
 ;; Memory examples are for a 32K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*2*clm*XMM_SCD4 + 2*clm*XMM_SCD2 = 9*2*clm 64-byte cache lines
 ;; BUG:	we under-prefetch the sin/cos data by 1*2*clm 64-byte cache lines
@@ -2249,7 +2249,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 64 doubles.
+;; Perform a pass 1 negacyclic FFT of length 64 doubles.
 ;; Memory examples are for a 64K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 8*2*clm*XMM_SCD4 + 2*clm*XMM_SCD8 = 20*2*clm 64-byte cache lines
 ;; BUG - we substantially underprefetch the sin/cos data
@@ -2438,7 +2438,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 96 doubles.
+;; Perform a pass 1 negacyclic FFT of length 96 doubles.
 ;; Memory examples are for a 96K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 12*2*clm*XMM_SCD4 + 4*2*clm*XMM_SCD1 + 2*clm*XMM_SCD2 = 27*2*clm 64-byte cache lines
 ;; BUG:	we under-prefetch the sin/cos data by 3*2*clm 64-byte cache lines
@@ -2691,7 +2691,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 128 doubles.
+;; Perform a pass 1 negacyclic FFT of length 128 doubles.
 ;; Memory examples are for a 128K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 16*2*clm*XMM_SCD4 + 4*2*clm*XMM_SCD2 + 2*clm*XMM_SCD2 = 37*2*clm 64-byte cache lines
 ;; BUG:	we under-prefetch the sin/cos data by 5*2*clm 64-byte cache lines
@@ -2951,7 +2951,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 256 doubles.
+;; Perform a pass 1 negacyclic FFT of length 256 doubles.
 ;; Memory examples are for a 256K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 32*2*clm*XMM_SCD4 + 8*2*clm*XMM_SCD2 + 2*clm*XMM_SCD8 = 76*2*clm 64-byte cache lines
 ;; BUG - we substantially underprefetch the sin/cos data

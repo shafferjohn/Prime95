@@ -1,0 +1,59 @@
+# Makefile for Haiku 32-bit mprime
+#
+# updated by Karl L. Brennan, aka Generic Username 3485
+# requires curl_x86_devel, hwloc2_x86_devel, and gmp_x86_devel
+#
+# last updated 2023-10-02
+
+# REMEMBER: setarch x86
+
+# Only tested with v30.18b2b, later versions may require changes.
+
+CC = gcc
+CFLAGS = -I.. -I../gwnum -O2 -march=i586 -malign-double -std=gnu99 -Wno-unused-result -DPORT=11
+
+CPP = g++
+CPPFLAGS = -I.. -I../gwnum -I../../boost_1_76_0 -O2 -march=i586 -malign-double -std=c++11 -Wno-unused-result -DPORT=11
+
+LFLAGS = -Wl,-M
+#LIBS = ../gwnum/gwnum.a ../gwnum/polymult.a -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -ldl -lgmp
+LIBS = ../gwnum/gwnum.a ../gwnum/polymult.a -lm -lpthread -lhwloc -lcurl -lstdc++ -lgmp
+
+FACTOROBJ = factor32.o
+HAIKUOBJS = prime.o menu.o cJSON.o ecm.o exponentiate.o pair.o pm1prob.o
+EXE      = mprime
+
+#########################################################################
+
+$(EXE): security $(HAIKUOBJS) $(FACTOROBJ)
+	$(CC) $(LFLAGS) -o $(EXE) $(HAIKUOBJS) $(FACTOROBJ) $(LIBS)
+
+security:
+	[ ! -e ../security.h ] && touch ../security.h || true
+	[ ! -e ../security.c ] && touch ../security.c || true
+	[ ! -e ../secure5.c ] && touch ../secure5.c || true
+
+clean:
+	rm -f $(EXE) $(HAIKUOBJS)
+
+cJSON.o:
+	$(CC) $(CFLAGS) -c ../cJSON.c
+
+ecm.o:
+	$(CPP) $(CPPFLAGS) -c ../ecm.cpp
+
+exponentiate.o:
+	$(CC) $(CFLAGS) -c ../exponentiate.c
+
+pair.o:
+	$(CPP) $(CPPFLAGS) -c ../pair.cpp
+
+pm1prob.o:
+	$(CC) $(CFLAGS) -c ../pm1prob.c
+
+	
+.c.o:
+	$(CC) $(CFLAGS) -c $<
+
+.cpp.o:
+	$(CPP) $(CPPFLAGS) -c $<

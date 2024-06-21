@@ -6,7 +6,7 @@
  *
  *	Important ideas courtesy of Pavel Atnashev, Mihai Preda, and myself.
  *
- *	c. 2021 Mersenne Research, Inc.
+ *	c. 2021-2023 Mersenne Research, Inc.
  *	All Rights Reserved.
  *
  *************************************************************/
@@ -208,6 +208,8 @@ void estimate_pairing (
 	int	D_idx, B1_idx, B2_ratio_idx, multiplier_idx;
 	double	B1_min, B1_max, B2_ratio, B2_ratio_min, B2_ratio_max, multiplier, multiplier_min, multiplier_max;
 	struct pair_data a, b, c, d;
+
+	ASSERTG (B1 > 0);
 
 	// Select which D benchmark to use.  Different D benchmarks are needed because second-missing-prime affects the quantity of
 	// multi-relocatable primes which in turn affects the pairing percentage.

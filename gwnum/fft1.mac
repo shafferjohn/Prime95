@@ -1,4 +1,4 @@
-; Copyright 1998-2009 - Mersenne Research, Inc.  All rights reserved
+; Copyright 1998-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -77,7 +77,7 @@ c1b:	disp eight_reals_last_unfft, 8, 4*dist1, 8*dist1
 	ENDM
 
 
-;; Perform a 32-element all-complex FFT.
+;; Perform a 32-element negacyclic FFT
 
 fft32p MACRO type
 	LOCAL	not4, b1b, c1b
@@ -438,7 +438,7 @@ c1b:	disp six_reals_last_unfft, 8, 8*dist1, 16*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 48-element all-complex FFT.
+;; Perform a 48-element negacyclic FFT
 
 fft48p MACRO type
 	LOCAL	not4, b1b, b3b, c1b, c3b
@@ -832,7 +832,7 @@ c1b:	disp eight_reals_last_unfft, 8, 8*dist1, 16*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 64-element all-complex FFT.
+;; Perform a 64-element negacyclic FFT
 
 fft64p MACRO type
 	LOCAL	not4, b1b, b3b, c1b, c3b
@@ -1176,7 +1176,7 @@ c1b:	disp six_reals_last_unfft, 8, 16*dist1, 32*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 96-element all-complex FFT.
+;; Perform a 96-element negacyclic FFT
 
 fft96p MACRO type
 	LOCAL	not4, b1b, c1b
@@ -1453,7 +1453,7 @@ c1b:	disp eight_reals_last_unfft, 8, 16*dist1, 32*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 128-element all-complex FFT.
+;; Perform a 128-element negacyclic FFT
 
 fft128p MACRO type
 	LOCAL	not4, b1b, c1b
@@ -1771,7 +1771,7 @@ c1b:	disp six_reals_last_unfft, 8, 32*dist1, 64*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 192-element all-complex FFT.
+;; Perform a 192-element negacylic FFT
 
 fft192p MACRO type
 	LOCAL	not4, b1b, c1b, c3b
@@ -2208,7 +2208,7 @@ c9b:	disp four_complex_unfft, 8, 4*dist1, 8*dist1
 	push_amt = 0
 	ENDM
 
-;; Perform a 256-element all-complex FFT.
+;; Perform a 256-element negacyclic FFT
 
 fft256p MACRO type
 	LOCAL	not4, b1b, b3b, c1b, c3b, c9b
@@ -2585,7 +2585,7 @@ c1b:	disp six_reals_last_unfft, 8, 64*dist1, 128*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 384-element all-complex FFT.
+;; Perform a 384-element negacyclic FFT
 
 fft384p MACRO type
 	LOCAL	not4, b1b, c1b
@@ -2865,7 +2865,7 @@ c1b:	disp eight_reals_last_unfft, 8, 64*dist1, 128*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 512-element all-complex FFT.
+;; Perform a 512-element negacyclic FFT
 
 fft512p MACRO type
 	LOCAL	not4, b1b, c1b
@@ -3183,7 +3183,7 @@ c1b:	disp six_reals_last_unfft, 8, 128*dist1, 256*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 768-element all-complex FFT.
+;; Perform a 768-element negacyclic FFT
 
 fft768p MACRO type
 	LOCAL	not4, b1b, c1b, c2b, c3b
@@ -3658,7 +3658,7 @@ c7b:	disp four_complex_unfft, 8, 16*dist1, 32*dist1
 	push_amt = 0
 	ENDM
 
-;; Perform a 1024-element all-complex FFT.
+;; Perform a 1024-element negacyclic FFT
 
 fft1024p MACRO type
 	LOCAL	not4, b1b, b3b, c1b, c3b, c7b, c9b
@@ -4065,7 +4065,7 @@ c1b:	disp six_reals_last_unfft, 8, 256*dist1, 512*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 1536-element all-complex FFT.
+;; Perform a 1536-element negacyclic FFT
 
 fft1536p MACRO type
 	LOCAL	not4, b1b, c1b
@@ -4345,7 +4345,7 @@ c1b:	disp eight_reals_last_unfft, 8, 256*dist1, 512*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 2048-element all-complex FFT.
+;; Perform a 2048-element negacyclic FFT
 
 fft2048p MACRO type
 	LOCAL	not4, b1b, c1b
@@ -4665,7 +4665,7 @@ c1b:	disp six_reals_last_unfft, 8, 512*dist1, 1024*dist1
 	fft_3_ret
 	ENDM
 
-;; Perform a 3072-element all-complex FFT.
+;; Perform a 3072-element negacyclic FFT
 
 fft3072p MACRO type
 	LOCAL	not4, b1b, c1b, c3b
@@ -5382,7 +5382,7 @@ c5b:	disp four_complex_unfft, 8, 64*dist1, 128*dist1
 	push_amt = 0
 	ENDM
 
-;; Perform a 4096-element all-complex FFT.
+;; Perform a 4096-element negacyclic FFT
 
 fft4096p MACRO type
 	LOCAL	not4, b1b, b3b, b5b, b7b, b9b, bab1, bab2, bab3, bab4

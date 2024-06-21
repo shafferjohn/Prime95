@@ -1,4 +1,4 @@
-; Copyright 2011-2019 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -41,7 +41,7 @@ build421 SKX, SKX, SKX,	zpass1gen 2048,0,
 build421 SKX, SKX, SKX,	zpass1gen 2304,0,
 build421 SKX, SKX, SKX,	zpass1gen 3072,0,
 
-;; Generate all-complex shared pass 1 routines optimized for this architecture
+;; Generate negacyclic shared pass 1 routines optimized for this architecture
 
 buildfor SKX, zpass1gen 2,1,,1		; Build complex one-pass FFT wrapper
 

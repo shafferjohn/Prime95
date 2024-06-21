@@ -1,4 +1,4 @@
-; Copyright 2001-2016 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2001-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -3072,8 +3072,7 @@ s2cl_four_complex_gpm_fft MACRO srcreg,srcinc,d1
 	bump	srcreg, srcinc
 	ENDM
 
-;; This code is identical to the above except it is used in the single pass
-;; all-complex FFTs and has a somewhat different memory layout.
+;; This code is identical to the above except it is used in the single pass negacyclic FFTs and has a somewhat different memory layout.
 s2cl_four_complex_first_fft MACRO srcreg,srcinc,d1
 	shuffle_load xmm0,xmm1,[srcreg][rbx],[srcreg+16][rbx] ;; R1,R3
 	shuffle_load xmm2,xmm3,[srcreg+32][rbx],[srcreg+48][rbx] ;; R5,R7
@@ -3150,8 +3149,7 @@ s2cl_four_complex_first_fft MACRO srcreg,srcinc,d1
 	xstore	[srcreg+48], xmm3
 	bump	srcreg, srcinc
 	ENDM
-;; This code is identical to the above except it is used in the two pass
-;; all-complex FFTs and has a somewhat different memory layout.
+;; This code is identical to the above except it is used in the two pass negacyclic FFTs and has a somewhat different memory layout.
 x2cl_four_complex_first_fft MACRO srcreg,srcinc,d1
 	x2cl_four_complex_first_fft_cmn srcreg,srcinc,d1,rbx
 	ENDM
@@ -3263,7 +3261,7 @@ s4cl_four_complex_gpm_unfft MACRO srcreg,srcinc,d1,d2,off
 
 	bump	srcreg, srcinc
 	ENDM
-;; Similar to above but used in all-complex FFT case.
+;; Similar to above but used in negacyclic FFT case.
 x4cl_four_complex_last_unfft MACRO srcreg,srcinc,d1,d2,off
 	d3 = d2+d1
 	xload	xmm0, [srcreg]		;; R1
@@ -3583,8 +3581,7 @@ x3cl_three_complex_fft MACRO srcreg,srcinc,d1
 	bump	srcreg, srcinc
 	ENDM
 
-;; This code is identical to the above except it is used in the single pass
-;; all-complex FFTs and swizzles the inputs.
+;; This code is identical to the above except it is used in the single pass negacyclic FFTs and swizzles the inputs.
 s3cl_three_complex_first_fft MACRO srcreg,srcinc,d1
 	low_load xmm0, [srcreg][rbx], [srcreg+16][rbx] ;; R1
 	low_load xmm3, [srcreg+32][rbx], [srcreg+48][rbx] ;; R4

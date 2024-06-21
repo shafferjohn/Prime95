@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2022 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2023 Mersenne Research, Inc.  All rights reserved
 +---------------------------------------------------------------------*/
 
 #ifndef _COMMONB_H
@@ -28,8 +28,8 @@ extern "C" {
 
 /* Common routines */
 
-#define ALL_WORKERS 8888	// Special value for first arg of LaunchWorkerThreads
-int LaunchWorkerThreads (int, int);
+#define ALL_WORKERS 8888	// Special value for first arg of LaunchWorkers
+int LaunchWorkers (int, int);
 int LaunchTortureTest (unsigned long, int);
 int LaunchBench (int, int);
 int LaunchAdvancedTime (unsigned long, unsigned long);
@@ -117,7 +117,6 @@ void autoBench (void);
 int isKnownMersennePrime (unsigned long);
 void makestr (unsigned long, unsigned long, unsigned long, char *);
 
-int pick_fft_size (int thread_num, struct work_unit *w);
 int exponent_near_fft_limit (gwhandle *gwdata);
 void calc_output_frequencies (gwhandle *gwdata, double *output_frequency, double *output_title_frequency);
 double trunc_percent (double percent);
@@ -176,18 +175,19 @@ void unlinkSaveFiles (writeSaveFileState *state);
 /* Stop routines */
 
 /* Reasons returned for why we stopped processing a work unit */
-#define STOP_ESCAPE		1	/* User hit escape key.  Stopping all worker threads. */
+#define STOP_ESCAPE		1	/* User hit escape key.  Stopping all workers. */
 #define STOP_OUT_OF_MEM		2	/* Fatal out-of-memory error */
 #define STOP_FILE_IO_ERROR	3	/* Fatal file I/O error */
 #define STOP_FATAL_ERROR	4	/* Other fatal error */
 #define STOP_ABORT		5	/* Abort current work unit */
-#define STOP_WORKER		6	/* This worker thread was stopped or was never started */
+#define STOP_WORKER		6	/* This worker was stopped or was never started */
 #define STOP_PAUSE		7	/* This worker must pause because a program in the PauseWhileRunning is running. */
 #define STOP_RETRY_LATER	8	/* Abort work unit, but try again later */
 #define STOP_WORK_UNIT_COMPLETE	50	/* Work unit is done! */
 #define STOP_PRIORITY_WORK	51	/* Priority work, restart thread */
 #define STOP_BATTERY		52	/* On battery - pause */
 #define STOP_AUTOBENCH		53	/* Stop worker for a little while to run auto-benchmarks */
+#define STOP_PREV_WORK_UNIT	54	/* Switch worker to previous work unit, PRP cofactor of a newly found ECM factor */
 #define STOP_REREAD_INI		100	/* Reread prime.ini because a during/else time period has changed */
 #define STOP_RESTART		101	/* Important INI option changed */
 #define STOP_MEM_CHANGED	102	/* Day/night memory change */
@@ -231,12 +231,12 @@ int avail_mem_not_sufficient (int thread_num, unsigned long min_memory, unsigned
 
 #define array_gwnum_size(g)			round_up_to_multiple_of((gwnum_datasize(g)+GW_HEADER_SIZE(g)),64)
 #define cvt_mem_to_gwnums(g,m)			cvt_mem_to_gwnums_adj(g,m,0.0)
-#define cvt_mem_to_gwnums_adj(g,m,a)		((unsigned long)(((double)((m)-1)*1048576.0-(double)gwmemused(g))/(double)array_gwnum_size(g)+(a)))
+#define cvt_mem_to_gwnums_adj(g,m,a)		((uint64_t)(((double)((m)-1)*1048576.0-(double)gwmemused(g))/(double)array_gwnum_size(g)+(a)))
 #define cvt_gwnums_to_mem(g,n)			((unsigned long)(((double)gwmemused(g)+(double)(n)*(double)gwnum_size(g))/1048576.0)+2)
 #define cvt_mem_to_array_gwnums(g,m)		cvt_mem_to_array_gwnums_adj(g,m,0.0)
-#define cvt_mem_to_array_gwnums_adj(g,m,a)	((unsigned long)(((double)((m)-1)*1048576.0-(double)gwmemused(g))/(double)array_gwnum_size(g)+(a)))
+#define cvt_mem_to_array_gwnums_adj(g,m,a)	((uint64_t)(((double)((m)-1)*1048576.0-(double)gwmemused(g))/(double)array_gwnum_size(g)+(a)))
 #define cvt_array_gwnums_to_mem(g,n)		((unsigned long)(((double)gwmemused(g)+(double)(n)*(double)array_gwnum_size(g))/1048576.0)+2)
-#define cvt_mem_to_estimated_gwnums(m,k,b,n,c)	((unsigned long)(((double)((m)-1)*1048576.0-(double)gwmap_to_memused(k,b,n,c))/(double)gwmap_to_estimated_size(k,b,n,c)))
+#define cvt_mem_to_estimated_gwnums(m,k,b,n,c)	((uint64_t)(((double)((m)-1)*1048576.0-(double)gwmap_to_memused(k,b,n,c))/(double)gwmap_to_estimated_size(k,b,n,c)))
 
 /* battery routines */
 
@@ -249,7 +249,7 @@ void test_battery (void);
 void check_for_priority_work (void);
 void stop_worker_for_advanced_test (int);
 
-/* starting/stopping individual worker threads routines */
+/* starting/stopping individual workers routines */
 
 void start_one_worker (int);
 void stop_one_worker (int);
@@ -285,7 +285,7 @@ void implementThrottle (int thread_num);
 void clearThreadHandleArray (void);
 void setOsThreadPriority (int);
 void registerThreadTermination (void);
-void raiseAllWorkerThreadPriority (void);
+void raiseAllWorkersPriority (void);
 void flashWindowAndBeep (void);
 int primeSieveTest (int);
 int test_randomly (int, struct PriorityInfo *);

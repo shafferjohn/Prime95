@@ -9,7 +9,7 @@
 // THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 // PARTICULAR PURPOSE.
 //
-// Copyright (c) 1997-2021 Mersenne Research, Inc. All Rights Reserved.
+// Copyright (c) 1997-2023 Mersenne Research, Inc. All Rights Reserved.
 //
 //  MODULE:   primenet.c
 //
@@ -56,7 +56,6 @@
 typedef int SOCKET;
 #endif
 
-static const char iniSection[] = "PrimeNet";
 static const char hx[] = "0123456789ABCDEF";
 static const char szSITEstr[] = "v5.mersenne.org";	/* PrimeNet Server's home domain */
 #define nHostPort 80					/* Internet PrimeNet port */
@@ -119,7 +118,7 @@ void getProxyInfo (
 /* Get the host name of the optional proxy server.  If using a proxy */
 /* server strip the optional http:// prefix. */
 
-	IniSectionGetString (INI_FILE, iniSection, "ProxyHost", szProxyHost, PROXY_HOST_BUFSIZE, NULL);
+	IniSectionGetString (INI_FILE, SEC_PrimeNet, KEY_ProxyHost, szProxyHost, PROXY_HOST_BUFSIZE, NULL);
 	if (szProxyHost[0] == 0) return;
 
 	if ((szProxyHost[0] == 'H' || szProxyHost[0] == 'h') &&
@@ -140,15 +139,15 @@ void getProxyInfo (
 
 /* Secure proxy - get username and password to negotiate access */
 
-	IniSectionGetString (INI_FILE, iniSection, "ProxyUser", szProxyUser, PROXY_USER_BUFSIZE, NULL);
-	IniSectionGetString (INI_FILE, iniSection, "ProxyPass", szProxyPassword, PROXY_PASSWORD_BUFSIZE, NULL);
+	IniSectionGetString (INI_FILE, SEC_PrimeNet, KEY_ProxyUser, szProxyUser, PROXY_USER_BUFSIZE, NULL);
+	IniSectionGetString (INI_FILE, SEC_PrimeNet, KEY_ProxyPass, szProxyPassword, PROXY_PASSWORD_BUFSIZE, NULL);
 
 /* Scramble or unscramble the password as necessary */
 
-	if (!IniSectionGetInt (INI_FILE, iniSection, "ProxyMask", 0)) {
+	if (!IniSectionGetInt (INI_FILE, SEC_PrimeNet, KEY_ProxyMask, 0)) {
 		scramble (szProxyPassword);
-		IniSectionWriteString (INI_FILE, iniSection, "ProxyPass", szProxyPassword);
-		IniSectionWriteInt (INI_FILE, iniSection, "ProxyMask", 1);
+		IniSectionWriteString (INI_FILE, SEC_PrimeNet, KEY_ProxyPass, szProxyPassword);
+		IniSectionWriteInt (INI_FILE, SEC_PrimeNet, KEY_ProxyMask, 1);
 	}
 	unscramble (szProxyPassword);
 }
@@ -276,7 +275,7 @@ int pnHttpServerCURL (char *pbuf, unsigned cbuf, char* postargs)
 
 /* Get debug logging flag */
 
-	debug = IniSectionGetInt (INI_FILE, iniSection, "Debug", 0);
+	debug = IniSectionGetInt (INI_FILE, SEC_PrimeNet, KEY_Debug, 0);
  
 /* Loop to try with proxy, then after a failure without proxy.  Ixfd64 requested this */
 /* feature here:  https://www.mersenneforum.org/showpost.php?p=505557&postcount=415 */
@@ -292,9 +291,9 @@ int pnHttpServerCURL (char *pbuf, unsigned cbuf, char* postargs)
 /* Give curl library the HTTP string to send */
 
 		strcpy (url, "http://");
-		IniSectionGetString (INI_FILE, iniSection, "MersenneIP", szSITE, sizeof (szSITE), szSITEstr);
+		IniSectionGetString (INI_FILE, SEC_PrimeNet, "MersenneIP", szSITE, sizeof (szSITE), szSITEstr);
 		strcat (url, szSITE);
-		if (IniSectionGetInt (INI_FILE, iniSection, "SendPortNumber", 0))
+		if (IniSectionGetInt (INI_FILE, SEC_PrimeNet, "SendPortNumber", 0))
 			sprintf (url + strlen (url), ":%d", nHostPort);
 		strcat (url, szFILE);
 		strcat (url, postargs);
@@ -349,7 +348,7 @@ int pnHttpServerCURL (char *pbuf, unsigned cbuf, char* postargs)
 			OutputStr (COMM_THREAD_NUM, buf);
 			curl_easy_cleanup (curl);
 			// By default, try again without using a proxy server
-			if (try_proxy && szProxyHost[0] && IniSectionGetInt (INI_FILE, iniSection, "TryNoProxyAfterProxyFailure", 1))
+			if (try_proxy && szProxyHost[0] && IniSectionGetInt (INI_FILE, SEC_PrimeNet, "TryNoProxyAfterProxyFailure", 1))
 				continue;
 			return (PRIMENET_ERROR_CURL_PERFORM);
 		}
@@ -385,25 +384,12 @@ int pnHttpServerCURL (char *pbuf, unsigned cbuf, char* postargs)
 
 /* armor parameter control chars as hex codes for transport */
 
-#define ARMOR_CHARS		"&+%\r\n"
-
-char *armor (char *d, char *s)
+char *armor (char *d, const char *s)
 {
-
-/* & is token delimiter, '+' is space char */
-
-	while (*s) {
-		if (strchr (ARMOR_CHARS, *s)) {	
-			*d++ = '%';	/* convert chars to %nn hex codes */
-			*d++ = hx[(*s) / 16];
-			*d++ = hx[(*s) % 16];
-		} else if (*s == ' ')	/* convert spaces to '+' */
-			*d++ = '+';
-		else *d++ = *s;		/* copy normal character */
-		s++;
-	}
-	*d = 0;
-	return (d);
+	char *armored_string = curl_easy_escape (NULL, s, 0);
+	strcpy (d, armored_string);
+	curl_free (armored_string);
+	return (d + strlen (d));
 }
 
 /*
@@ -1158,17 +1144,17 @@ int primenet_parse_page (char *response_buf, short operation, void *pkt)
 			primenet_parse_uint (s, "ppm", &proof_power_mult);
 			primenet_parse_uint (s, "ph", &proof_hashlen);
 			if (proof_power == 0)
-				IniSectionWriteString (INI_FILE, iniSection, "ProofPower", NULL);
+				IniSectionWriteString (INI_FILE, SEC_PrimeNet, KEY_ProofPower, NULL);
 			else
-				IniSectionWriteInt (INI_FILE, iniSection, "ProofPower", proof_power);
+				IniSectionWriteInt (INI_FILE, SEC_PrimeNet, KEY_ProofPower, proof_power);
 			if (proof_power_mult == 0)
-				IniSectionWriteString (INI_FILE, iniSection, "ProofPowerMult", NULL);
+				IniSectionWriteString (INI_FILE, SEC_PrimeNet, KEY_ProofPowerMult, NULL);
 			else
-				IniSectionWriteInt (INI_FILE, iniSection, "ProofPowerMult", proof_power_mult);
+				IniSectionWriteInt (INI_FILE, SEC_PrimeNet, KEY_ProofPowerMult, proof_power_mult);
 			if (proof_hashlen == 0)
-				IniSectionWriteString (INI_FILE, iniSection, "ProofHashLength", NULL);
+				IniSectionWriteString (INI_FILE, SEC_PrimeNet, KEY_ProofHashLength, NULL);
 			else
-				IniSectionWriteInt (INI_FILE, iniSection, "ProofHashLength", proof_hashlen);
+				IniSectionWriteInt (INI_FILE, SEC_PrimeNet, KEY_ProofHashLength, proof_hashlen);
 		}
 		break;
 		}

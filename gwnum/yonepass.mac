@@ -1,4 +1,4 @@
-; Copyright 2011-2020 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -41,13 +41,13 @@ ycopy_7_words MACRO dist_half_minus_3, dist_half_minus_2, dist_half_minus_1, dis
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	short nozpad		;; No, skip 7 word copy
 	vmovsd	xmm0, Q [rsi+rbx+dist_half] ;; Copy half-way point word
-	vmovsd	Q [rsi-40], xmm0
+	vmovsd	Q [rsi-64], xmm0
 	vmovsd	xmm1, Q [rsi+rbx+dist_half_plus_1] ;; Copy 1st word above half-way
-	vmovsd	Q [rsi-48], xmm1
+	vmovsd	Q [rsi-56], xmm1
 	vmovsd	xmm2, Q [rsi+rbx+dist_half_plus_2] ;; Copy 2nd word above half-way
-	vmovsd	Q [rsi-56], xmm2
+	vmovsd	Q [rsi-48], xmm2
 	vmovsd	xmm3, Q [rsi+rbx+dist_half_plus_3] ;; Copy 3rd word above half-way
-	vmovsd	Q [rsi-64], xmm3
+	vmovsd	Q [rsi-40], xmm3
 	vmovsd	xmm0, Q [rsi+rbx+dist_half_minus_1] ;; Copy 1st word below half-way
 	vmovsd	Q [rsi-72], xmm0
 	vmovsd	xmm1, Q [rsi+rbx+dist_half_minus_2] ;; Copy 2nd word below half-way
@@ -259,7 +259,7 @@ yfinish_unfft:
 	yfft_3_ret
 	ENDM
 
-;; Perform a 32-element all-complex FFT.
+;; Perform a 32-element negacyclic FFT
 
 yfft32p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -501,7 +501,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 2*64, 4*64, rdi, YMM_SCD3, 2
 	yfft_3_ret
 	ENDM
 
-;; Perform a 64-element all-complex FFT.
+;; Perform a 64-element negacyclic FFT
 
 yfft64p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -822,7 +822,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 3*64, 6*64, rdi, YMM_SCD3, 3
 	yfft_3_ret
 	ENDM
 
-;; Perform a 96-element all-complex FFT.
+;; Perform a 96-element negacyclic FFT
 
 yfft96p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -1218,7 +1218,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 4*64, 8*64, rdi, YMM_SCD3, 4
 	yfft_3_ret
 	ENDM
 
-;; Perform a 128-element all-complex FFT.
+;; Perform a 128-element negacyclic FFT
 
 yfft128p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -1621,7 +1621,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 5*64, 10*64, rdi, YMM_SCD3, 5
 	yfft_3_ret
 	ENDM
 
-;; Perform a 160-element all-complex FFT.
+;; Perform a 160-element negacyclic FFT
 
 yfft160p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -2021,7 +2021,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 6*64, 12*64, rdi, YMM_SCD3, 6
 	yfft_3_ret
 	ENDM
 
-;; Perform a 192-element all-complex FFT.
+;; Perform a 192-element negacyclic FFT
 
 yfft192p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -2421,7 +2421,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 8*64, 16*64, rdi, YMM_SCD3, 8
 	yfft_3_ret
 	ENDM
 
-;; Perform a 256-element all-complex FFT.
+;; Perform a 256-element negacyclic FFT
 
 yfft256p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -2824,7 +2824,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 10*64, 20*64, rdi, YMM_SCD3, 10
 	yfft_3_ret
 	ENDM
 
-;; Perform a 320-element all-complex FFT.
+;; Perform a 320-element negacyclic FFT
 
 yfft320p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -3297,7 +3297,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 12*64, 24*64, rdi, YMM_SCD3, 12
 	yfft_3_ret
 	ENDM
 
-;; Perform a 384-element all-complex FFT.
+;; Perform a 384-element negacyclic FFT
 
 yfft384p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -3830,7 +3830,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 16*64, 32*64, rdi, YMM_SCD3, 16
 	yfft_3_ret
 	ENDM
 
-;; Perform a 512-element all-complex FFT.
+;; Perform a 512-element negacyclic FFT
 
 yfft512p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -4367,7 +4367,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 20*64, 40*64, rdi, YMM_SCD3, 20
 	yfft_3_ret
 	ENDM
 
-;; Perform a 640-element all-complex FFT.
+;; Perform a 640-element negacyclic FFT
 
 yfft640p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -4902,7 +4902,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 24*64, 48*64, rdi, YMM_SCD3, 24
 	yfft_3_ret
 	ENDM
 
-;; Perform a 768-element all-complex FFT.
+;; Perform a 768-element negacyclic FFT
 
 yfft768p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -5439,7 +5439,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, dist32, 2*dist32, rdi, YMM_SCD3, 32
 	yfft_3_ret
 	ENDM
 
-;; Perform a 1K-element all-complex FFT.
+;; Perform a 1K-element negacyclic FFT
 
 yfft1Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -5980,7 +5980,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 40*64, 80*64, rdi, YMM_SCD3, 40
 	yfft_3_ret
 	ENDM
 
-;; Perform a 1280-element all-complex FFT.
+;; Perform a 1280-element negacyclic FFT
 
 yfft1280p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -6587,7 +6587,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 3*dist16, 6*dist16, rdi, YMM_SCD3, 16
 	yfft_3_ret
 	ENDM
 
-;; Perform a 1536-element all-complex FFT.
+;; Perform a 1536-element negacyclic FFT
 
 yfft1536p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -7266,7 +7266,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 4*64, dist64, 2*dist64, rdi, 4*YMM_SCD3, 16
 	yfft_3_ret
 	ENDM
 
-;; Perform a 2048-element all-complex FFT.
+;; Perform a 2048-element negacyclic FFT
 
 yfft2Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -7949,7 +7949,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 5*dist16, 10*dist16, rdi, YMM_SCD3, 16
 	yfft_3_ret
 	ENDM
 
-;; Perform a 2560-element all-complex FFT.
+;; Perform a 2560-element negacyclic FFT
 
 yfft2560p MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -8616,7 +8616,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 3*dist32, 6*dist32, rdi, YMM_SCD3, 32
 	yfft_3_ret
 	ENDM
 
-;; Perform a 3K-element all-complex FFT.
+;; Perform a 3K-element negacyclic FFT
 
 yfft3Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -9299,7 +9299,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 2*dist64, 4*dist64, rdi, YMM_SCD3, 64
 	yfft_3_ret
 	ENDM
 
-;; Perform a 4K-element all-complex FFT.
+;; Perform a 4K-element negacyclic FFT
 
 yfft4Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -9978,7 +9978,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 5*dist32, 10*dist32, rdi, YMM_SCD3, 32
 	yfft_3_ret
 	ENDM
 
-;; Perform a 5K-element all-complex FFT.
+;; Perform a 5K-element negacyclic FFT
 
 yfft5Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -10736,7 +10736,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 3*dist64, 6*dist64, rdi, YMM_SCD3, 64
 	yfft_3_ret
 	ENDM
 
-;; Perform a 6K-element all-complex FFT.
+;; Perform a 6K-element negacyclic FFT
 
 yfft6Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -11562,7 +11562,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 4*dist64, 8*dist64, rdi, YMM_SCD3, 64
 	yfft_3_ret
 	ENDM
 
-;; Perform a 8K-element all-complex FFT.
+;; Perform a 8K-element negacyclic FFT
 
 yfft8Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -12392,7 +12392,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 5*dist64, 10*dist64, rdi, YMM_SCD3, 64
 	yfft_3_ret
 	ENDM
 
-;; Perform a 10K-element all-complex FFT.
+;; Perform a 10K-element negacyclic FFT
 
 yfft10Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -13224,7 +13224,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 6*dist64, 12*dist64, rdi, YMM_SCD3, 64
 	yfft_3_ret
 	ENDM
 
-;; Perform a 12K-element all-complex FFT.
+;; Perform a 12K-element negacyclic FFT
 
 yfft12Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -14056,7 +14056,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 8*dist64, 16*dist64, rdi, YMM_SCD3, 64
 	yfft_3_ret
 	ENDM
 
-;; Perform a 16K-element all-complex FFT.
+;; Perform a 16K-element negacyclic FFT
 
 yfft16Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -14892,7 +14892,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 10*dist64, 20*dist64, rdi, YMM_SCD3, 64
 	yfft_3_ret
 	ENDM
 
-;; Perform a 20K-element all-complex FFT.
+;; Perform a 20K-element negacyclic FFT
 
 yfft20Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -15798,7 +15798,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 9*dist64, 18*dist64, rdi, YMM_SCD3, 64
 	yfft_3_ret
 	ENDM
 
-;; Perform a 18K-element all-complex FFT.
+;; Perform a 18K-element negacyclic FFT
 
 yfft18Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -16760,7 +16760,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 12*dist64, 24*dist64, rdi, YMM_SCD3, 64
 	yfft_3_ret
 	ENDM
 
-;; Perform a 24K-element all-complex FFT.
+;; Perform a 24K-element negacyclic FFT
 
 yfft24Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft
@@ -17724,7 +17724,7 @@ c1b:	yr4_s4cl_eight_reals_unfft rsi, 64, 16*dist64, 32*dist64, rdi, YMM_SCD3, 64
 	yfft_3_ret
 	ENDM
 
-;; Perform a 32768-element all-complex FFT.
+;; Perform a 32768-element negacyclic FFT
 
 yfft32Kp MACRO type
 	LOCAL	ymid2p, ymid3p, ymid4p, yfinish_unfft

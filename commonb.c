@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 1995-2022 Mersenne Research, Inc.  All rights reserved
+| Copyright 1995-2024 Mersenne Research, Inc.  All rights reserved
 |
 | This file contains routines and global variables that are common for
 | all operating systems the program has been ported to.  It is included
@@ -12,12 +12,12 @@
 
 #include "ecm.h"
 #include "exponentiate.h"
+#include "polymult.h"
 
 /* Globals for error messages */
 
 static const char ERRMSG0[] = "Iteration: %ld/%ld, %s";
 static const char ERRMSG1A[] = "ERROR: ILLEGAL SUMOUT\n";
-static const char ERRMSG1B[] = "ERROR: SUM(INPUTS) != SUM(OUTPUTS), %.16g != %.16g\n";
 static const char ERRMSG1C[] = "Possible error: round off (%.10g) > %.5g\n";
 static const char ERRMSG1D[] = "ERROR: Shift counter corrupt.\n";
 static const char ERRMSG1E[] = "ERROR: Illegal double encountered.\n";
@@ -40,7 +40,7 @@ const char ALLSAVEBAD_MSG[] = "All intermediate files bad.  Temporarily abandoni
 /* PauseWhileRunning globals */
 
 struct pause_info {
-	int	thread_num;		/* Worker thread to pause */
+	int	thread_num;		/* Worker to pause */
 	int	low_mem;		/* Flag set for LowMemWhileRunning entries */
 	int	workers_affected;	/* Number of workers affected */
 	char	*program_name;		/* Pause if running this program */
@@ -54,82 +54,75 @@ struct pause_info *PAUSE_DATA = NULL;
 int	PAUSE_WHILE_RUNNING_FREQ = 10;
 int	PAUSEABLE_WORKERS_RUNNING = FALSE;
 
-/* Globals for stopping and starting worker threads */
+/* Globals for stopping and starting workers */
 
-/* Note that we have one flag byte for each worker thread.  We could */
-/* use one bit per worker thread, but then we need to have locks around */
-/* updates so that 2 worker threads don't interleave a read-modify-write */
-/* operation. */
+/* Note that we have one flag byte for each worker.  We could use one bit per worker, but then we need to have locks around */
+/* updates so that 2 workers don't interleave a read-modify-write operation. */
 
-int	STOP_FOR_RESTART = FALSE;/* Flag indicating we should stop and */
-				/* restart all worker threads because an */
-				/* important option changed in the GUI. */
-				/* One example is changing the priority */
-				/* for worker threads. */
+int	STOP_FOR_RESTART = FALSE;/* Flag indicating we should stop and restart all workers because an important option changed in the GUI. */
+				/* One example is changing the priority for workers. */
 int	STOP_FOR_REREAD_INI = FALSE;/* Flag indicating all workers must */
 				/* stop because a during/else time period */
 				/* has ended and INI file must be reread. */
-char	STOP_FOR_MEM_CHANGED[MAX_NUM_WORKER_THREADS] = {0};
+char	STOP_FOR_MEM_CHANGED[MAX_NUM_WORKERS] = {0};
 				/* Flags indicating it is time to stop */
 				/* workers due to day/night memory change. */
 int	STOP_FOR_BATTERY = FALSE;/* Flag indicating it is time to stop */
 				/* workers due to running on battery. */
 int	STOP_FOR_AUTOBENCH = FALSE;/* Flag indicating we chould temporarily */
 				/* stop workers to run an auto-benchmark. */
-char	STOP_FOR_PRIORITY_WORK[MAX_NUM_WORKER_THREADS] = {0};
+char	STOP_FOR_PRIORITY_WORK[MAX_NUM_WORKERS] = {0};
 				/* Flags indicating it is time to switch */
 				/* a worker to high priority work. */
-struct pause_info *STOP_FOR_PAUSE[MAX_NUM_WORKER_THREADS] = {NULL};
-				/* Flags saying worker thread should */
-				/* pause while another program runs */
+struct pause_info *STOP_FOR_PAUSE[MAX_NUM_WORKERS] = {NULL};
+				/* Flags saying worker should pause while another program runs */
 struct pause_info *STOP_FOR_LOW_MEMORY = NULL; /* Set when LowMemWhileRunning active */
 				/* Workers using lots of memory will be stopped */
 int	STOP_FOR_LOADAVG = 0;	/* Count of workers to pause due */
 				/* to a period of high system load. */
-char	STOP_FOR_THROTTLE[MAX_NUM_WORKER_THREADS] = {0};
+char	STOP_FOR_THROTTLE[MAX_NUM_WORKERS] = {0};
 				/* Flags indicating it is time to pause */
 				/* a worker for throttling. */
-char	STOP_FOR_ABORT[MAX_NUM_WORKER_THREADS] = {0};
+char	STOP_FOR_ABORT[MAX_NUM_WORKERS] = {0};
 				/* Abort work unit due to unreserve, factor */
 				/* found in a different thread, server */
 				/* request, or any other reason. */
-char	ACTIVE_WORKERS[MAX_NUM_WORKER_THREADS] = {0};
-				/* Flags indicating which worker threads */
-				/* are active. */
-char	WRITE_SAVE_FILES[MAX_NUM_WORKER_THREADS] = {0};
+char	ACTIVE_WORKERS[MAX_NUM_WORKERS] = {0};
+				/* Flags indicating which workers are active. */
+char	WRITE_SAVE_FILES[MAX_NUM_WORKERS] = {0};
 				/* Flags indicating it is time to write */
 				/* a save file. */
-char	JACOBI_ERROR_CHECK[MAX_NUM_WORKER_THREADS] = {0};
+char	JACOBI_ERROR_CHECK[MAX_NUM_WORKERS] = {0};
 				/* Flags indicating it is time to execute */
 				/* a Jacobi error check. */
 
-char	WORK_AVAILABLE_OR_STOP_INITIALIZED[MAX_NUM_WORKER_THREADS] = {0};
-gwevent WORK_AVAILABLE_OR_STOP[MAX_NUM_WORKER_THREADS] = {0};
+char	WORK_AVAILABLE_OR_STOP_INITIALIZED[MAX_NUM_WORKERS] = {0};
+gwevent WORK_AVAILABLE_OR_STOP[MAX_NUM_WORKERS] = {0};
 				/* Signal for telling primeContinue that */
 				/* work is now available or all threads */
 				/* are stopping */
-char	USER_START_OR_STOP_INITIALIZED[MAX_NUM_WORKER_THREADS] = {0};
-gwevent	USER_START_OR_STOP[MAX_NUM_WORKER_THREADS] = {0};
+char	USER_START_OR_STOP_INITIALIZED[MAX_NUM_WORKERS] = {0};
+gwevent	USER_START_OR_STOP[MAX_NUM_WORKERS] = {0};
 				/* Signal for telling implement_stop_one_worker */
 				/* that the user wants this worker to start or */
 				/* all threads are stopping */
-char	END_PAUSE_OR_STOP_INITIALIZED[MAX_NUM_WORKER_THREADS] = {0};
-gwevent END_PAUSE_OR_STOP[MAX_NUM_WORKER_THREADS] = {0};
+char	END_PAUSE_OR_STOP_INITIALIZED[MAX_NUM_WORKERS] = {0};
+gwevent END_PAUSE_OR_STOP[MAX_NUM_WORKERS] = {0};
 				/* Signal for telling implement_pause */
 				/* that the pause has ended or */
 				/* all threads are stopping */
-char	END_LOADAVG_OR_STOP_INITIALIZED[MAX_NUM_WORKER_THREADS] = {0};
-gwevent END_LOADAVG_OR_STOP[MAX_NUM_WORKER_THREADS] = {0};
+char	END_LOADAVG_OR_STOP_INITIALIZED[MAX_NUM_WORKERS] = {0};
+gwevent END_LOADAVG_OR_STOP[MAX_NUM_WORKERS] = {0};
 				/* Signal for telling implement_loadavg */
 				/* that the load average condition has ended */
 				/* or all threads are stopping */
-char	OFF_BATTERY_OR_STOP_INITIALIZED[MAX_NUM_WORKER_THREADS] = {0};
-gwevent OFF_BATTERY_OR_STOP[MAX_NUM_WORKER_THREADS] = {0};
+char	OFF_BATTERY_OR_STOP_INITIALIZED[MAX_NUM_WORKERS] = {0};
+gwevent OFF_BATTERY_OR_STOP[MAX_NUM_WORKERS] = {0};
 				/* Signal for telling implement_stop_battery */
 				/* that AC power has been restored or */
 				/* all threads are stopping */
-char	MEM_WAIT_OR_STOP_INITIALIZED[MAX_NUM_WORKER_THREADS] = {0};
-gwevent MEM_WAIT_OR_STOP[MAX_NUM_WORKER_THREADS] = {0};
+char	MEM_WAIT_OR_STOP_INITIALIZED[MAX_NUM_WORKERS] = {0};
+gwevent MEM_WAIT_OR_STOP[MAX_NUM_WORKERS] = {0};
 				/* Signal for telling avail_mem that */
 				/* it can now determine the available memory */
 
@@ -138,10 +131,10 @@ gwevent MEM_WAIT_OR_STOP[MAX_NUM_WORKER_THREADS] = {0};
 #define DEFAULT_MEM_USAGE 48	/* 48MB default */
 unsigned long AVAIL_MEM = 0;	/* Memory available now */
 unsigned long MAX_MEM = 0;	/* Max memory available */
-unsigned long AVAIL_MEM_PER_WORKER[MAX_NUM_WORKER_THREADS] = {0};	/* Maximum memory each worker can use */
+unsigned long AVAIL_MEM_PER_WORKER[MAX_NUM_WORKERS] = {0};	/* Maximum memory each worker can use */
 unsigned long MAX_HIGH_MEM_WORKERS =  0;				/* Maximum number of workers allowed to use lots of memory */
-char	MEM_FLAGS[MAX_NUM_WORKER_THREADS] = {0};			/* Flags indicating which threads will be affected by a change in memory settings. */
-unsigned int MEM_IN_USE[MAX_NUM_WORKER_THREADS] = {0};			/* Array containing memory in use by each worker thread */
+char	MEM_FLAGS[MAX_NUM_WORKERS] = {0};			/* Flags indicating which threads will be affected by a change in memory settings. */
+unsigned int MEM_IN_USE[MAX_NUM_WORKERS] = {0};			/* Array containing memory in use by each worker */
 
 #define MEM_RESTART_LOWMEM_ENDS 0x1		/* Worker needs to restart when the LowMemWhileRunning program ends. */
 #define MEM_RESTART_MAX_MEM_AVAILABLE 0x2	/* Worker needs to restart when available memory equals maximum memory.  This happens when */
@@ -151,10 +144,10 @@ unsigned int MEM_IN_USE[MAX_NUM_WORKER_THREADS] = {0};			/* Array containing mem
 #define MEM_RESTART_MORE_AVAIL 0x10		/* One of the worker's work units did not have enough memory to run.  If memory becomes available restart the worker. */
 #define MEM_RESTART_IF_MORE 0x20		/* The current work unit could use more memory and should be restarted if more becomes available. */
 
-char	MEM_RESTART_FLAGS[MAX_NUM_WORKER_THREADS] = {0};
-unsigned int MEM_RESTART_MIN_AMOUNT[MAX_NUM_WORKER_THREADS] = {0};
-unsigned int MEM_RESTART_DESIRED_AMOUNT[MAX_NUM_WORKER_THREADS] = {0};	/* Only restart if this amount of memory is available */
-unsigned int MEM_RESTART_IF_MORE_AMOUNT[MAX_NUM_WORKER_THREADS] = {0};
+char	MEM_RESTART_FLAGS[MAX_NUM_WORKERS] = {0};
+unsigned int MEM_RESTART_MIN_AMOUNT[MAX_NUM_WORKERS] = {0};
+unsigned int MEM_RESTART_DESIRED_AMOUNT[MAX_NUM_WORKERS] = {0};	/* Only restart if this amount of memory is available */
+unsigned int MEM_RESTART_IF_MORE_AMOUNT[MAX_NUM_WORKERS] = {0};
 
 int	MEM_MUTEX_INITIALIZED = FALSE;
 gwmutex	MEM_MUTEX;		/* Lock for accessing mem globals */
@@ -350,16 +343,16 @@ uint32_t get_worker_num_threads (
 	char	section_name[32];
 	const char *p;
 	sprintf (section_name, "Worker #%d", worker_num + 1);
-	p = IniSectionGetStringRaw (LOCALINI_FILE, section_name, "Affinity");
+	p = IniSectionGetStringRaw (INI_FILE, section_name, "Affinity");
 	if (p != NULL) return (countCommas (p) + 1);
 
 	// Second case is the special SET_PRIORITY_NORMAL_WORK code where num workers = num cores
-	if (NUM_WORKER_THREADS == HW_NUM_COMPUTE_CORES || NUM_WORKER_THREADS == HW_NUM_CORES) return (get_ranked_num_threads (worker_num, 1, hyperthreading));
+	if (NUM_WORKERS == HW_NUM_COMPUTE_CORES || NUM_WORKERS == HW_NUM_CORES) return (get_ranked_num_threads (worker_num, 1, hyperthreading));
 
 	// Third case is to duplicate the SET_PRIORITY_NORMAL_WORK code to get the prime95 base core number using the total number of cores to use
 	uint32_t worker_core_count, cores_used_by_lower_workers, base_core_num;
 	worker_core_count = cores_used_by_lower_workers = 0;
-	for (uint32_t i = 0; i < NUM_WORKER_THREADS; i++) {
+	for (uint32_t i = 0; i < NUM_WORKERS; i++) {
 		worker_core_count += CORES_PER_TEST[i];
 		if (i < worker_num) cores_used_by_lower_workers += CORES_PER_TEST[i];
 	}
@@ -387,7 +380,8 @@ uint32_t map_aux_to_core (
 {
 	ASSERTG (base_core_num < (int) HW_NUM_CORES);
 	// Without hyperthreading.  Aux-thread-num is same as core # since we are running one thread per core.  Map to hwloc core numbering.
-	if (!hyperthreading) return (get_ranked_core (base_core_num + aux_thread_num));
+	// Do a modulo in case user has oversubscribed cores.
+	if (!hyperthreading) return (get_ranked_core ((base_core_num + aux_thread_num) % HW_NUM_CORES));
 	// With hyperthreading.  Use every thread on each core.  Map to hwloc core numbering.
 	uint32_t total_threads = 0;
 	uint32_t hwloc_core = 0;
@@ -477,7 +471,7 @@ void SetPriority (
 			char	section_name[32];
 			const char *p;
 			sprintf (section_name, "Worker #%d", info->worker_num+1);
-			p = IniSectionGetStringRaw (LOCALINI_FILE, section_name, "Affinity");
+			p = IniSectionGetStringRaw (INI_FILE, section_name, "Affinity");
 			if (p != NULL) {
 				bind_type = 2;				// Set affinity to a set of logical CPUs
 				truncated_strcpy (logical_CPU_string, sizeof (logical_CPU_string), p);
@@ -490,9 +484,16 @@ void SetPriority (
 /* logical cores created by hyperthreading.  In essence, we are overriding the settings in CORES_TO_USE and using just one core.  This is not */
 /* intuitive to the user and perhaps we should delete this code! */
 
-		if (NUM_WORKER_THREADS == HW_NUM_COMPUTE_CORES || NUM_WORKER_THREADS == HW_NUM_CORES) {
+		if (NUM_WORKERS == HW_NUM_COMPUTE_CORES || NUM_WORKERS == HW_NUM_CORES) {
 			bind_type = 0;				// Set affinity to a specific physical CPU core
 			core = get_ranked_core (info->worker_num);
+			break;
+		}
+
+/* Set P-1 and ECM Stage2ExtraThreads to run on any performance core */
+
+		if (info->aux_polymult && info->aux_thread_num >= CORES_PER_TEST[info->worker_num] * (info->normal_work_hyperthreading ? 2 : 1)) {
+			bind_type = 3;
 			break;
 		}
 
@@ -500,7 +501,7 @@ void SetPriority (
 
 		uint32_t worker_core_count, cores_used_by_lower_workers;
 		worker_core_count = cores_used_by_lower_workers = 0;
-		for (uint32_t i = 0; i < NUM_WORKER_THREADS; i++) {
+		for (uint32_t i = 0; i < NUM_WORKERS; i++) {
 			worker_core_count += CORES_PER_TEST[i];
 			if (i < info->worker_num) cores_used_by_lower_workers += CORES_PER_TEST[i];
 		}
@@ -515,20 +516,16 @@ void SetPriority (
 		if (worker_core_count < HW_NUM_COMPUTE_CORES && HW_NUM_COMPUTE_CORES == HW_NUM_CORES && IniGetInt (INI_FILE, "ReserveCore0", 0)) {
 			bind_type = 0;			// Set affinity to a specific physical CPU core
 			// Map prime95 core number and auxiliary thread number to hwloc core number.
-			// Normally this works great, but now P-1 can request extra threads (in case hyperthreading helps in polymult) which lets
-			// aux_thread_num exceed the number of cores.  Thus, we do a modulo to make the core numbering work out OK.
-			core = map_aux_to_core (cores_used_by_lower_workers + 1, info->aux_thread_num % HW_NUM_CORES, info->normal_work_hyperthreading);
+			core = map_aux_to_core (cores_used_by_lower_workers + 1, info->aux_thread_num, info->normal_work_hyperthreading);
 			break;
 		}
 
-/* If total num worker cores <= num cores, then there is an easy path forward.  Assign cores in ascending order.  This will assigne efficiency cores last. */
+/* If total num worker cores <= num cores, then there is an easy path forward.  Assign cores in ascending order.  This will assign efficiency cores last. */
 
 		if (worker_core_count <= HW_NUM_CORES) {
 			bind_type = 0;			// Set affinity to a specific physical CPU core
 			// Map prime95 core number and auxiliary thread number to hwloc core number.
-			// Normally this works great, but now P-1 can request extra threads (in case hyperthreading helps in polymult) which lets
-			// aux_thread_num exceed the number of cores.  Thus, we do a modulo to make the core numbering work out OK.
-			core = map_aux_to_core (cores_used_by_lower_workers, info->aux_thread_num % HW_NUM_CORES, info->normal_work_hyperthreading);
+			core = map_aux_to_core (cores_used_by_lower_workers, info->aux_thread_num, info->normal_work_hyperthreading);
 			break;
 		}
 
@@ -544,11 +541,11 @@ void SetPriority (
 
 /* Parse affinity settings specified in the INI file. */
 /* We accept several syntaxes in an INI file for a zero-based list of logical CPUs: */
-/*	3,6,9		Run main worker thread on logical CPU #3, run two aux threads on logical CPUs #6 & #9 */
-/*	3-4,5-6		Run main worker thread on logical CPUs #3 & #4, run aux thread on logical CPUs #5 & #6 */
-/*	{3,5,7},{4,6}	Run main worker thread on logical CPUs #3, #5, & #7, run aux thread on logical CPUs #4 & #6 */
-/*	(3,5,7),(4,6)	Run main worker thread on logical CPUs #3, #5, & #7, run aux thread on logical CPUs #4 & #6 */
-/*	[3,5-7],(4,6)	Run main worker thread on logical CPUs #3, #5, #6, & #7, run aux thread on logical CPUs #4 & #6 */
+/*	3,6,9		Run main worker on logical CPU #3, run two aux threads on logical CPUs #6 & #9 */
+/*	3-4,5-6		Run main worker on logical CPUs #3 & #4, run aux thread on logical CPUs #5 & #6 */
+/*	{3,5,7},{4,6}	Run main worker on logical CPUs #3, #5, & #7, run aux thread on logical CPUs #4 & #6 */
+/*	(3,5,7),(4,6)	Run main worker on logical CPUs #3, #5, & #7, run aux thread on logical CPUs #4 & #6 */
+/*	[3,5-7],(4,6)	Run main worker on logical CPUs #3, #5, #6, & #7, run aux thread on logical CPUs #4 & #6 */
 
 	if (bind_type == 2) {		// Find the subset of the logical CPU string for this auxilary thread
 		uint32_t i;
@@ -594,6 +591,7 @@ void SetPriority (
 #ifdef BIND_TYPE_1_USED
 		else if (bind_type == 1) sprintf (buf+strlen(buf), "logical CPU #%d (zero-based)\n", logical_CPU);
 #endif
+		else if (bind_type == 3) sprintf (buf+strlen(buf), "any performance core\n");
 		else sprintf (buf+strlen(buf), "logical CPUs %s (zero-based)\n", logical_CPU_substring);
 		OutputStr (info->worker_num, buf);
 	}
@@ -665,6 +663,33 @@ void SetPriority (
 	}
 #endif
 
+/* Set affinity for this thread to any performance thread */
+
+	else if (bind_type == 3) {
+		hwloc_bitmap_t cpuset = hwloc_bitmap_alloc ();
+		for (int core = 0; core < (int) HW_NUM_CORES; core++) {
+			if (HW_CORES[core].ranking != 1) continue;		// Only look at performance cores
+			hwloc_obj_t obj = hwloc_get_obj_by_type (hwloc_topology, HWLOC_OBJ_CORE, core);		/* Get core obj */
+			if (obj == NULL) obj = hwloc_get_obj_by_type (hwloc_topology, HWLOC_OBJ_PU, core);	/* The above failed for someone use plan B */
+			if (obj == NULL) continue;				// Can't happen?
+			hwloc_bitmap_or (cpuset, cpuset, obj->cpuset);
+		}
+		if (hwloc_set_cpubind (hwloc_topology, cpuset, HWLOC_CPUBIND_THREAD)) {
+			char	str[80];
+			int	error = errno;
+			hwloc_bitmap_snprintf (str, sizeof (str), cpuset);
+			sprintf (buf, "Error setting affinity to cpuset %s: %s\n", str, strerror (error));
+			OutputStr (info->worker_num, buf);
+		}
+		else if (info->verbosity >= 2) {
+			char	str[80];
+			hwloc_bitmap_snprintf (str, sizeof (str), cpuset);
+			sprintf (buf, "Affinity set to cpuset %s\n", str);
+			OutputStr (info->worker_num, buf);
+		}
+		hwloc_bitmap_free (cpuset);
+	}
+
 /* Set affinity for this thread to one or more logical CPUs as specified in the INI file. */
 
 	else {
@@ -719,7 +744,7 @@ void SetAuxThreadPriority (int aux_thread_num, int action, void *data)
 		SetPriority (&sp_info);
 	}
 
-/* Handle thread terminate and hyperthread terminate action.  Remove thread handle from list of active worker threads. */
+/* Handle thread terminate and hyperthread terminate action.  Remove thread handle from list of active workers. */
 
 	if (action == 1 || action == 11 || action == 21) {
 		registerThreadTermination ();
@@ -731,13 +756,11 @@ void SetAuxThreadPriority (int aux_thread_num, int action, void *data)
 /*             and the write save files timer                 */
 /**************************************************************/
 
-/* This routine checks if the worker thread needs to be stopped for any */
-/* reason whatsoever.  If the worker thread should stop, a stop reason */
-/* is returned.  The routine is declared EXTERNC because it can be called */
-/* by the C code in giants that does GCD. */
+/* This routine checks if the worker needs to be stopped for any reason whatsoever.  If the worker should stop, a stop reason is returned. */
+/* The routine is declared EXTERNC because it can be called by the C code in giants that does GCD. */
 
 EXTERNC int stopCheck (
-	int	thread_num)	/* Worker thread number */
+	int	thread_num)	/* Worker number */
 {
 
 /* Call an OS-specific callback routine.  This gives OSes that poll for */
@@ -749,7 +772,7 @@ EXTERNC int stopCheck (
 /* If the ESC key was hit, stop processing.  This takes precedence over */
 /* all other stop reasons.  This also happens when the program is exiting. */
 
-	if (WORKER_THREADS_STOPPING) return (STOP_ESCAPE);
+	if (WORKERS_STOPPING) return (STOP_ESCAPE);
 
 /* If this request is coming from one of the "special" thread_nums, then */
 /* do not check for any more stop codes.  The only time I know this can happen */
@@ -757,18 +780,15 @@ EXTERNC int stopCheck (
 
 	if (thread_num < 0) return (0);
 
-/* If an important option changed in the GUI, restart all threads. */
-/* For example, the user changes the priority of all worker threads. */	
+/* If an important option changed in the GUI, restart all workers.  For example, the user changes the priority of all workers. */	
 
 	if (STOP_FOR_RESTART) return (STOP_RESTART);
 
-/* If the during/else time period has ended, stop processing all worker */
-/* threads so prime.txt and local.txt can be reprocessed. */
+/* If the during/else time period has ended, stop processing all workers so prime.txt and local.txt can be reprocessed. */
 
 	if (STOP_FOR_REREAD_INI) return (STOP_REREAD_INI);
 
-/* If the memory settings have changed, stop processing affected worker */
-/* threads so they can allocate more or less memory. */
+/* If the memory settings have changed, stop processing affected workers so they can allocate more or less memory. */
 
 	if (STOP_FOR_MEM_CHANGED[thread_num]) {
 		STOP_FOR_MEM_CHANGED[thread_num] = 0;
@@ -839,7 +859,7 @@ EXTERNC int stopCheck (
 	return (0);
 }
 
-/* Clear flags controlling the stopping of worker threads. */
+/* Clear flags controlling the stopping of workers */
 
 int stop_events_initialized = FALSE;
 
@@ -865,7 +885,7 @@ void restart_waiting_workers (
 	int	restart_flags)
 {
 	int	thread_num;
-	for (thread_num = 0; thread_num < MAX_NUM_WORKER_THREADS; thread_num++)
+	for (thread_num = 0; thread_num < MAX_NUM_WORKERS; thread_num++)
 		restart_one_waiting_worker (thread_num, restart_flags);
 }
 
@@ -899,68 +919,62 @@ void restart_one_waiting_worker (
 	}
 }
 
-/* Set flags so that worker threads will stop due to ESC key being pressed. */
+/* Set flags so that workers will stop due to ESC key being pressed */
 
 void stop_workers_for_escape (void)
 {
-	if (WORKER_THREADS_ACTIVE) {
+	if (WORKERS_ACTIVE) {
 		OutputStr (MAIN_THREAD_NUM, "Stopping all worker windows.\n");
-		WORKER_THREADS_STOPPING = TRUE;
+		WORKERS_STOPPING = TRUE;
 		restart_waiting_workers (RESTART_ALL);
-		raiseAllWorkerThreadPriority ();
+		raiseAllWorkersPriority ();
 	}
 }
 
-/* Set flag so that all worker threads stop and restart because an */
-/* important INI option changed (like thread priority).  This routine only */
-/* restarts "genuine" work threads - not benchmarking and torture test */
-/* work threads. */
+/* Set flag so that all workers stop and restart because an important INI option changed (like thread priority). */
+/* This routine only restarts "genuine" workers - not benchmarking and torture test workers. */
 
 void stop_workers_for_restart (void)
 {
-	if (WORKER_THREADS_ACTIVE &&
+	if (WORKERS_ACTIVE &&
 	    LAUNCH_TYPE == LD_CONTINUE &&
 	    ! STOP_FOR_RESTART) {
 		OutputStr (MAIN_THREAD_NUM, "Restarting all worker windows.\n");
 		STOP_FOR_RESTART = TRUE;
 		restart_waiting_workers (RESTART_ALL);
-		if (NUM_WORKER_THREADS > WORKER_THREADS_ACTIVE)
-			create_worker_windows (NUM_WORKER_THREADS);
+		if (NUM_WORKERS > WORKERS_ACTIVE)
+			create_worker_windows (NUM_WORKERS);
 	}
 }
 
-/* Set flag so that all worker threads stop and restart because an */
-/* important INI option changed (like thread priority). */
+/* Set flag so that all workers stop and restart because an important INI option changed (like thread priority). */
 
 void stop_workers_for_add_files (void)
 {
-	if (WORKER_THREADS_ACTIVE && ! STOP_FOR_RESTART) {
+	if (WORKERS_ACTIVE && ! STOP_FOR_RESTART) {
 		OutputStr (MAIN_THREAD_NUM, "Restarting all worker windows to process .add file.\n");
 		STOP_FOR_RESTART = TRUE;
 		restart_waiting_workers (RESTART_ALL);
 	}
 }
 
-/* Set flag so that worker threads will stop due to Time= end time being */
-/* reached.  We need to stop all worker threads, reprocess prime.ini, and */
-/* restart the worker threads. */
+/* Set flag so that workers will stop due to Time= end time being reached.  We need to stop all workers, reprocess prime.ini, and restart the workers. */
 
 void stop_workers_for_reread_ini (void)
 {
-	if (WORKER_THREADS_ACTIVE && ! STOP_FOR_REREAD_INI) {
+	if (WORKERS_ACTIVE && ! STOP_FOR_REREAD_INI) {
 		OutputStr (MAIN_THREAD_NUM, "Restarting all worker windows with new timed INI settings.\n");
 		STOP_FOR_REREAD_INI = TRUE;
 		restart_waiting_workers (RESTART_ALL);
 	}
 }
 
-/* Set flags so that worker threads will stop due to day/night memory */
-/* changeover. */
+/* Set flags so that workers will stop due to day/night memory changeover. */
 
 void stop_worker_for_mem_changed (
 	int	thread_num)
 {
-	if (WORKER_THREADS_ACTIVE && ! STOP_FOR_MEM_CHANGED[thread_num]) {
+	if (WORKERS_ACTIVE && ! STOP_FOR_MEM_CHANGED[thread_num]) {
 		OutputStr (thread_num, "Restarting worker with new memory settings.\n");
 		MEM_FLAGS[thread_num] |= MEM_RESTARTING;
 		STOP_FOR_MEM_CHANGED[thread_num] = 1;
@@ -968,44 +982,43 @@ void stop_worker_for_mem_changed (
 	}
 }
 
-/* Set flag so that worker thread will stop to do priority work. */
+/* Set flag so that worker will stop to do priority work. */
 
 void stop_worker_for_advanced_test (
 	int	thread_num)
 {
-	if (WORKER_THREADS_ACTIVE && ! STOP_FOR_PRIORITY_WORK[thread_num]) {
+	if (WORKERS_ACTIVE && ! STOP_FOR_PRIORITY_WORK[thread_num]) {
 		OutputStr (thread_num, "Restarting worker to do LL test.\n");
 		STOP_FOR_PRIORITY_WORK[thread_num] = 1;
 	}
 }
 
-/* Set flag so that worker thread will stop to do priority work. */
+/* Set flag so that worker will stop to do priority work. */
 
 void stop_worker_for_priority_work (
 	int	thread_num)
 {
-	if (WORKER_THREADS_ACTIVE && ! STOP_FOR_PRIORITY_WORK[thread_num]) {
+	if (WORKERS_ACTIVE && ! STOP_FOR_PRIORITY_WORK[thread_num]) {
 		OutputStr (thread_num, "Restarting worker to do priority work.\n");
 		STOP_FOR_PRIORITY_WORK[thread_num] = 1;
 	}
 }
 
-/* Set flags so that worker threads will stop for throttling. */
+/* Set flags so that workers will stop for throttling. */
 
 void stop_workers_for_throttle (void)
 {
-	if (WORKER_THREADS_ACTIVE)
+	if (WORKERS_ACTIVE)
 		memset (STOP_FOR_THROTTLE, 1, sizeof (STOP_FOR_THROTTLE));
 }
 
-/* Set flags so that worker thread will abort processing its current */
-/* work unit.  There are many reasons to do this: unreserve, factor found */
-/* in another thread, server request, etc. */
+/* Set flags so that worker will abort processing its current work unit.  There are many reasons to do this: unreserve, factor found */
+/* in another worker, server request, etc. */
 
 void stop_worker_for_abort (
 	int	thread_num)
 {
-	if (WORKER_THREADS_ACTIVE)
+	if (WORKERS_ACTIVE)
 		STOP_FOR_ABORT[thread_num] = 1;
 }
 
@@ -1023,8 +1036,7 @@ void stop_save_files_timer ()
 	delete_timed_event (TE_SAVE_FILES);
 }
 
-/* Set flags so that worker threads will write save files */
-/* at next convenient opportunity. */
+/* Set flags so that workers will write save files at next convenient opportunity. */
 
 void saveFilesTimer ()
 {
@@ -1058,8 +1070,7 @@ void stop_Jacobi_timer ()
 	delete_timed_event (TE_JACOBI);
 }
 
-/* Set flags so that worker threads will execute a Jacobi error check */
-/* at next convenient opportunity. */
+/* Set flags so that workers will execute a Jacobi error check at next convenient opportunity. */
 
 void JacobiTimer ()
 {
@@ -1109,21 +1120,21 @@ void read_mem_info (void)
 /* Read and parse the Memory data from the INI file */
 
 	seconds_until_reread = 0;
-	AVAIL_MEM = IniGetTimedInt (LOCALINI_FILE, "Memory", physical_memory () / 16, &seconds);
+	AVAIL_MEM = IniGetTimedInt (INI_FILE, "Memory", 256, &seconds);
 	if (seconds && (seconds_until_reread == 0 || seconds < seconds_until_reread))
 		seconds_until_reread = seconds;
-	for (tnum = 0; tnum < (int) MAX_NUM_WORKER_THREADS; tnum++) {
+	for (tnum = 0; tnum < (int) MAX_NUM_WORKERS; tnum++) {
 		char	section_name[32];
 		sprintf (section_name, "Worker #%d", tnum+1);
-		AVAIL_MEM_PER_WORKER[tnum] = IniSectionGetTimedInt (LOCALINI_FILE, section_name, "Memory", AVAIL_MEM, &seconds);
+		AVAIL_MEM_PER_WORKER[tnum] = IniSectionGetTimedInt (INI_FILE, section_name, "Memory", AVAIL_MEM, &seconds);
 		if (seconds && (seconds_until_reread == 0 || seconds < seconds_until_reread))
 			seconds_until_reread = seconds;
 	}
 
-/* Compute the maximum memory setting.  If not found, assume 8MB. */
+/* Compute the maximum memory setting.  If not found, assume 256MB. */
 
-	MAX_MEM = 8;
-	p = IniSectionGetStringRaw (LOCALINI_FILE, NULL, "Memory");
+	MAX_MEM = 256;
+	p = IniSectionGetStringRaw (INI_FILE, NULL, "Memory");
 	if (p != NULL) for ( ; ; ) {
 		unsigned long mem = atol (p);
 		if (mem > MAX_MEM) MAX_MEM = mem;
@@ -1132,11 +1143,11 @@ void read_mem_info (void)
 		p = p + 6;
 	}
 
-/* Get the maximum number of workers that can use lots of memory.  Default is one. */
+/* Get the maximum number of workers that can use lots of memory.  Default is one.  If not using timers, do not allow zero max high mem workers. */
 
-	MAX_HIGH_MEM_WORKERS = IniGetTimedInt (LOCALINI_FILE, "MaxHighMemWorkers", 1, &seconds);
+	MAX_HIGH_MEM_WORKERS = IniGetTimedInt (INI_FILE, "MaxHighMemWorkers", 1, &seconds);
+	if (seconds == 0 && MAX_HIGH_MEM_WORKERS < 1) MAX_HIGH_MEM_WORKERS = 1;
 	if (seconds && (seconds_until_reread == 0 || seconds < seconds_until_reread)) seconds_until_reread = seconds;
-	if (MAX_HIGH_MEM_WORKERS < 1) MAX_HIGH_MEM_WORKERS = 1;
 
 /* Add the event that fires when the memory settings expire. */
 
@@ -1147,17 +1158,16 @@ void read_mem_info (void)
 	gwmutex_unlock (&MEM_MUTEX);
 }
 
-/* This routine initializes mem_changed globals.  It must be called prior */
-/* to launching the worker threads. */
+/* This routine initializes mem_changed globals.  It must be called prior to launching the workers. */
 
 void init_mem_state (void)
 {
 	int	i;
 
 /* Clear flags saying thread is affected by changes in the memory settings. */
-/* Assume each worker thread will use a default amount of memory. */
+/* Assume each worker will use a default amount of memory. */
 
-	for (i = 0; i < MAX_NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < MAX_NUM_WORKERS; i++) {
 		MEM_FLAGS[i] = MEM_USAGE_NOT_SET;
 		MEM_IN_USE[i] = DEFAULT_MEM_USAGE;
 		MEM_RESTART_FLAGS[i] = 0;
@@ -1250,15 +1260,16 @@ int are_threads_using_lots_of_memory (
 	unsigned int high_mem_threshold;
 
 /* Get the user configurable count of workers that are allowed to use lots of memory. */
-/* If this equals the number of workers then there is no need to scan the workers. */
+/* If this equals the number of workers or is zero then there is no need to scan the workers. */
 
 	max_high_mem = MAX_HIGH_MEM_WORKERS;
-	if (max_high_mem >= (int) NUM_WORKER_THREADS) return (FALSE);
+	if (max_high_mem >= (int) NUM_WORKERS) return (FALSE);
+	if (max_high_mem <= 0) return (TRUE);
 
 /* If there are enough threads with variable memory usage, then return TRUE. */
 
-	high_mem_threshold = IniGetInt (LOCALINI_FILE, "HighMemThreshold", 250);
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++)
+	high_mem_threshold = IniGetInt (INI_FILE, "HighMemThreshold", 250);
+	for (i = 0; i < (int) NUM_WORKERS; i++)
 		if (i != thread_num &&
 		    ((MEM_FLAGS[i] & MEM_WILL_BE_VARIABLE_USAGE) ||
 		     (MEM_FLAGS[i] & MEM_VARIABLE_USAGE && MEM_IN_USE[i] >= high_mem_threshold))) {
@@ -1268,14 +1279,10 @@ int are_threads_using_lots_of_memory (
 	return (FALSE);
 }
 
-/* Each worker thread tells us how much memory it will be using.  This may */
-/* cause other worker threads to restart if they are using more than their */
-/* fair share. */
-/* Variable usage callers must examine the return code!  During startup */
-/* all threads may not have determined their memory needs.  This routine */
-/* returns TRUE if caller should recalculate the amount of memory available */
-/* for use because we previously overestimated the amount of memory available */
-/* to the thread. */
+/* Each worker tells us how much memory it will be using.  This may cause other workers to restart if they are using more than their fair share. */
+/* Variable usage callers must examine the return code!  During startup all workers may not have determined their memory needs.  This routine */
+/* returns TRUE if caller should recalculate the amount of memory available for use because we previously overestimated the amount of memory available */
+/* to the worker. */
 
 int set_memory_usage (
 	int	thread_num,
@@ -1318,7 +1325,7 @@ int set_memory_usage (
 
 	mem_usage = 0;
 	worst_thread = -1;
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < (int) NUM_WORKERS; i++) {
 		mem_usage += MEM_IN_USE[i];
 		if ((MEM_FLAGS[i] & MEM_VARIABLE_USAGE ||
 		     MEM_FLAGS[i] & MEM_WILL_BE_VARIABLE_USAGE) &&
@@ -1371,7 +1378,7 @@ int set_memory_usage (
 /* See if all fixed usage threads have set their memory usage */
 
 	all_threads_set = TRUE;
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < (int) NUM_WORKERS; i++) {
 		if (MEM_FLAGS[i] & MEM_WILL_BE_VARIABLE_USAGE) continue;
 		if (MEM_FLAGS[i] & MEM_USAGE_NOT_SET ||
 		    MEM_FLAGS[i] & MEM_RESTARTING) {
@@ -1386,7 +1393,7 @@ int set_memory_usage (
 
 	if (all_threads_set) {
 		best_thread = -1;
-		for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+		for (i = 0; i < (int) NUM_WORKERS; i++) {
 			if (MEM_FLAGS[i] & MEM_WAITING) {
 				best_thread = i;
 				break;
@@ -1405,12 +1412,12 @@ int set_memory_usage (
 /* If a worker is waiting for a reduction in the number of workers */
 /* using lots of memory, then check to see if it can run now. */
 /* The 100 is an arbitrary figure that makes sure a significant amount */
-/* of new memory is available before restarting worker threads. */
+/* of new memory is available before restarting workers. */
 /* Be careful subtracting from AVAIL_MEM.  Since it is an unsigned long */
 /* if it goes negative it will become a large positive value instead */	
 
 	if (all_threads_set && AVAIL_MEM > mem_usage + 100) {
-		for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+		for (i = 0; i < (int) NUM_WORKERS; i++) {
 			if (! (MEM_RESTART_FLAGS[i] & MEM_RESTART_TOO_MANY_HIGHMEM)) continue;
 			if (are_threads_using_lots_of_memory (i)) continue;
 			stop_worker_for_mem_changed (i);
@@ -1424,7 +1431,7 @@ int set_memory_usage (
 
 	if (all_threads_set && AVAIL_MEM > mem_usage + 100) {
 		best_thread = -1;
-		for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+		for (i = 0; i < (int) NUM_WORKERS; i++) {
 			if (MEM_RESTART_FLAGS[i] & MEM_RESTART_IF_MORE &&
 			    MEM_RESTART_IF_MORE_AMOUNT[i] < AVAIL_MEM - mem_usage)
 				best_thread = i;
@@ -1441,7 +1448,7 @@ int set_memory_usage (
 
 	if (all_threads_set && AVAIL_MEM > mem_usage + 100) {
 		best_thread = -1;
-		for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+		for (i = 0; i < (int) NUM_WORKERS; i++) {
 			if (MEM_RESTART_FLAGS[i] & MEM_RESTART_MORE_AVAIL &&
 			    MEM_RESTART_MIN_AMOUNT[i] < AVAIL_MEM - mem_usage)
 				best_thread = i;
@@ -1470,7 +1477,7 @@ unsigned long max_mem (
 /* Compute the maximum memory setting for this thread.  If not found, return the global max memory. */
 
 	sprintf (section_name, "Worker #%d", thread_num+1);
-	p = IniSectionGetStringRaw (LOCALINI_FILE, section_name, "Memory");
+	p = IniSectionGetStringRaw (INI_FILE, section_name, "Memory");
 	if (p == NULL) return (MAX_MEM);
 
 	memory = 0;
@@ -1489,7 +1496,7 @@ unsigned long max_mem (
 }
 
 /* Return memory (in MB) now available for a variable usage thread. */
-/* This routine takes into account the memory used by other worker threads. */
+/* This routine takes into account the memory used by other workers. */
 
 int avail_mem (
 	int	thread_num,
@@ -1497,7 +1504,7 @@ int avail_mem (
 	unsigned long desired_memory,	/* If this much memory (in MB) can be returned without restarting other workers, then do so */
 	unsigned int *memory)		/* Returned available memory, in MB */
 {
-	int	i, fixed_threads[MAX_NUM_WORKER_THREADS];
+	int	i, fixed_threads[MAX_NUM_WORKERS];
 	unsigned long fixed_usage, variable_usage, num_variable_threads, avail, diff;
 
 /* Check if we are in a period of forced low memory usage */
@@ -1538,10 +1545,10 @@ int avail_mem (
 /* If any workers have not yet set their memory usage, then wait for them */
 /* to do so.  This allows us to accurately gauge how much fixed memory */
 /* is consumed and how many variable usage workers there are. */
-/* Just in case we wake up from the timeout (should rarely happen), we try*/
+/* Just in case we wake up from the timeout (should rarely happen), we try */
 /* to stagger the timeouts by adding the thread number. */
 
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < (int) NUM_WORKERS; i++) {
 		if (i == thread_num) continue;
 		if (MEM_FLAGS[i] & MEM_USAGE_NOT_SET || MEM_FLAGS[i] & MEM_RESTARTING) {
 			gwevent_init (&MEM_WAIT_OR_STOP[thread_num]);
@@ -1563,7 +1570,7 @@ int avail_mem (
 	fixed_usage = 0;
 	variable_usage = 0;
 	num_variable_threads = 0;
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < (int) NUM_WORKERS; i++) {
 		if (MEM_FLAGS[i] & MEM_VARIABLE_USAGE ||
 		    MEM_FLAGS[i] & MEM_WILL_BE_VARIABLE_USAGE) {
 			num_variable_threads++;
@@ -1579,7 +1586,7 @@ int avail_mem (
 /* that are using a variable amount of memory.  */
 
 	avail = (AVAIL_MEM > fixed_usage) ? AVAIL_MEM - fixed_usage : 0;
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < (int) NUM_WORKERS; i++) {
 		unsigned long avail_per_worker;
 		if (i == thread_num) continue;
 		if (fixed_threads[i]) continue;
@@ -1657,8 +1664,7 @@ int avail_mem (
 	return (0);
 }
 
-/* Routine to notify all worker threads the day/night memory settings */
-/* have changed.  This is called when the memory change timer fires OR */
+/* Routine to notify all workers the day/night memory settings have changed.  This is called when the memory change timer fires OR */
 /* when memory settings are changed by the GUI. */
 
 void mem_settings_have_changed (void)
@@ -1672,16 +1678,16 @@ void mem_settings_have_changed (void)
 	old_max_mem = MAX_MEM;
 	read_mem_info ();
 
-/* If the worker threads are not active then no workers need restarting */
+/* If workers are not active then no workers need restarting */
 
-	if (! WORKER_THREADS_ACTIVE) return;
+	if (! WORKERS_ACTIVE) return;
 
 /* If maximum memory has changed see which threads need restarting. */
 /* Those threads that are in stage 1 of pfactor work will want to compute */
 /* new bounds. */
 
 	if (MAX_MEM != old_max_mem)
-		for (tnum = 0; tnum < (int) NUM_WORKER_THREADS; tnum++)
+		for (tnum = 0; tnum < (int) NUM_WORKERS; tnum++)
 			if (MEM_RESTART_FLAGS[tnum] & MEM_RESTART_MAX_MEM_CHANGE)
 				stop_worker_for_mem_changed (tnum);
 
@@ -1690,7 +1696,7 @@ void mem_settings_have_changed (void)
 /* run during memory need restarting. */
 
 	if (AVAIL_MEM == MAX_MEM)
-		for (tnum = 0; tnum < (int) NUM_WORKER_THREADS; tnum++)
+		for (tnum = 0; tnum < (int) NUM_WORKERS; tnum++)
 			if (MEM_RESTART_FLAGS[tnum] & MEM_RESTART_MAX_MEM_AVAILABLE)
 				stop_worker_for_mem_changed (tnum);
 
@@ -1699,13 +1705,13 @@ void mem_settings_have_changed (void)
 /* need restarting. */
 
 	if (AVAIL_MEM > old_avail_mem)
-		for (tnum = 0; tnum < (int) NUM_WORKER_THREADS; tnum++)
+		for (tnum = 0; tnum < (int) NUM_WORKERS; tnum++)
 			if (MEM_RESTART_FLAGS[tnum] & MEM_RESTART_MORE_AVAIL)
 				stop_worker_for_mem_changed (tnum);
 
 /* If any worker now exceeds (by 10MB) the per-worker maximum, then restart. */
 
-	for (tnum = 0; tnum < (int) NUM_WORKER_THREADS; tnum++)
+	for (tnum = 0; tnum < (int) NUM_WORKERS; tnum++)
 		if (MEM_FLAGS[tnum] & MEM_VARIABLE_USAGE &&
 		    MEM_IN_USE[tnum] > AVAIL_MEM_PER_WORKER[tnum] + 10)
 			stop_worker_for_mem_changed (tnum);
@@ -1722,7 +1728,7 @@ void mem_settings_have_changed (void)
 
 		mem_usage = 0;
 		worst_thread = -1;
-		for (tnum = 0; tnum < (int) NUM_WORKER_THREADS; tnum++) {
+		for (tnum = 0; tnum < (int) NUM_WORKERS; tnum++) {
 			mem_usage += MEM_IN_USE[tnum];
 			if (MEM_FLAGS[tnum] & MEM_USAGE_NOT_SET ||
 			    MEM_FLAGS[tnum] & MEM_RESTARTING ||
@@ -1747,9 +1753,9 @@ void stop_high_memory_workers (void)
 {
 	int	i;
 
-/* If the worker threads are not active then no workers need restarting */
+/* If workers are not active then no workers need restarting */
 
-	if (! WORKER_THREADS_ACTIVE) return;
+	if (! WORKERS_ACTIVE) return;
 
 /* Obtain lock before accessing memory global variables */
 
@@ -1757,7 +1763,7 @@ void stop_high_memory_workers (void)
 
 /* Look for workers marked with variable usage */
 
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < (int) NUM_WORKERS; i++) {
 		if (MEM_FLAGS[i] & MEM_VARIABLE_USAGE ||
 		    MEM_FLAGS[i] & MEM_WILL_BE_VARIABLE_USAGE)
 			stop_worker_for_mem_changed (i);
@@ -1774,13 +1780,13 @@ void restart_high_memory_workers (void)
 {
 	int	tnum;
 
-/* If the worker threads are not active then no workers need restarting */
+/* If workers are not active then no workers need restarting */
 
-	if (! WORKER_THREADS_ACTIVE) return;
+	if (! WORKERS_ACTIVE) return;
 
 /* Restart the workers affected by LowMemWhileRunning */
 
-	for (tnum = 0; tnum < (int) NUM_WORKER_THREADS; tnum++)
+	for (tnum = 0; tnum < (int) NUM_WORKERS; tnum++)
 		if (MEM_RESTART_FLAGS[tnum] & MEM_RESTART_LOWMEM_ENDS) {
 			MEM_RESTART_FLAGS[tnum] &= ~MEM_RESTART_LOWMEM_ENDS;
 			stop_worker_for_mem_changed (tnum);
@@ -1808,7 +1814,7 @@ void stop_battery_timer (void)
 
 void run_on_battery_changed (void)
 {
-	if (WORKER_THREADS_ACTIVE) {
+	if (WORKERS_ACTIVE) {
 		stop_battery_timer ();
 		start_battery_timer ();
 	}
@@ -1923,7 +1929,7 @@ void check_for_priority_work (void)
 	int	tnum;
 	struct work_unit *w;
 
-	for (tnum = 0; tnum < (int) NUM_WORKER_THREADS; tnum++) {
+	for (tnum = 0; tnum < (int) NUM_WORKERS; tnum++) {
 		w = NULL;
 		for ( ; ; ) {
 			w = getNextWorkToDoLine (tnum, w, SHORT_TERM_USE);
@@ -1956,12 +1962,12 @@ void mark_workers_active (
 void start_one_worker (
 	int	thread_num)
 {
-	if (thread_num < 0 || thread_num >= (int) WORKER_THREADS_ACTIVE) {
-		OutputStr (MAIN_THREAD_NUM, "Worker thread number out of range.\n");
+	if (thread_num < 0 || thread_num >= (int) WORKERS_ACTIVE) {
+		OutputStr (MAIN_THREAD_NUM, "Worker number out of range.\n");
 		return;
 	}
 	if (ACTIVE_WORKERS[thread_num]) {
-		OutputStr (MAIN_THREAD_NUM, "Worker thread is already running.\n");
+		OutputStr (MAIN_THREAD_NUM, "Worker is already running.\n");
 		return;
 	}
 	ACTIVE_WORKERS[thread_num] = 1;
@@ -1973,12 +1979,12 @@ void start_one_worker (
 void stop_one_worker (
 	int	thread_num)
 {
-	if (thread_num < 0 || thread_num >= (int) WORKER_THREADS_ACTIVE) {
-		OutputStr (MAIN_THREAD_NUM, "Worker thread number out of range.\n");
+	if (thread_num < 0 || thread_num >= (int) WORKERS_ACTIVE) {
+		OutputStr (MAIN_THREAD_NUM, "Worker number out of range.\n");
 		return;
 	}
 	if (!ACTIVE_WORKERS[thread_num]) {
-		OutputStr (MAIN_THREAD_NUM, "Worker thread is already stopped.\n");
+		OutputStr (MAIN_THREAD_NUM, "Worker is already stopped.\n");
 		return;
 	}
 	ACTIVE_WORKERS[thread_num] = 0;
@@ -2023,7 +2029,7 @@ unsigned int active_workers_count (void)
 {
 	unsigned int i, count;
 
-	for (i = count = 0; i < WORKER_THREADS_ACTIVE; i++)
+	for (i = count = 0; i < WORKERS_ACTIVE; i++)
 		if (ACTIVE_WORKERS[i]) count++;
 	return (count);
 }
@@ -2036,7 +2042,7 @@ unsigned int active_workers_count (void)
 
 void parse_pause_info (
        char	*buf,		/* Comma separated list of program names */
-       int	thread_num,	/* Worker thread to pause */
+       int	thread_num,	/* Worker to pause */
        int	low_mem)	/* Flag for LowMemWhileRunning */
 {
 	struct pause_info *data;
@@ -2060,7 +2066,7 @@ void parse_pause_info (
 			*bracket = 0;
 			data->workers_affected = atoi (bracket+1);
 		} else
-			data->workers_affected = MAX_NUM_WORKER_THREADS;
+			data->workers_affected = MAX_NUM_WORKERS;
 
 		if (!low_mem && *p == '*')
 			data->program_name = NULL;
@@ -2115,7 +2121,7 @@ void read_pause_info (void)
 	if (seconds && (seconds_until_reread == 0 || seconds < seconds_until_reread))
 		seconds_until_reread = seconds;
 	parse_pause_info (buf, ALL_WORKERS, FALSE);
-	for (tnum = 0; tnum < (int) NUM_WORKER_THREADS; tnum++) {
+	for (tnum = 0; tnum < (int) NUM_WORKERS; tnum++) {
 		char	section_name[32];
 		sprintf (section_name, "Worker #%d", tnum+1);
 		IniSectionGetTimedString (INI_FILE, section_name, "PauseWhileRunning", buf, sizeof (buf), NULL, &seconds);
@@ -2172,10 +2178,9 @@ int best_pause_candidate (
 {
 	int	i;
 
-/* Loop through all the workers.  Give preference to any worker that */
-/* is paused waiting for work or is already paused. */
+/* Loop through all the workers.  Give preference to any worker that is paused waiting for work or is already paused. */
 
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < (int) NUM_WORKERS; i++) {
 		if (!ACTIVE_WORKERS[i]) continue;
 		if (workers_to_pause[i] != NULL) continue;
 		if (WORK_AVAILABLE_OR_STOP_INITIALIZED[i]) return (i);
@@ -2188,7 +2193,7 @@ int best_pause_candidate (
 /* is not checked because that is the flag that recomputes pfactor */
 /* bounds on change in max mem. */
 
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < (int) NUM_WORKERS; i++) {
 		if (!ACTIVE_WORKERS[i]) continue;
 		if (workers_to_pause[i] != NULL) continue;
 		if (MEM_FLAGS[i] & MEM_USAGE_NOT_SET) return (i);
@@ -2198,7 +2203,7 @@ int best_pause_candidate (
 
 /* Loop through all the workers.  Return first one we find. */
 
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < (int) NUM_WORKERS; i++) {
 		if (!ACTIVE_WORKERS[i]) continue;
 		if (workers_to_pause[i] != NULL) continue;
 		return (i);
@@ -2214,7 +2219,7 @@ int best_pause_candidate (
 void checkPauseWhileRunning (void)
 {
 	struct pause_info *p, *lowmem;
-	struct pause_info *workers_to_pause[MAX_NUM_WORKER_THREADS];
+	struct pause_info *workers_to_pause[MAX_NUM_WORKERS];
 	int	i, named_program_entries;
 
 /* Clear flag indicating a running program matched a pause_info entry */
@@ -2285,7 +2290,7 @@ void checkPauseWhileRunning (void)
 /* to the workers that are currently paused.  Pause more workers or */
 /* resume workers as appropriate. */
 
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < (int) NUM_WORKERS; i++) {
 		p = STOP_FOR_PAUSE[i];
 		STOP_FOR_PAUSE[i] = workers_to_pause[i];
 		if (p != NULL && STOP_FOR_PAUSE[i] != NULL && p != STOP_FOR_PAUSE[i]) {
@@ -2326,7 +2331,7 @@ void isInPauseList (
 	}
 }
 
-/* This routine implements a pause for one worker thread */
+/* This routine implements a pause for one worker */
 
 void implement_pause (
 	int	thread_num)
@@ -2357,11 +2362,11 @@ void implement_pause (
 
 		sleep_time = timed_event_fire_time (TE_READ_PAUSE_DATA);
 		time_as_string = sleep_time ? ctime (&sleep_time) : "forever";
-		if (NUM_WORKER_THREADS == 1)
+		if (NUM_WORKERS == 1)
 			sprintf (buf, "Sleeping until %s\n", time_as_string);
 		else if (p->workers_affected == 1)
 			sprintf (buf, "Sleeping one worker until %s\n", time_as_string);
-		else if (p->workers_affected == MAX_NUM_WORKER_THREADS)
+		else if (p->workers_affected == MAX_NUM_WORKERS)
 			sprintf (buf, "Sleeping all workers until %s\n", time_as_string);
 		else
 			sprintf (buf, "Sleeping %d workers until %s\n", p->workers_affected, time_as_string);
@@ -2475,7 +2480,7 @@ void checkLoadAverage (void)
 		double	threads_per_worker;
 		int	workers_to_stop;
 
-		threads_per_worker = (double) HW_NUM_CORES / (double) NUM_WORKER_THREADS;
+		threads_per_worker = (double) HW_NUM_CORES / (double) NUM_WORKERS;
 		if (threads_per_worker < 1.0) threads_per_worker = 1.0;
 		workers_to_stop = (int) ((load - HI_LOAD) / threads_per_worker);
 		if (workers_to_stop < 1) workers_to_stop = 1;
@@ -2489,7 +2494,7 @@ void checkLoadAverage (void)
 /* system time to adjust the average to reflect our restarted worker. */
 
 	if (load >= 0.0 && load <= LO_LOAD) {
-		for (i = 0; i < (int) NUM_WORKER_THREADS; i++) {
+		for (i = 0; i < (int) NUM_WORKERS; i++) {
 			if (END_LOADAVG_OR_STOP_INITIALIZED[i]) {
 				restart_one_waiting_worker (i, RESTART_LOADAVG);
 				if (recheck_interval < 65) recheck_interval = 65;
@@ -2503,7 +2508,7 @@ void checkLoadAverage (void)
 	add_timed_event (TE_LOAD_AVERAGE, recheck_interval);
 }
 
-/* This routine implements a load average pause for one worker thread */
+/* This routine implements a load average pause for one worker */
 
 void implement_loadavg (
 	int	thread_num)
@@ -2568,7 +2573,7 @@ int handleThrottleTimerEvent (void)
 	return (TE_THROTTLE_FREQ + THROTTLE_SLEEP_TIME_IN_SEC);
 }
 
-/* This routine implements a throttle for one worker thread */
+/* This routine implements a throttle for one worker */
 
 void implementThrottle (
 	int	thread_num)
@@ -2579,7 +2584,7 @@ void implementThrottle (
 /* frequently so that we can be responsive to an ESC or terminate command. */
 
 	for (totaltime = 0; totaltime < THROTTLE_SLEEP_TIME_IN_MS; totaltime += 100) {
-		if (WORKER_THREADS_STOPPING) return;
+		if (WORKERS_STOPPING) return;
 		Sleep (100);
 	}
 }
@@ -2655,12 +2660,12 @@ int SleepFive (
 	BlinkIcon (thread_num, 10);		/* Blink icon for 10 seconds */
 	for (i = 0; i < 100; i++) {
 		Sleep (100);
-		if (WORKER_THREADS_STOPPING) return (STOP_ESCAPE);
+		if (WORKERS_STOPPING) return (STOP_ESCAPE);
 	}
 	ChangeIcon (thread_num, IDLE_ICON);	/* Idle icon while stopped */
 	for (i = 0; i < 2900; i++) {
 		Sleep (100);
-		if (WORKER_THREADS_STOPPING) return (STOP_ESCAPE);
+		if (WORKERS_STOPPING) return (STOP_ESCAPE);
 	}
 	ChangeIcon (thread_num, WORKING_ICON);	/* Back to the working icon */
 	return (0);
@@ -2686,7 +2691,7 @@ void calc_output_frequencies (
 		*output_frequency = 1.0;
 	} else {
 		*output_frequency = gwmap_to_timing (1.0, 2, 50000000, -1) / gwmap_to_timing (gwdata->k, gwdata->b, gwdata->n, gwdata->c);
-		if (gwget_num_threads (gwdata) > 1 && NUM_WORKER_THREADS < HW_NUM_CORES)
+		if (gwget_num_threads (gwdata) > 1 && NUM_WORKERS < HW_NUM_CORES)
 			*output_frequency /= 1.8 * (gwget_num_threads (gwdata) - 1);
 		/* For prettier output (outputs likely to be a multiple of a power of 10), round the */
 		/* output frequency to the nearest (10,15,20,25,30,40,...90) times a power of ten */
@@ -2737,10 +2742,10 @@ void formatETA (
 }
 
 /****************************************************************************/
-/*             Portable routines to launch worker threads                   */
+/*                  Portable routines to launch workers                     */
 /****************************************************************************/
 
-/* Structure used in launching one worker thread. */
+/* Structure used in launching one worker */
 
 struct LaunchData {
 	int	thread_num;		/* This thread number */
@@ -2753,8 +2758,7 @@ struct LaunchData {
 	int	stop_reason;		/* Returned stop reason */
 };
 
-/* Create windows for the worker threads.  Windows REALLY prefers this be */
-/* done in the main thread.  Otherwise, deadlocks can occur. */
+/* Create windows for the worker.  Windows REALLY prefers this be done in the main thread.  Otherwise, deadlocks can occur. */
 
 void create_worker_windows (
 	int	num_threads)
@@ -2762,7 +2766,7 @@ void create_worker_windows (
 	int	tnum;
 	char	buf[80];
 
-/* Make sure each worker thread has a window to output to */
+/* Make sure each worker has a window to output to */
 
 	for (tnum = 0; tnum < num_threads; tnum++) {
 		create_window (tnum);
@@ -2772,9 +2776,9 @@ void create_worker_windows (
 	}
 }
 
-/* Launch the worker threads to process work units */
+/* Launch the workers to process work units */
 
-int LaunchWorkerThreads (
+int LaunchWorkers (
 	int	thread_num,		/* Specific worker to launch or special value ALL_WORKERS */
 	int	wait_flag)		/* TRUE if we wait for workers to end before returning. */
 {
@@ -2783,9 +2787,9 @@ int LaunchWorkerThreads (
 
 /* If workers are already active, then call routine that restarts individual workers. */
 
-	if (WORKER_THREADS_ACTIVE && (LAUNCH_TYPE == LD_CONTINUE || LAUNCH_TYPE == LD_TORTURE)) {
+	if (WORKERS_ACTIVE && (LAUNCH_TYPE == LD_CONTINUE || LAUNCH_TYPE == LD_TORTURE)) {
 		if (thread_num == ALL_WORKERS) {
-			for (thread_num = 0; thread_num < (int) WORKER_THREADS_ACTIVE; thread_num++)
+			for (thread_num = 0; thread_num < (int) WORKERS_ACTIVE; thread_num++)
 				if (! ACTIVE_WORKERS[thread_num])
 					start_one_worker (thread_num);
 		} else
@@ -2797,10 +2801,10 @@ int LaunchWorkerThreads (
 
 	ld = (struct LaunchData *) malloc (sizeof (struct LaunchData));
 	if (ld == NULL) return (OutOfMemory (MAIN_THREAD_NUM));
-	ld->num_threads = NUM_WORKER_THREADS;
+	ld->num_threads = NUM_WORKERS;
 	LAUNCH_TYPE = LD_CONTINUE;
-	create_worker_windows (NUM_WORKER_THREADS);
-	ld->num_to_mark_active = (thread_num == ALL_WORKERS ? NUM_WORKER_THREADS : -thread_num);
+	create_worker_windows (NUM_WORKERS);
+	ld->num_to_mark_active = (thread_num == ALL_WORKERS ? NUM_WORKERS : -thread_num);
 	if (wait_flag) {
 		gwthread_create_waitable (&thread_handle, &Launcher, ld);
 		gwthread_wait_for_exit (&thread_handle);
@@ -2856,7 +2860,7 @@ int LaunchBench (
 	return (0);
 }
 
-/* Launch the worker thread(s) to process Advanced/Time */
+/* Launch the worker(s) to process Advanced/Time */
 
 int LaunchAdvancedTime (
 	unsigned long p,		/* Exponent to time */
@@ -2879,38 +2883,36 @@ int LaunchAdvancedTime (
 	return (0);
 }
 
-/* Launch all worker threads */
+/* Launch all workers */
 
 void Launcher (void *arg)
 {
 	struct LaunchData *ld;
 	unsigned int tnum;
 	int	stop_reason;
-	gwthread handles[MAX_NUM_WORKER_THREADS];
-	struct LaunchData *ldwork[MAX_NUM_WORKER_THREADS];
+	gwthread handles[MAX_NUM_WORKERS];
+	struct LaunchData *ldwork[MAX_NUM_WORKERS];
 	int	delay_amount, total_delay_amount;
 
-/* This thread will create more worker threads if necessary and */
-/* then become thread number 0. */
+/* This thread will create more workers if necessary and then become worker number 0. */
 
 	ld = (struct LaunchData *) arg;
 
-/* If worker threads are active then stop them all.  This can */
-/* happen when we choose Torture Test, Benchmark, or Advanced/Time from */
-/* the menus while the worker threads are running */
+/* If workers are active then stop them all.  This can happen when we choose Torture Test, Benchmark, or Advanced/Time from */
+/* the menus while the workera are running. */
 
-	if (WORKER_THREADS_ACTIVE) {
+	if (WORKERS_ACTIVE) {
 		stop_workers_for_escape ();
-		while (WORKER_THREADS_STOPPING) Sleep (50);
+		while (WORKERS_STOPPING) Sleep (50);
 	}
 
-/* Set flags so that GUI knows worker threads are active */
+/* Set flags so that GUI knows workers are active */
 
-	WORKER_THREADS_ACTIVE = ld->num_threads;
-	WORKER_THREADS_STOPPING = FALSE;
+	WORKERS_ACTIVE = ld->num_threads;
+	WORKERS_STOPPING = FALSE;
 	mark_workers_active (ld->num_to_mark_active);
 
-/* Output a starting worker threads message */
+/* Output a starting workers message */
 
 	if (ld->num_threads > 1)
 		OutputStr (MAIN_THREAD_NUM, "Starting workers.\n");
@@ -2931,9 +2933,9 @@ again:	clearThreadHandleArray ();
 /* Reread prime.ini, local.ini, and worktodo.ini files just in case user */
 /* hand edited it.  We don't officially support this, but we'll do it */
 /* anyway.  Also, check for a .add file, which we do officially support. */
-/* If the user edited the ini files changing the number of worker threads */
+/* If the user edited the ini files changing the number of workers */
 /* then handle that here.  We also jump here if the threads were restarted */
-/* because the user changed the number of worker threads using dialog boxes. */
+/* because the user changed the number of workers using dialog boxes. */
 /* NOTE: If the user increases the number of threads, then he will not see */
 /* worker windows until he does a stop and restart. */
 
@@ -2942,18 +2944,17 @@ again:	clearThreadHandleArray ();
 		OutputStr (MAIN_THREAD_NUM, "Error rereading INI files.\n");
 		return;
 	}
-	if (LAUNCH_TYPE == LD_CONTINUE) ld->num_threads = NUM_WORKER_THREADS;
+	if (LAUNCH_TYPE == LD_CONTINUE) ld->num_threads = NUM_WORKERS;
 
-/* Initialize flags that cause the worker threads to stop at the */
-/* appropriate time */
+/* Initialize flags that cause the workers to stop at the appropriate time */
 
 	init_stop_code ();
 
-/* Init the code that keeps track of the memory used by each worker thread */
+/* Init the code that keeps track of the memory used by each worker */
 
 	init_mem_state ();
 
-/* Run OS-specific code prior to launching the worker threads */
+/* Run OS-specific code prior to launching the workers */
 
 	PreLaunchCallback (LAUNCH_TYPE);
 
@@ -2994,7 +2995,7 @@ again:	clearThreadHandleArray ();
 		start_throttle_timer ();
 	}
 
-/* Launch more worker threads if needed */
+/* Launch more workers if needed */
 
 	delay_amount = IniGetInt (INI_FILE, "StaggerStarts", 5);
 	total_delay_amount = 0;
@@ -3011,7 +3012,7 @@ again:	clearThreadHandleArray ();
 		gwthread_create_waitable (&handles[tnum], &LauncherDispatch, ldwork[tnum]);
 	}
 
-/* This thread is a worker thread too.  Call dispatching routine. */
+/* This thread becomes a worker too.  Call dispatching routine. */
 
 	ld->thread_num = 0;
 	ld->delay_amount = 0;
@@ -3052,25 +3053,23 @@ again:	clearThreadHandleArray ();
 
 	ChangeIcon (MAIN_THREAD_NUM, IDLE_ICON);
 
-/* Run OS-specific code after worker threads terminate */
+/* Run OS-specific code after workers terminate */
 
 	PostLaunchCallback (LAUNCH_TYPE);
 
-/* Restart all worker threads if the stop reason tells us to.  Make sure */
-/* we set num_threads in case the reason for the restart is a change to */
-/* NUM_WORKER_THREADS. */
+/* Restart all workers if the stop reason tells us to.  Make sure we set num_threads in case the reason for the restart is a change to */
+/* NUM_WORKERS. */
 
 	if (stop_reason == STOP_RESTART) {
-		OutputStr (MAIN_THREAD_NUM, "Restarting all worker windows using new settings.\n");
+		OutputStr (MAIN_THREAD_NUM, "Restarting all workers using new settings.\n");
 		goto again;
 	}
 
-/* Restart all worker threads if the stop reason tells us to reread the */
-/* INI file.  Make sure we set num_threads in case the reason for the restart */
-/* is a change to NUM_WORKER_THREADS. */
+/* Restart all workers if the stop reason tells us to reread the INI file.  Make sure we set num_threads in case the reason for the restart */
+/* is a change to NUM_WORKERS. */
 
 	if (stop_reason == STOP_REREAD_INI) {
-		OutputStr (MAIN_THREAD_NUM, "Restarting all worker windows using new timed prime.txt settings.\n");
+		OutputStr (MAIN_THREAD_NUM, "Restarting all workers using new timed prime.txt settings.\n");
 		goto again;
 	}
 
@@ -3081,18 +3080,17 @@ again:	clearThreadHandleArray ();
 	if (LAUNCH_TYPE == LD_CONTINUE)
 		OutputStr (MAIN_THREAD_NUM, "Choose Test/Continue to restart.\n");
 
-/* Clear flags so that GUI knows worker threads are not active */
+/* Clear flags so that GUI knows workers are not active */
 
-	WORKER_THREADS_ACTIVE = 0;
-	WORKER_THREADS_STOPPING = FALSE;
+	WORKERS_ACTIVE = 0;
+	WORKERS_STOPPING = FALSE;
 
-/* Free the ld structure and exit the first worker thread */
+/* Free the ld structure and exit the first worker */
 
 	free (ld);
 }
 
-/* Now that the worker thread has been created, call the correct routine */
-/* to do some work. */
+/* Now that the worker has been created, call the correct routine to do some work. */
 
 void LauncherDispatch (void *arg)
 {
@@ -3112,7 +3110,7 @@ void LauncherDispatch (void *arg)
 		OutputStr (ld->thread_num, buf);
 
 		for (totaltime = 0; totaltime < ld->delay_amount * 1000; totaltime += 100) {
-			if (WORKER_THREADS_STOPPING) break;
+			if (WORKERS_STOPPING) break;
 			Sleep (100);
 		}
 	}
@@ -3146,7 +3144,7 @@ void LauncherDispatch (void *arg)
 	OutputStr (ld->thread_num, "Worker stopped.\n");
 	ChangeIcon (ld->thread_num, IDLE_ICON);
 
-/* Set the return code and exit this worker thread */
+/* Set the return code and exit this worker */
 
 	ld->stop_reason = stop_reason;
 }
@@ -3284,11 +3282,18 @@ int primeContinue (
 
 /* If the work unit completed, remove it from the worktodo.txt file and move on to the next entry. */
 /* NOTE:  We ignore errors writing the worktodo.txt file.  KEP had a computer that occasionally */
-/* had such a problem and the worker thread stopped computing his long list of PRP tests. */
+/* had such a problem and the worker stopped computing his long list of PRP tests. */
 
 		if (stop_reason == STOP_WORK_UNIT_COMPLETE) {
 			rolling_average_work_unit_complete (thread_num, w);
 			deleteWorkToDoLine (thread_num, w, FALSE);
+			stop_reason = 0;
+		}
+
+/* This odd case is when ECM finds a factor a continue ECM is set.  The new PRP-CF assignmnent is placed ahead of the remaining ECM work unit */
+
+		if (stop_reason == STOP_PREV_WORK_UNIT) {
+			w = w->prev->prev;		// Back up so that new PRP-CF will be the next work unit
 			stop_reason = 0;
 		}
 
@@ -3332,7 +3337,7 @@ int primeContinue (
 	}
 
 /* Check for all the possible stop codes we must handle here.  Those */
-/* that terminate the worker thread are not handled here. */
+/* that terminate the worker are not handled here. */
 
 check_stop_code:
 
@@ -3385,7 +3390,7 @@ check_stop_code:
 	}
 
 /* The stop reason was not caught above.  It must be a fatal error or a */
-/* stop code that causes the worker thread to terminate. */
+/* stop code that causes the worker to terminate. */
 
 	if (stop_reason) return (stop_reason);
 
@@ -3408,7 +3413,7 @@ check_stop_code:
 	}
 #endif
 
-/* Output a message saying this worker thread is waiting for work */
+/* Output a message saying this worker is waiting for work */
 
 	title (thread_num, "Waiting for work");
 	OutputStr (thread_num, "No work to do at the present time.  Waiting.\n");
@@ -3446,8 +3451,7 @@ check_stop_code:
 /* Common save file code */
 /*************************/
 
-/* Internal routine to atomicly test for a unique file name.  If it is */
-/* unique it is added to the list of save file names in use. */
+/* Internal routine to atomicly test for a unique file name.  If it is unique it is added to the list of save file names in use. */
 
 int testUniqueFileName (
 	int	thread_num,
@@ -3455,7 +3459,7 @@ int testUniqueFileName (
 {
 static	int	USED_FILENAMES_MUTEX_INITIALIZED = FALSE;
 static	gwmutex	USED_FILENAMES_MUTEX;
-static	char	USED_FILENAMES[MAX_NUM_WORKER_THREADS][32];
+static	char	USED_FILENAMES[MAX_NUM_WORKERS][32];
 	int	i;
 
 /* Initialize the lock and used file array */
@@ -3463,15 +3467,14 @@ static	char	USED_FILENAMES[MAX_NUM_WORKER_THREADS][32];
 	if (!USED_FILENAMES_MUTEX_INITIALIZED) {
 		USED_FILENAMES_MUTEX_INITIALIZED = 1;
 		gwmutex_init (&USED_FILENAMES_MUTEX);
-		for (i = 0; i < MAX_NUM_WORKER_THREADS; i++) USED_FILENAMES[i][0] = 0;
+		for (i = 0; i < MAX_NUM_WORKERS; i++) USED_FILENAMES[i][0] = 0;
 	}
 
-/* Scan array to see if the save file name is in use by another thread. */
+/* Scan array to see if the save file name is in use by another worker. */
 
 	gwmutex_lock (&USED_FILENAMES_MUTEX);
-	for (i = 0; i < MAX_NUM_WORKER_THREADS; i++) {
-		if (i != thread_num &&
-		    strcmp (filename, USED_FILENAMES[i]) == 0) {
+	for (i = 0; i < MAX_NUM_WORKERS; i++) {
+		if (i != thread_num && strcmp (filename, USED_FILENAMES[i]) == 0) {
 			gwmutex_unlock (&USED_FILENAMES_MUTEX);
 			return (FALSE);
 		}
@@ -3485,7 +3488,7 @@ static	char	USED_FILENAMES[MAX_NUM_WORKER_THREADS][32];
 }
 
 /* Multiple workers can do ECM on the same number.  This causes problems */
-/* because the two threads try to use the same save file.  We work around */
+/* because the two workers may try to use the same save file.  We work around */
 /* the problem here, by making sure each worker has a unique save file name. */
 
 void uniquifySaveFile (
@@ -3499,8 +3502,7 @@ void uniquifySaveFile (
 
 	strcpy (original_filename, filename);
 
-/* Our first preference is to use an existing save file with an extension */
-/* consisting of this thread number */
+/* Our first preference is to use an existing save file with an extension consisting of this worker number */
 
 	sprintf (filename, "%s_%d", original_filename, thread_num+1);
 	if (fileExists (filename) && testUniqueFileName (thread_num, filename)) return;
@@ -3512,7 +3514,7 @@ void uniquifySaveFile (
 
 /* Our third preference is to use any existing save file */
 
-	for (i = 0; i < MAX_NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < MAX_NUM_WORKERS; i++) {
 		sprintf (filename, "%s_%d", original_filename, i+1);
 		if (fileExists (filename) && testUniqueFileName (thread_num, filename)) return;
 	}
@@ -3522,14 +3524,14 @@ void uniquifySaveFile (
 	strcpy (filename, original_filename);
 	if (testUniqueFileName (thread_num, filename)) return;
 
-/* Our fifth preference is to use an extension consisting of this thread number */
+/* Our fifth preference is to use an extension consisting of this worker number */
 
 	sprintf (filename, "%s_%d", original_filename, thread_num+1);
 	if (testUniqueFileName (thread_num, filename)) return;
 
-/* Our final preference is to use any thread number as an extension */
+/* Our final preference is to use any worker number as an extension */
 
-	for (i = 0; i < MAX_NUM_WORKER_THREADS; i++) {
+	for (i = 0; i < MAX_NUM_WORKERS; i++) {
 		sprintf (filename, "%s_%d", original_filename, i+1);
 		if (testUniqueFileName (thread_num, filename)) return;
 	}
@@ -3905,7 +3907,7 @@ int factorSetup (
 	asm_data->EXPONENT = p;
 	asm_data->cpu_flags = CPU_FLAGS;
 	asm_data->firstcall = 0;
-	if (!IniGetInt (LOCALINI_FILE, "FactorUsingSSE2", 1)) asm_data->cpu_flags &= ~CPU_SSE2;
+	if (!IniGetInt (INI_FILE, "FactorUsingSSE2", 1)) asm_data->cpu_flags &= ~CPU_SSE2;
 
 /* Setup complete */
 
@@ -4301,7 +4303,7 @@ memerr:		OutputStr (thread_num, "Error allocating memory for trial factoring.\n"
 
 	asm_data->p = p;
 	asm_data->cpu_flags = CPU_FLAGS;
-	if (!IniGetInt (LOCALINI_FILE, "FactorUsingSSE2", 0)) asm_data->cpu_flags &= ~CPU_SSE2;
+	if (!IniGetInt (INI_FILE, "FactorUsingSSE2", 0)) asm_data->cpu_flags &= ~CPU_SSE2;
 	asm_data->alternate_sieve_count = IniGetInt (INI_FILE, "AlternateTFSieveCount", 9);
 	if (asm_data->alternate_sieve_count < 1) asm_data->alternate_sieve_count = 1;
 
@@ -5353,50 +5355,14 @@ begin:	factor_found = 0;
 		test_bits = 78;
 	}
 
-/* Check for a v24 continuation file.  These were named pXXXXXXX.  The */
-/* first 16 bits contained a 2 to distinguish it from a LL save file. */
-/* In v25, we name the file fXXXXXXX and use the common header format */
-/* to make Test/Status and computing completion dates easier. */
+/* Check for a v24 continuation file.  These were named pXXXXXXX.  The first 16 bits contained a 2 to distinguish it from a LL save file. */
+/* In v25, we name the file fXXXXXXX and use the common header format to make Test/Status and computing completion dates easier. */
+/* In v30.10, we no longer attempt to read v24 TF save files. */
+
+/* Read v25+ continuation file.  Limit number of backup files we try to read in case there is an error deleting bad save files. */
 
 	continuation = FALSE;
 	tempFileName (w, filename);
-	filename[0] = 'p';
-	fd = _open (filename, _O_BINARY | _O_RDONLY);
-	if (fd > 0) {
-		short	type;
-		short	shortdummy;
-		unsigned long longdummy, fachsw, facmsw;
-		short	file_factor_found, file_bits, file_pass;
-
-		if (read_short (fd, &type) &&
-		    type == 2 &&
-		    read_long (fd, &longdummy, NULL) &&
-		    read_short (fd, &shortdummy) &&
-		    read_short (fd, &file_factor_found) &&
-		    read_short (fd, &shortdummy) &&
-		    read_short (fd, &file_bits) &&
-		    read_short (fd, &file_pass) &&
-		    read_long (fd, &fachsw, NULL) &&
-		    read_long (fd, &facmsw, NULL) &&
-		    read_long (fd, &endpthi, NULL) &&
-		    read_long (fd, &endptlo, NULL)) {
-			OutputBoth (thread_num, "Using old-style factoring save file.\n");
-			facdata.asm_data->FACHSW = fachsw;
-			facdata.asm_data->FACMSW = facmsw;
-			factor_found = file_factor_found;
-			bits = file_bits;
-			pass = file_pass;
-			continuation = TRUE;
-			_close (fd);
-			_unlink (filename);
-		} else {
-			_close (fd);
-		}
-	}
-
-/* Read v25+ continuation file.  Limit number of backup files we try */
-/* to read in case there is an error deleting bad save files. */
-
 	filename[0] = 'f';
 	readSaveFileStateInit (&read_save_file_state, thread_num, filename);
 	writeSaveFileStateInit (&write_save_file_state, filename, 0);
@@ -5417,7 +5383,8 @@ begin:	factor_found = 0;
 
 		fd = _open (read_save_file_state.current_filename, _O_BINARY | _O_RDONLY);
 		if (fd > 0) {
-			unsigned long version, sum, fachsw, facmsw;
+			unsigned long fachsw, facmsw;
+			uint32_t version, sum;
 			if (read_magicnum (fd, FACTOR_MAGICNUM) &&
 			    read_header (fd, &version, w, &sum) &&
 			    version == FACTOR_VERSION &&
@@ -5445,8 +5412,7 @@ begin:	factor_found = 0;
 
 	sprintf (buf, "Factoring M%ld", p);
 	title (thread_num, buf);
-	sprintf (buf, "%s trial factoring of M%ld to 2^%lu\n",
-		 fd > 0 ? "Resuming" : "Starting", p, test_bits);
+	sprintf (buf, "%s trial factoring of M%ld to 2^%lu\n", continuation ? "Resuming" : "Starting", p, test_bits);
 	OutputStr (thread_num, buf);
 
 /* Clear all timers */
@@ -5710,7 +5676,7 @@ begin:	factor_found = 0;
 			writeResults (buf);
 
 /* Format a JSON version of the result.  An example follows: */
-/* {"status":"F", "exponent":45581713, "worktype":"TF", "factors":["430639100587696027847"], */
+/* {"status":"F", "exponent":45581713, "worktype":"TF", "factors":["430639100587696027847"], "bitlo":73, "bithi":74, "rangecomplete":false, */
 /* "program":{"name":"prime95", "version":"29.5", "build":"8"}, "timestamp":"2019-01-15 23:28:16", */
 /* "user":"gw_2", "cpu":"office_computer", "aid":"FF00AA00FF00AA00FF00AA00FF00AA00"} */
 
@@ -5718,9 +5684,12 @@ begin:	factor_found = 0;
 			JSONaddExponent (JSONbuf, w);
 			strcat (JSONbuf, ", \"worktype\":\"TF\"");
 			sprintf (JSONbuf+strlen(JSONbuf), ", \"factors\":[\"%s\"]", str);
+			sprintf (JSONbuf+strlen(JSONbuf), ", \"bitlo\":%d", (int) ((bits < report_bits) ? w->sieve_depth : bits));
+			sprintf (JSONbuf+strlen(JSONbuf), ", \"bithi\":%d, \"rangecomplete\":false", end_bits);
 			JSONaddProgramTimestamp (JSONbuf);
+			JSONaddExponentKnownFactors (JSONbuf, w);
 			JSONaddUserComputerAID (JSONbuf, w);
-			strcat (JSONbuf, "}\n");
+			strcat (JSONbuf, "}");
 			if (IniGetInt (INI_FILE, "OutputJSON", 1)) writeResultsJSON (JSONbuf);
 
 /* Send assignment result to the server.  To avoid flooding the server */
@@ -5791,7 +5760,7 @@ nextpass:	;
 		writeResults (buf);
 
 /* Format a JSON version of the result.  An example follows: */
-/* {"status":"NF", "exponent":25000000, "worktype":"TF", "bitlo":73, "bithi":74, */
+/* {"status":"NF", "exponent":25000000, "worktype":"TF", "bitlo":73, "bithi":74, "rangecomplete":true, */
 /* "security-code":"C6B0B26C", "program":{"name":"prime95", "version":"29.5", "build":"8"}, "timestamp":"2019-01-15 23:28:16", */
 /* "user":"gw_2", "cpu":"laptop1", "aid":"FF00AA00FF00AA00FF00AA00FF00AA00"} */
 
@@ -5799,11 +5768,12 @@ nextpass:	;
 		JSONaddExponent (JSONbuf, w);
 		strcat (JSONbuf, ", \"worktype\":\"TF\"");
 		sprintf (JSONbuf+strlen(JSONbuf), ", \"bitlo\":%d", start_bits);
-		sprintf (JSONbuf+strlen(JSONbuf), ", \"bithi\":%d", end_bits);
+		sprintf (JSONbuf+strlen(JSONbuf), ", \"bithi\":%d, \"rangecomplete\":true", end_bits);
 		sprintf (JSONbuf+strlen(JSONbuf), ", \"security-code\":\"%08lX\"", SEC3 (p));
 		JSONaddProgramTimestamp (JSONbuf);
+		JSONaddExponentKnownFactors (JSONbuf, w);
 		JSONaddUserComputerAID (JSONbuf, w);
-		strcat (JSONbuf, "}\n");
+		strcat (JSONbuf, "}");
 		if (IniGetInt (INI_FILE, "OutputJSON", 1)) writeResultsJSON (JSONbuf);
 
 /* Send no factor found message to the server for each bit */
@@ -5878,7 +5848,7 @@ typedef struct {		/* Some of the data kept during LL test */
 /* Prepare for running a Lucas-Lehmer test.  Caller must have already called gwinit. */
 
 int lucasSetup (
-	int	thread_num,	/* Worker thread number */
+	int	thread_num,	/* Worker number */
 	unsigned long p,	/* Exponent to test */
 	unsigned long fftlen,	/* Specific FFT length to use or zero.  Add one to test all-complex. */
 	llhandle *lldata)	/* Common LL data structure */
@@ -6019,7 +5989,7 @@ int writeLLSaveFile (
 	unsigned long error_count)
 {
 	int	fd;
-	unsigned long sum = 0;
+	uint32_t sum = 0;
 
 /* Open the save file */
 
@@ -6051,7 +6021,8 @@ void writeNewErrorCount (
 	unsigned long new_error_count)
 {
 	int	fd;
-	unsigned long sum, old_error_count;
+	unsigned long old_error_count;
+	uint32_t sum;
 
 /* Open the intermediate file, position past the FFT data */
 
@@ -6089,7 +6060,7 @@ int readLLSaveFile (
 	unsigned long *error_count)
 {
 	int	fd;
-	unsigned long sum, filesum, version;
+	uint32_t version, sum, filesum;
 
 	fd = _open (filename, _O_BINARY | _O_RDONLY);
 	if (fd <= 0) return (FALSE);
@@ -6120,6 +6091,7 @@ err:	_close (fd);
 /* NOTE:  The server considers an LL run clean if the error code is XXaaYY00 and XX = YY and aa is ignored.  That is, repeatable */
 /* round off errors and all ILLEGAL SUMOUTS are ignored. */
 /* In version 29.3, a.k.a. Wf in result lines, the 32-bit field changed.  See comments in the code below. */
+/* In version 30.16, SUMINP != SUMOUT was deprecated in gwnum freeing the bottom 4 bits of the 32-bit value */
 
 void inc_error_count (
 	int	type,
@@ -6128,8 +6100,7 @@ void inc_error_count (
 	unsigned long addin, orin, maxval;
 
 	addin = orin = 0;
-	if (type == 0) addin = 1, maxval = 0xF;				// SUMINP != SUMOUT
-	else if (type == 4) addin = 1 << 4, maxval = 0x0F << 4;		// Jacobi error check
+	if (type == 4) addin = 1 << 4, maxval = 0x0F << 4;		// Jacobi error check
 	else if (type == 1) addin = 1 << 8, maxval = 0x3F << 8;		// Roundoff > 0.4
 	else if (type == 5) orin = 1 << 14;				// Zeroed FFT data
 	else if (type == 6) orin = 1 << 15;				// Units bit, counter, or other value corrupted
@@ -6300,126 +6271,6 @@ void generateRandomData (
 	}
 }
 
-/* For exponents that are near an FFT limit, do 1000 sample iterations */
-/* to see if we should use the smaller or larger FFT size.  We examine */
-/* the average roundoff error to determine which FFT size to use. */
-
-int pick_fft_size (
-	int	thread_num,
-	struct work_unit *w)
-{
-	llhandle lldata;
-	char	buf[120];
-	double	softpct, total_error, avg_error, max_avg_error;
-	unsigned long small_fftlen, large_fftlen;
-	int	i, stop_reason;
-
-/* We only do this for Mersenne numbers */
-
-	if (w->k != 1.0 || w->b != 2 || w->c != -1) return (0);
-
-/* We don't do this for small exponents.  We've not studied the average */
-/* error enough on smaller FFT sizes to intelligently pick the FFT size. */
-/* Also, for really large exponents there is no larger FFT size to use! */
-
-	if (w->n <= 5000000) return (0);
-
-/* If we've already calculated the best FFT size, then return */
-
-	if (w->minimum_fftlen) return (0);
-
-/* Starting in version 29.5, we created a spreadsheet to calculate FFT crossovers based on average roundoff error */
-/* of sample exponents (previously it was based on volatile maximum roundoff error, which led to inconsistent crossovers). */
-/* We're discontinuing running the code below by default and relying on gwnum having set crossovers properly. */
-/* Users can use the ExtraSafetyMargin INI setting to shift the crossovers up or down a little bit. */
-
-	if (!IniGetInt (INI_FILE, "OldStyleSoftCrossover", 0)) return (0);
-
-/* Get info on what percentage of exponents on either side of */
-/* an FFT crossover we will do this 1000 iteration test. */
-
-	softpct = IniGetFloat (INI_FILE, "SoftCrossover", (float) 0.2) / 100.0;
-
-/* If this exponent is not close to an FFT crossover, then we are done */
-
-	small_fftlen = gwmap_to_fftlen (1.0, 2, (unsigned long) ((1.0 - softpct) * w->n), -1);
-	large_fftlen = gwmap_to_fftlen (1.0, 2, (unsigned long) ((1.0 + softpct) * w->n), -1);
-	if (small_fftlen == large_fftlen || large_fftlen == 0) return (0);
-
-/* Let the user be more conservative or more aggressive in picking the acceptable average error. */
-/* By default, we accept an average error between 0.241 and 0.243 depending on the FFT size. */
-/* NOTE: This code was written when the maximum FFT length was 4M.  The code below now allows an */
-/* average error of almost 0.245 for the largest FFT legngths.  I think that will be OK. */
-
-	max_avg_error = 0.241 + 0.002 *
-		(log ((double) small_fftlen) - log ((double) 262144.0)) /
-		(log ((double) 4194304.0) - log ((double) 262144.0));
-	max_avg_error += IniGetFloat (INI_FILE, "SoftCrossoverAdjust", 0.0);
-
-/* Print message to let user know what is going on */
-
-	sprintf (buf,
-		 "Trying 1000 iterations for exponent %ld using %luK FFT.\n",
-		 w->n, small_fftlen / 1024);
-	OutputBoth (thread_num, buf);
-	sprintf (buf,
-		 "If average roundoff error is above %.5g, then a larger FFT will be used.\n",
-		 max_avg_error);
-	OutputBoth (thread_num, buf);
-
-/* Init the FFT code using the smaller FFT size */
-
-	gwinit (&lldata.gwdata);
-	gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
-	stop_reason = lucasSetup (thread_num, w->n, small_fftlen, &lldata);
-	if (stop_reason) return (stop_reason);
-
-/* Fill data space with random values then do one squaring to make */
-/* the data truly random. */
-
-	generateRandomData (&lldata);
-	gwsetnormroutine (&lldata.gwdata, 0, TRUE, 0);
-	gwstartnextfft (&lldata.gwdata, TRUE);
-	gwsquare (&lldata.gwdata, lldata.lldata);
-
-/* Average the roundoff error over a 1000 iterations. */
-
-	for (i = 0, total_error = 0.0; ; ) {
-		gw_clear_maxerr (&lldata.gwdata);
-		gwsquare (&lldata.gwdata, lldata.lldata);
-		total_error += gw_get_maxerr (&lldata.gwdata);
-		stop_reason = stopCheck (thread_num);
-		if (stop_reason) {
-			lucasDone (&lldata);
-			return (stop_reason);
-		}
-		if (++i == 1000) break;
-		if (i % 100 == 0) {
-			sprintf (buf,
-				 "After %d iterations average roundoff error is %.5g.\n",
-				 i, total_error / (double) i);
-			OutputStr (thread_num, buf);
-		}
-	}
-	avg_error = total_error / 1000.0;
-	lucasDone (&lldata);
-
-/* Now decide which FFT size to use based on the average error. */
-/* Save this info in worktodo.ini so that we don't need to do this again. */
-
-	w->minimum_fftlen = (avg_error <= max_avg_error) ? small_fftlen : large_fftlen;
-	stop_reason = updateWorkToDoLine (thread_num, w);
-	if (stop_reason) return (stop_reason);
-
-/* Output message to user informing him of the outcome. */
-
-	sprintf (buf,
-		 "Final average roundoff error is %.5g, using %luK FFT for exponent %ld.\n",
-		 avg_error, w->minimum_fftlen / 1024, w->n);
-	OutputBoth (thread_num, buf);
-	return (0);
-}
-
 /* Test if we are near the maximum exponent this fft length can test */
 /* We only support this (careful iterations when near fft limit) for */
 /* Mersenne numbers. */
@@ -6438,7 +6289,7 @@ void good_news (void *arg)
 
 	title (MAIN_THREAD_NUM, "New Prime!!!");
 	sprintf (buf, "New Mersenne Prime!!!!  M%d is prime!\n", (int) (intptr_t) arg);
-	while (WORKER_THREADS_ACTIVE && ! WORKER_THREADS_STOPPING) {
+	while (WORKERS_ACTIVE && ! WORKERS_STOPPING) {
 		OutputStr (MAIN_THREAD_NUM, buf);
 		flashWindowAndBeep ();
 		Sleep (50);
@@ -6598,7 +6449,7 @@ oom:	OutputBoth (thread_num, "Memory allocation error.  Could not run Jacobi err
 /* Do the Lucas-Lehmer test */
 
 int prime (
-	int	thread_num,		/* Worker thread number */
+	int	thread_num,		/* Worker number */
 	struct PriorityInfo *sp_info,	/* SetPriority information */
 	struct work_unit *w,		/* Worktodo entry */
 	int	pass)			/* PrimeContinue pass */
@@ -6626,8 +6477,6 @@ int prime (
 	double	best_iteration_time;
 	unsigned long last_counter = 0xFFFFFFFF;	/* Iteration of last error */
 	int	maxerr_recovery_mode = 0;		/* Big roundoff err rerun */
-	double	last_suminp = 0.0;
-	double	last_sumout = 0.0;
 	double	last_maxerr = 0.0;
 	double	allowable_maxerr, output_frequency, output_title_frequency;
 	int	error_count_messages;
@@ -6687,11 +6536,6 @@ int prime (
 
 	if (pass == 1 && w->work_type != WORK_ADVANCEDTEST) return (0);
 
-/* Figure out which FFT size we should use */
-
-	stop_reason = pick_fft_size (thread_num, w);
-	if (stop_reason) return (stop_reason);
-
 /* Make sure the first-time user runs a successful self-test. */
 /* The one-hour self-test may have been useful when it was first introduced */
 /* but I think it now does little to catch buggy machines (they eventually */
@@ -6713,17 +6557,16 @@ int prime (
 /* Setup the LL test */
 
 begin:	gwinit (&lldata.gwdata);
-	if (IniGetInt (LOCALINI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&lldata.gwdata);
-	if (IniGetInt (INI_FILE, "HyperthreadPrefetch", 0)) gwset_hyperthread_prefetch (&lldata.gwdata);
-	gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
+	if (IniGetInt (INI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&lldata.gwdata);
 	if (HYPERTHREAD_LL) sp_info->normal_work_hyperthreading = TRUE, gwset_will_hyperthread (&lldata.gwdata, 2);
 	gwset_bench_cores (&lldata.gwdata, HW_NUM_CORES);
-	gwset_bench_workers (&lldata.gwdata, NUM_WORKER_THREADS);
+	gwset_bench_workers (&lldata.gwdata, NUM_WORKERS);
 	if (ERRCHK) gwset_will_error_check (&lldata.gwdata);
 	else gwset_will_error_check_near_limit (&lldata.gwdata);
 	gwset_num_threads (&lldata.gwdata, get_worker_num_threads (thread_num, HYPERTHREAD_LL));
 	gwset_thread_callback (&lldata.gwdata, SetAuxThreadPriority);
 	gwset_thread_callback_data (&lldata.gwdata, sp_info);
+	gwset_use_spin_wait (&lldata.gwdata, IniGetInt (INI_FILE, "SpinWait", 0));
 	stop_reason = lucasSetup (thread_num, p, w->minimum_fftlen, &lldata);
 	if (stop_reason) return (stop_reason);
 
@@ -6897,7 +6740,7 @@ begin:	gwinit (&lldata.gwdata);
 
 /* Check if we should send residue to server, output residue to screen, or create an interediate save file */
 
-		sending_residue = ((counter+1) == 500002 || ((counter+1) % 5000000 == 2 && IniGetInt (INI_FILE, "SendInterimResidues", 1)));
+		sending_residue = ((counter+1) == 500002 || ((counter+1) % 5000000 == 2)) && IniGetInt (INI_FILE, "SendInterimResidues", 0);
 		interim_residue = (INTERIM_RESIDUES && (counter+1) % INTERIM_RESIDUES <= 2);
 		interim_file = (INTERIM_FILES && (counter+1) % INTERIM_FILES == 0);
 
@@ -6963,33 +6806,6 @@ begin:	gwinit (&lldata.gwdata);
 			inc_error_count (2, &error_count);
 			sleep5 = TRUE;
 			goto restart;
-		}
-
-/* Check that the sum of the input numbers squared is approximately */
-/* equal to the sum of unfft results.  Since this check may not */
-/* be perfect, check for identical results after a restart. */
-
-		if (gw_test_mismatched_sums (&lldata.gwdata)) {
-			if (counter == last_counter &&
-			    gwsuminp (&lldata.gwdata, lldata.lldata) == last_suminp &&
-			    gwsumout (&lldata.gwdata, lldata.lldata) == last_sumout) {
-				OutputBoth (thread_num, ERROK);
-				inc_error_count (3, &error_count);
-				gw_clear_error (&lldata.gwdata);
-			} else {
-				char	msg[100];
-				sprintf (msg, ERRMSG1B,
-					 gwsuminp (&lldata.gwdata, lldata.lldata),
-					 gwsumout (&lldata.gwdata, lldata.lldata));
-				sprintf (buf, ERRMSG0, counter, p, msg);
-				OutputBoth (thread_num, buf);
-				last_counter = counter;
-				last_suminp = gwsuminp (&lldata.gwdata, lldata.lldata);
-				last_sumout = gwsumout (&lldata.gwdata, lldata.lldata);
-				inc_error_count (0, &error_count);
-				sleep5 = TRUE;
-				goto restart;
-			}
 		}
 
 /* Check for excessive roundoff error.  If round off is too large, repeat */
@@ -7296,8 +7112,9 @@ begin:	gwinit (&lldata.gwdata);
 		JSONbuf[strlen(JSONbuf)-2] = 0;
 		strcat (JSONbuf, "}");
 	}
+	JSONaddExponentKnownFactors (JSONbuf, w);
 	JSONaddUserComputerAID (JSONbuf, w);
-	strcat (JSONbuf, "}\n");
+	strcat (JSONbuf, "}");
 	if (IniGetInt (INI_FILE, "OutputJSON", 1)) writeResultsJSON (JSONbuf);
 
 /* Send results to the server if they might possibly be of interest */
@@ -7376,11 +7193,11 @@ static const char TORTURE2[] = "Please read stress.txt.  Choose Test/Stop to end
 static const char SELF1[] = "Test %i%s, %i Lucas-Lehmer %siterations of M%ld using %s.\n";
 static const char SELFFAIL[] = "FATAL ERROR: Final result was %08lX, expected: %08lX.\n";
 static const char SELFFAIL1[] = "ERROR: ILLEGAL SUMOUT\n";
-static const char SELFFAIL2[] = "FATAL ERROR: Resulting sum was %.16g, expected: %.16g\n";
 static const char SELFFAIL3[] = "FATAL ERROR: Rounding was %.10g, expected less than 0.4\n";
 static const char SELFFAIL4[] = "Possible hardware failure, consult readme.txt file, restarting test.\n";
 static const char SELFFAIL5[] = "Hardware failure detected running %lu%s FFT size, consult stress.txt file.\n";
 static const char SELFFAIL6[] = "Maximum number of warnings exceeded.\n";
+static const char SELFFAIL7[] = "TORTURE TEST FAILED on worker #%d.\n";
 
 static const char SELFPASS[] = "Self-test %i%s%s passed!\n";
 //static const char SelfTestIniMask[] = "SelfTest%iPassed";
@@ -7798,10 +7615,7 @@ int selfTestInternal (
 			break;
 		}
 
-/* Now run Lucas setup, for extra safety double the maximum allowable */
-/* sum(inputs) vs. sum(outputs) difference.  For faster detection of unstable */
-/* systems, enable SUM(INPUTS) != SUM(OUTPUTS) checking on the first test. */
-/* For a better variety of tests, enable SUM(INPUTS) != SUM(OUTPUTS) checking half the time. */
+/* Now run Lucas setup */
 
 		// Gwinit normally does not allow Bulldozer to run AVX or FMA3 FFTs.  For torture
 		// testing purposes we will allow running these FFTs.
@@ -7813,15 +7627,13 @@ int selfTestInternal (
 			gwinit (&lldata.gwdata);
 		lldata.gwdata.cpu_flags &= ~disabled_cpu_flags;
 		gwclear_use_benchmarks (&lldata.gwdata);
-		gwset_sum_inputs_checking (&lldata.gwdata, iter & 1);
 		gwset_num_threads (&lldata.gwdata, num_threads);
 		gwset_thread_callback (&lldata.gwdata, SetAuxThreadPriority);
 		gwset_thread_callback_data (&lldata.gwdata, sp_info);
 		lldata.gwdata.GW_BIGBUF = (char *) bigbuf;
-		lldata.gwdata.GW_BIGBUF_SIZE = (bigbuf != NULL) ? (size_t) memory * (size_t) 1048576 : 0;
+		lldata.gwdata.GW_BIGBUF_SIZE = (bigbuf != NULL) ? (intptr_t) memory * (intptr_t) 1048576 : 0;
 		stop_reason = lucasSetup (thread_num, p, fftlen, &lldata);
 		if (stop_reason) return (stop_reason);
-		lldata.gwdata.MAXDIFF *= 2.0;
 
 /* Determine how many gwnums we can allocate in the memory we are given */
 
@@ -7830,7 +7642,7 @@ int selfTestInternal (
 		if (in_place)
 			num_gwnums = 1;
 		else {
-			num_gwnums = cvt_mem_to_gwnums (&lldata.gwdata, memory);
+			num_gwnums = (int) cvt_mem_to_gwnums (&lldata.gwdata, memory);
 			if (num_gwnums < 1) num_gwnums = 1;
 			if (num_gwnums > ll_iters) num_gwnums = ll_iters;
 		}
@@ -7881,6 +7693,8 @@ restart_test:	dbltogw (&lldata.gwdata, 4.0, lldata.lldata);
 /* If the sum of the output values is an error (such as infinity) then raise an error. */
 
 			if (gw_test_illegal_sumout (&lldata.gwdata)) {
+				sprintf (buf, SELFFAIL7, thread_num+1);
+				OutputStr (MAIN_THREAD_NUM, buf);
 				OutputBoth (thread_num, SELFFAIL1);
 				flashWindowAndBeep ();
 				(*warnings)++;
@@ -7895,23 +7709,11 @@ restart_test:	dbltogw (&lldata.gwdata, 4.0, lldata.lldata);
 				}
 			}
 
-/* Check that the sum of the input numbers squared is approximately equal to the sum of unfft results. */
-
-			if (gw_test_mismatched_sums (&lldata.gwdata)) {
-				sprintf (buf, SELFFAIL2, gwsumout (&lldata.gwdata, g), gwsuminp (&lldata.gwdata, g));
-				OutputBoth (thread_num, buf);
-				sprintf (buf, SELFFAIL5, (fftlen % 1024 == 0) ? fftlen >> 10 : fftlen, (fftlen % 1024 == 0) ? "K" : "");
-				OutputBoth (thread_num, buf);
-				flashWindowAndBeep ();
-				(*errors)++;
-				lucasDone (&lldata);
-				free (gwarray);
-				return (STOP_FATAL_ERROR);
-			}
-
 /* Make sure round off error is tolerable */
 
 			if (gw_get_maxerr (&lldata.gwdata) > 0.45) {
+				sprintf (buf, SELFFAIL7, thread_num+1);
+				OutputStr (MAIN_THREAD_NUM, buf);
 				sprintf (buf, SELFFAIL3, gw_get_maxerr (&lldata.gwdata));
 				OutputBoth (thread_num, buf);
 				sprintf (buf, SELFFAIL5, (fftlen % 1024 == 0) ? fftlen >> 10 : fftlen, (fftlen % 1024 == 0) ? "K" : "");
@@ -7951,6 +7753,8 @@ restart_test:	dbltogw (&lldata.gwdata, 4.0, lldata.lldata);
 		free (gwarray);
 		(*completed)++;
 		if (reshi != test_data[i].reshi) {
+			sprintf (buf, SELFFAIL7, thread_num+1);
+			OutputStr (MAIN_THREAD_NUM, buf);
 			sprintf (buf, SELFFAIL, reshi, test_data[i].reshi);
 			OutputBoth (thread_num, buf);
 			sprintf (buf, SELFFAIL5, (fftlen % 1024 == 0) ? fftlen >> 10 : fftlen, (fftlen % 1024 == 0) ? "K" : "");
@@ -7982,7 +7786,7 @@ restart_test:	dbltogw (&lldata.gwdata, 4.0, lldata.lldata);
 	else sprintf (buf, SELFPASS, (int) fftlen, "", addl_msg);
 	OutputBoth (thread_num, buf);
 //	sprintf (iniName, SelfTestIniMask, (int) (fftlen/1024));
-//	IniWriteInt (LOCALINI_FILE, iniName, 1);
+//	IniWriteInt (INI_FILE, iniName, 1);
 	return (0);
 }
 
@@ -8059,7 +7863,7 @@ int selfTest (
 /* Make sure we haven't run this self-test already. */
 
 	sprintf (iniName, SelfTestIniMask, (int) (fftlen/1024));
-	if (IniGetInt (LOCALINI_FILE, iniName, 0)) return (0);
+	if (IniGetInt (INI_FILE, iniName, 0)) return (0);
 #ifdef SERVER_TESTING
 	return (0);
 #endif
@@ -8265,7 +8069,7 @@ loop:	run_indefinitely = TRUE;
 	memory = IniGetInt (INI_FILE, "TortureMem", 8);
 	memory = memory / num_torture_workers;
 	while (memory > 8 && bigbuf == NULL) {
-		bigbuf = aligned_malloc ((size_t) memory * (size_t) 1048576, 128);
+		bigbuf = aligned_malloc ((intptr_t) memory * (intptr_t) 1048576, 128);
 		if (bigbuf == NULL) memory--;
 	}
 
@@ -8275,15 +8079,15 @@ loop:	run_indefinitely = TRUE;
 	num_large_lengths = 0;
 	disabled_cpu_flags = IniGetInt (INI_FILE, "TortureWeak", 0);
 	fftlen = gwmap_with_cpu_flags_to_fftlen (CPU_FLAGS & ~disabled_cpu_flags, 1.0, 2, 15 * min_fft, -1);
-	while (fftlen <= max_fft) {
+	while (fftlen && fftlen <= max_fft) {
 		unsigned long max_exponent = gwmap_with_cpu_flags_fftlen_to_max_exponent (CPU_FLAGS & ~disabled_cpu_flags, fftlen);
+		if (max_exponent == 0) break;			// Somethng went wrong, likely a CPU_ARCHITECTURE / BIF / jmptable inconsistency
 		if (fftlen >= min_fft && max_exponent > test_data[test_data_count-1].p) {
 			lengths[num_lengths] = fftlen;
 			data_index[num_lengths++] = 0;
 			if (fftlen > max_small_fftlen * 2) num_large_lengths++;
 		}
 		fftlen = gwmap_with_cpu_flags_to_fftlen (CPU_FLAGS & ~disabled_cpu_flags, 1.0, 2, max_exponent + 100, -1);
-		if (fftlen == 0) break;
 	}
 
 /* Raise error if no FFT lengths to test */
@@ -8347,7 +8151,7 @@ loop:	run_indefinitely = TRUE;
 				info[i].test_time = test_time;
 				info[i].torture_index = &data_index[index];
 				info[i].memory = memory / num_threads;
-				info[i].bigbuf = (bigbuf != NULL ? (char *) bigbuf + i * info[i].memory * 1048576 : NULL);
+				info[i].bigbuf = (bigbuf != NULL ? (char *) bigbuf + i * (intptr_t) info[i].memory * (intptr_t) 1048576 : NULL);
 				info[i].test_data = test_data;
 				info[i].test_data_count = test_data_count;
 				info[i].disabled_cpu_flags = disabled_cpu_flags;
@@ -8455,7 +8259,7 @@ int lucas_QA (
 		int	c;
 		char	buf[500], res[80];
 		unsigned long units_bit, i, maxerrcnt;
-		double	maxsumdiff, maxerr, toterr, M, S;
+		double	maxerr, toterr, M, S;
 		unsigned long ge_300, ge_325, ge_350, ge_375, ge_400;
 		unsigned int iters_unchecked, M_count;
 
@@ -8474,7 +8278,6 @@ int lucas_QA (
 /* Now run a replica of lucasSetup but able to handle any k,b,n,c */
 
 		gwinit (&lldata.gwdata);
-		gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
 		gwset_minimum_fftlen (&lldata.gwdata, fftlen);
 		if (gwsetup (&lldata.gwdata, (double) k, b, p, c)) goto not_impl;
 
@@ -8508,7 +8311,6 @@ int lucas_QA (
 
 /* Do Lucas-Lehmer iterations maintaining roundoff stats */
 
-		maxsumdiff = 0.0;
 		ge_300 = ge_325 = ge_350 = ge_375 = ge_400 = 0;
 		maxerr = 0.0; maxerrcnt = 0; toterr = 0.0;
 		iters_unchecked = (type > 3) ? 2 : 40;
@@ -8547,12 +8349,6 @@ int lucas_QA (
 				else if (gw_get_maxerr (&lldata.gwdata) == maxerr) maxerrcnt++;
 			}
 			gw_clear_maxerr (&lldata.gwdata);
-
-/* Maintain maximum suminp/sumout difference */
-
-			if (fabs (gwsuminp (&lldata.gwdata, lldata.lldata) - gwsumout (&lldata.gwdata, lldata.lldata)) > maxsumdiff) {
-				maxsumdiff = fabs (gwsuminp (&lldata.gwdata, lldata.lldata) - gwsumout (&lldata.gwdata, lldata.lldata));
-			}
 
 /* If the sum of the output values is an error (such as infinity) */
 /* then raise an error.  For some reason these bad values are treated */
@@ -8602,8 +8398,7 @@ int lucas_QA (
 		sprintf (buf, "avg: %6.6f, stddev: %6.6f, #stdev to 0.5: %6.6f\n", toterr, S, (0.50 - toterr) / S);
 		OutputBoth (thread_num, buf);
 
-		sprintf (buf, "Exp/iters: %lu/%lu, maxerr: %6.6f/%lu, %lu/%lu/%lu/%lu/%lu, maxdiff: %9.9f/%9.9f\n",
-			 p, iters, maxerr, maxerrcnt, ge_300, ge_325, ge_350, ge_375, ge_400, maxsumdiff, lldata.gwdata.MAXDIFF);
+		sprintf (buf, "Exp/iters: %lu/%lu, maxerr: %6.6f/%lu, %lu/%lu/%lu/%lu/%lu\n", p, iters, maxerr, maxerrcnt, ge_300, ge_325, ge_350, ge_375, ge_400);
 		OutputBoth (thread_num, buf);
 
 /* Cleanup */
@@ -8848,7 +8643,7 @@ int primeTime (
 	unsigned long p,
 	unsigned long iterations)
 {
-static	int	time_all_complex = 0;	/* TRUE if we should time all-complex FFTs */
+static	int	time_negacyclic = 0;		/* TRUE if we should time negacyclic FFTs */
 	struct PriorityInfo sp_info;
 #define SAVED_LIMIT	10
 	llhandle lldata;
@@ -8885,12 +8680,122 @@ static	int	time_all_complex = 0;	/* TRUE if we should time all-complex FFTs */
 		if (p == 9950)
 			return (cpuid_dump (thread_num));
 		if (p == 9951) {
-			time_all_complex = !time_all_complex;
+			time_negacyclic = !time_negacyclic;
 			return (0);
 		}
 		if (p >= 9900 && p <= 9919)
 			return (test_randomly (thread_num, &sp_info));
 		return (test_all_impl (thread_num, &sp_info));
+	}
+
+	// Time polymult code
+	if (p >= 8900 && p <= 8999) {
+		char	buf[200];
+
+//	* starting gwnum FFTLEN point 
+//	* starting gwnum poly FFTLEN point 
+
+		int polymem = IniGetInt (INI_FILE, "PolyMem", (long) (0.8 * physical_memory ()));
+		if (polymem > (int) physical_memory ()) polymem = (int) (0.9 * physical_memory ());
+
+		sprintf (buf, "Polymult timing using %d threads, %dMB\n", HW_NUM_CORES, polymem);
+		OutputBoth (thread_num, buf);
+
+		memset (&sp_info, 0, sizeof (sp_info));
+		sp_info.type = SET_PRIORITY_NORMAL_WORK;
+		sp_info.worker_num = thread_num;
+		sp_info.verbosity = IniGetInt (INI_FILE, "AffinityVerbosity", 1);
+		sp_info.normal_work_hyperthreading = FALSE;
+		SetPriority (&sp_info);
+
+// starting gwnum FFTLEN option 
+// starting poly FFTLEN option
+		// Loop working on bigger and bigger exponents
+		for (int EXP = 1000; EXP < 500000000; EXP *= 4) {
+			int iters = 100000 / EXP;	// A small number of iterations that won't take too long
+			// Loop working on bigger and bigger poly sizes (CNT is the output poly size which roughly equals the poly FFT size)
+			for (int CNT = 3125; CNT < 500000000; CNT *= 2, iters = iters / 2) {
+				// Check if we have enough memory
+				if ((double) CNT * (gwmap_to_estimated_size (1.0, 2, EXP, -1) + 64) > polymem * 1048576.0) break;
+
+				bool	first_poly = TRUE;
+				bool	mt_polymult_line;		// Multi-thread polymult_line vs multi-thread fft_line_pass
+				bool	preprocess;			// TRUE if poly should be pre-processed
+				bool	preFFT;				// TRUE if poly should be pre-FFTed
+				bool	compress;			// TRUE if preprocessed poly s.b. compressed
+				bool	strided_write;			// TRUE if writes should be strided
+				bool	streamed_stores;		// TRUE if writes should be streamed
+				bool	scrambled;			// TRUE if output array is scrambled
+				for (int mm = 0; mm < 2; mm++) { mt_polymult_line = mm;		// original polymult = 0, new fft_line_pass = 1
+				for (int sc = 0; sc < 2; sc++) { scrambled = sc;
+				for (int sw = 0; sw < 2; sw++) { strided_write = sw;
+				for (int ss = 0; ss < 2; ss++) { streamed_stores = ss;
+				for (int pp = 0; pp < 5; pp++) {
+				preprocess = (pp != 0);	// not preprocessed=0, preprocessed=1, compressed=2, preFFTed=3, preFFTed and compresed=4
+				preFFT = (pp >= 3);
+				compress = (pp == 2) || (pp == 4);
+				if (p == 8900 && pp > 0) continue;
+				if (p == 8901 && sc > 0) continue;
+
+				gwhandle gwdata;
+				pmhandle pmdata;
+				gwarray a, b;
+				gwinit (&gwdata); 
+				gwset_num_threads (&gwdata, HW_NUM_CORES);
+				gwset_thread_callback (&gwdata, SetAuxThreadPriority);
+				gwset_thread_callback_data (&gwdata, &sp_info);
+				gwset_use_spin_wait (&gwdata, 1);
+				gwsetup (&gwdata, 1.0, 2, EXP, -1);
+				if (stopCheck (thread_num)) { gwdone (&gwdata); return 1; }
+				polymult_init (&pmdata, &gwdata);
+				polymult_default_tuning (&pmdata,
+					IniGetInt (INI_FILE, "PolymultCacheSize", CPU_NUM_L2_CACHES > 0 ? CPU_TOTAL_L2_CACHE_SIZE / CPU_NUM_L2_CACHES : 256),
+					IniGetInt (INI_FILE, "PolymultCacheSize2", CPU_NUM_L3_CACHES > 0 ? CPU_TOTAL_L3_CACHE_SIZE / CPU_NUM_L3_CACHES : 6144));
+				polymult_set_max_num_threads (&pmdata, HW_NUM_CORES);
+				pmdata.mt_ffts_start = mt_polymult_line ? 0xFFFFFFFFFFFFFFFFULL : 0;
+				pmdata.mt_ffts_end = 0xFFFFFFFFFFFFFFFFULL;
+				pmdata.strided_writes_end = strided_write ? 0xFFFFFFFFFFFFFFFFULL : 0;
+				pmdata.streamed_stores_start = streamed_stores ? 0 : 0xFFFFFFFFFFFFFFFFULL;
+				gwdata.scramble_arrays = (char) scrambled;
+
+				// Check if we have enough memory
+				if ((!preprocess ? 1.0 : !preFFT ? 1.5 : 2.0) * CNT * (gwnum_datasize (&gwdata) + 64) +
+				    (double) polymult_mem_required (&pmdata, CNT/2, CNT/2, 0) > polymem * 1048576.0) {
+					polymult_done (&pmdata);
+					gwdone (&gwdata);
+					continue;
+				}
+
+				a = b = gwalloc_array (&gwdata, CNT);
+				dbltogw (&gwdata, 10001.0, a[0]);
+				for (int i = 1; i < CNT/2; i++) gwcopy (&gwdata, a[0], a[i]);
+				if (preprocess) a = polymult_preprocess (&pmdata, a, CNT/2, CNT/2, CNT-1, (preFFT ? POLYMULT_PRE_FFT : 0) + (compress ? POLYMULT_PRE_COMPRESS : 0));
+				clear_timers (timers, sizeof (timers) / sizeof (timers[0]));
+				start_timer (timers, 0);
+				if (iters == 0) iters = 1;
+				for (int i = 0; i < iters; i++) polymult (&pmdata, a, CNT/2, a, CNT/2, b, (CNT/2)*2-1, POLYMULT_NEXTFFT);
+				end_timer (timers, 0);
+				timers[0] /= iters;
+				if (first_poly) {
+					int aligned_gwnum_size = gwnum_datasize (&gwdata) + GW_HEADER_SIZE (&gwdata);
+					aligned_gwnum_size = round_up_to_multiple_of (aligned_gwnum_size, 64);
+					sprintf (buf, "Poly-size %d, gwnum FFT size %ld, gwnum size %d, mod 256 %d\n", CNT, gwdata.FFTLEN, aligned_gwnum_size, aligned_gwnum_size % 256);
+					OutputBoth (thread_num, buf);
+					first_poly = FALSE;
+				}
+				sprintf (buf, "  multithread %s, %s%s%s writes, Time: ",
+					 mt_polymult_line ? "lines" : "fft passes",
+					 !scrambled ? "" : "scrambled, ",
+					 !preprocess ? "" : !preFFT ? (!compress ? "preprocessed, " : "pre-compressed, ") : (!compress ? "pre-FFTed, " : "pre-FFT-compressed, "),
+					 !streamed_stores ? (strided_write ? "strided" : "standard") : (strided_write ? "strided streamed" : "standard streamed"));
+				print_timer (timers, 0, buf, TIMER_NL | TIMER_CLR | TIMER_MS);
+				OutputBoth (thread_num, buf);
+				polymult_done (&pmdata);
+				gwdone (&gwdata);
+				}}}}}
+			}
+		}
+		return (0);
 	}
 
 /* Set the process/thread priority */
@@ -8949,13 +8854,11 @@ static	int	time_all_complex = 0;	/* TRUE if we should time all-complex FFTs */
 /* Init the FFT code */
 
 			gwinit (&lldata.gwdata);
-			gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
 			gwset_bench_cores (&lldata.gwdata, HW_NUM_COMPUTE_CORES);	// We're most likely to have bench data for this case
-			gwset_bench_workers (&lldata.gwdata, NUM_WORKER_THREADS);	// We're most likely to have bench data for this case
+			gwset_bench_workers (&lldata.gwdata, NUM_WORKERS);	// We're most likely to have bench data for this case
 			if (ERRCHK) gwset_will_error_check (&lldata.gwdata);
 			else gwset_will_error_check_near_limit (&lldata.gwdata);
-			if (IniGetInt (LOCALINI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&lldata.gwdata);
-			if (IniGetInt (INI_FILE, "HyperthreadPrefetch", 0)) gwset_hyperthread_prefetch (&lldata.gwdata);
+			if (IniGetInt (INI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&lldata.gwdata);
 			// Here is a hack to let me time different FFT implementations.
 			// For example, 39000001 times the first 2M FFT implementation,
 			// 39000002 times the second 2M FFT implementation, etc.
@@ -8963,7 +8866,8 @@ static	int	time_all_complex = 0;	/* TRUE if we should time all-complex FFTs */
 			gwset_num_threads (&lldata.gwdata, get_ranked_num_threads (0, num_cores, num_hyperthreads > 1));
 			gwset_thread_callback (&lldata.gwdata, SetAuxThreadPriority);
 			gwset_thread_callback_data (&lldata.gwdata, &sp_info);
-			stop_reason = lucasSetup (thread_num, p, time_all_complex, &lldata);
+			gwset_use_spin_wait (&lldata.gwdata, IniGetInt (INI_FILE, "SpinWait", 0));
+			stop_reason = lucasSetup (thread_num, p, time_negacyclic, &lldata);
 			if (stop_reason) return (stop_reason);
 			ASM_TIMERS = get_asm_timers (&lldata.gwdata);
 			memset (ASM_TIMERS, 0, 32 * sizeof (uint32_t));
@@ -9286,7 +9190,6 @@ void primeBenchOneWorker (void *arg)
 /* Initialize this FFT length */
 
 	gwinit (&lldata.gwdata);
-	gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
 	gwset_num_threads (&lldata.gwdata, get_ranked_num_threads (info->core_num, info->core_count, info->hyperthreading));
 	gwset_thread_callback (&lldata.gwdata, SetAuxThreadPriority);
 	gwset_thread_callback_data (&lldata.gwdata, &sp_info);
@@ -9301,7 +9204,7 @@ void primeBenchOneWorker (void *arg)
 
 	generateRandomData (&lldata);
 
-/* Pause until all worker threads are initialized */
+/* Pause until all workers are initialized */
 
 	gwmutex_lock (&bench_workers_mutex);
 	num_bench_workers_initialized++;
@@ -9352,7 +9255,7 @@ int primeBenchMultipleWorkersInternal (
 	unsigned long min_FFT_length,
 	unsigned long max_FFT_length,
 	int	only_time_5678,
-	int	time_all_complex,
+	int	time_negacyclic,
 	int	all_bench,
 	const char *bench_cores,
 	int	bench_hyperthreading,
@@ -9374,8 +9277,8 @@ int primeBenchMultipleWorkersInternal (
 	int	i, stop_reason;
 	unsigned long fftlen;
 	double	throughput;
-	gwthread thread_id[MAX_NUM_WORKER_THREADS];
-	struct prime_bench_arg info[MAX_NUM_WORKER_THREADS];
+	gwthread thread_id[MAX_NUM_WORKERS];
+	struct prime_bench_arg info[MAX_NUM_WORKERS];
 
 /* Init the worker synchronization primitives */
 
@@ -9385,14 +9288,13 @@ int primeBenchMultipleWorkersInternal (
 /* Loop over a variety of FFT lengths */
 
 	for (plus1 = 0; plus1 <= 1; plus1++) {
-	  if (plus1 == 0 && time_all_complex == 2) continue;
-	  if (plus1 == 1 && time_all_complex == 0) continue;
+	  if (plus1 == 0 && time_negacyclic == 2) continue;
+	  if (plus1 == 1 && time_negacyclic == 0) continue;
 	  for (fftlen = min_FFT_length * 1024; fftlen <= max_FFT_length * 1024; fftlen += 10) {
 
 /* Initialize this FFT length */
 
 	    gwinit (&lldata.gwdata);
-	    gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
 	    if (all_bench) lldata.gwdata.bench_pick_nth_fft = 1;
 	    stop_reason = lucasSetup (thread_num, fftlen * 17 + 1, fftlen + plus1, &lldata);
 	    if (stop_reason) {
@@ -9432,7 +9334,6 @@ int primeBenchMultipleWorkersInternal (
 		if (impl > 1) {
 			if (!all_bench) break;
 			gwinit (&lldata.gwdata);
-			gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
 			lldata.gwdata.bench_pick_nth_fft = impl;
 			stop_reason = lucasSetup (thread_num, fftlen * 17 + 1, fftlen + plus1, &lldata);
 			if (stop_reason) break;	// Assume stop_reason set because there are no more implementations for this FFT
@@ -9460,7 +9361,7 @@ int primeBenchMultipleWorkersInternal (
 
 			    if (! is_number_in_list (workers, bench_workers)) continue;
 			    if (cpus % workers != 0 && !bench_oddballs) continue;
-			    /* Only SSE2 code supports multi-threaded FFTs */
+			    /* Only SSE2 and later code supports multi-threaded FFTs */
 			    if ((cpus > workers || hypercpus > 1) && ! (CPU_FLAGS & CPU_SSE2)) continue;
 
 /* Output start message for this benchmark */
@@ -9747,7 +9648,7 @@ int primeBenchMultipleWorkers (
 		IniGetInt (INI_FILE, "MinBenchFFT", 1024),
 		IniGetInt (INI_FILE, "MaxBenchFFT", 8192),
 		IniGetInt (INI_FILE, "OnlyBench5678", 0),			/* Limit FFTs benched to mimic previous prime95s */
-		IniGetInt (INI_FILE, "BenchAllComplex", 0),
+		IniGetInt (INI_FILE, "BenchNegacyclic", 0),
 		all_bench,
 		bench_cores,
 		IniGetInt (INI_FILE, "BenchHyperthreads", 1),			/* Benchmark hyperthreading */
@@ -9794,15 +9695,14 @@ void autoBench (void)
 	int	num_cores, num_workers, autobench_num_benchmarks, tnum, i, num_ffts_to_bench;
 	double	autobench_days_of_work;
 	struct {
-		unsigned long min_fftlen;
-		unsigned long max_fftlen;
-		int	all_complex;
-	} ffts_to_bench[200];
+		unsigned long fftlen;
+		int	negacyclic;
+	} ffts_to_bench[500];
 	struct primenetBenchmarkData pkt;
 
 /* If workers are not active or we're not doing normal work, do not benchmark now */
 
-	if (!WORKER_THREADS_ACTIVE || WORKER_THREADS_STOPPING || LAUNCH_TYPE != LD_CONTINUE) return;
+	if (!WORKERS_ACTIVE || WORKERS_STOPPING || LAUNCH_TYPE != LD_CONTINUE) return;
 
 /* If we're not supposed to run while on battery and we are on battery power now, then skip this benchmark */
 
@@ -9810,12 +9710,12 @@ void autoBench (void)
 
 /* If any worker is paused due to PauseWhileRunning, then skip auto-bench */
 
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++) if (STOP_FOR_PAUSE[i] != NULL) return;
+	for (i = 0; i < (int) NUM_WORKERS; i++) if (STOP_FOR_PAUSE[i] != NULL) return;
 
 /* If there are any threads with high variable memory usage, then skip auto-bench. */
 /* We do this because restarting stage 2 can take a long time when the worker is using lots of memory. */
 
-	for (i = 0; i < (int) NUM_WORKER_THREADS; i++)
+	for (i = 0; i < (int) NUM_WORKERS; i++)
 		if ((MEM_FLAGS[i] & (MEM_VARIABLE_USAGE | MEM_WILL_BE_VARIABLE_USAGE)) && MEM_IN_USE[i] >= 250) return;
 
 // BUG/FEATURE -- purge bench DB of old or anomalous results so that we can replace them with new, hopefully accurate, benchmarks?
@@ -9825,11 +9725,13 @@ void autoBench (void)
 	if (BENCH_NUM_CORES)
 		num_cores = BENCH_NUM_CORES;		/* Use gwnum.txt override or default to all cores in use */
 	else {
-		num_cores = 0;
-		for (i = 0; i < (int) NUM_WORKER_THREADS; i++) num_cores += CORES_PER_TEST[i];
-		if (num_cores > (int) HW_NUM_CORES) num_cores = HW_NUM_CORES;
+		//num_cores = 0;
+		//for (i = 0; i < (int) NUM_WORKERS; i++) num_cores += CORES_PER_TEST[i];
+		//if (num_cores > (int) HW_NUM_CORES)
+		// Always auto-bench using all the cores.  Prime95 always calls gwset_bench_cores with HW_NUM_CORES.
+		num_cores = HW_NUM_CORES;
 	}
-	num_workers = BENCH_NUM_WORKERS ? BENCH_NUM_WORKERS : NUM_WORKER_THREADS; /* Use gwnum.txt override or default to all workers */
+	num_workers = BENCH_NUM_WORKERS ? BENCH_NUM_WORKERS : NUM_WORKERS; /* Use gwnum.txt override or default to all workers */
 
 /* Get some ini file overrides for autobenching criteria. */
 
@@ -9837,10 +9739,10 @@ void autoBench (void)
 	autobench_num_benchmarks = IniGetInt (INI_FILE, "AutoBenchNumBenchmarks", 10);
 
 /* Look at worktodo.txt for FFT sizes we are working on now or will work on soon.  See if any need more benchmark data. */
-/* Loop over all worker threads */
+/* Loop over all workers. */
 
 	num_ffts_to_bench = 0;
-	for (tnum = 0; tnum < (int) NUM_WORKER_THREADS; tnum++) {
+	for (tnum = 0; tnum < (int) NUM_WORKERS; tnum++) {
 	    struct work_unit *w;
 	    double	est;
 
@@ -9849,8 +9751,10 @@ void autoBench (void)
 	    est = 0.0;
 	    for (int pass = 0; pass <= 1; pass++)
 	    for (w = NULL; ; ) {
-		int	all_complex, num_benchmarks;
-		unsigned long min_fftlen, max_fftlen;    
+		int	negacyclic, num_benchmarks;
+		unsigned long minimum_fftlen, first_fftlen, fftlen;
+		bool	have_first_fftlen;
+		double	plausible_fftlen_multiplier;
 
 /* Read the next line of the work file.  Handle CERT lines first in computing estimated completion dates. */
 
@@ -9868,47 +9772,48 @@ void autoBench (void)
 		if (est > autobench_days_of_work * 86400.0) continue;
 		est += work_estimate (tnum, w);
 
-/* Trial factoring is the only work type that does not use FFTs.  CERTs are short work assignments unlikely to benefit from an auto-bench. */
+/* Trial factoring is the only work type that does not use FFTs.  CERTs are short work assignments unlikely to benefit much from an auto-bench. */
 
 		if (w->work_type == WORK_FACTOR) continue;
 		if (w->work_type == WORK_CERT) continue;
 
-/* If this is an LL or PRP test determine the FFT size that will actually be used */
+/* Loop over the FFT lengths that could plausibly be needed by this work unit.  We might find a faster FFT length than the minimum possible -- arbitrarily */
+/* search 3% above minimum FFT length.  For ECM, P-1 (and eventually P+1) polynomial stage 2 FFT length can easily be 15% larger than the stage 1 FFT length. */
 
-		if (w->work_type == WORK_TEST || w->work_type == WORK_DBLCHK || w->work_type == WORK_ADVANCEDTEST || w->work_type == WORK_PRP)
-			pick_fft_size (MAIN_THREAD_NUM, w);
+		have_first_fftlen = FALSE;
+		plausible_fftlen_multiplier = (w->work_type == WORK_ECM || w->work_type == WORK_PMINUS1 || w->work_type == WORK_PFACTOR) ? 1.15 : 1.03;
+		for (minimum_fftlen = w->minimum_fftlen; ; minimum_fftlen = fftlen + 10) {
 
-/* Ask gwnum how many relevant benchmarks are in its database */
-/* If we have enough benchmarks, skip this worktodo entry */
+/* Find the next possible FFT length and ask gwnum how many relevant benchmarks are in its database.  If no FFT length found, break out of loop. */
 
-		gwbench_get_num_benchmarks (w->k, w->b, w->n, w->c, w->minimum_fftlen, num_cores, num_workers, HYPERTHREAD_LL, ERRCHK,
-					    &min_fftlen, &max_fftlen, &all_complex, &num_benchmarks);
-		if (num_benchmarks >= autobench_num_benchmarks) continue;
+		    gwbench_get_num_benchmarks (w->k, w->b, w->n, w->c, minimum_fftlen, num_cores, num_workers, HYPERTHREAD_LL, ERRCHK,
+						&fftlen, &negacyclic, &num_benchmarks);
+		    if (fftlen == 0) break;
+
+/* Remember the minimum possible FFT length and break when we reach FFT lengths at are so far above the minimum that hey do not need auto-benching */
+
+		    if (!have_first_fftlen) { first_fftlen = fftlen; have_first_fftlen = TRUE; }
+		    else if (fftlen > first_fftlen * plausible_fftlen_multiplier) break;
+
+/* If we have enough benchmarks, skip benchmarking this length */
+
+		    if (num_benchmarks >= autobench_num_benchmarks) continue;
 
 /* For this release, we do not run automatic benchmarks for FFT lengths below 8K */
 
-		if (max_fftlen < 8192) continue;
-		if (min_fftlen < 8192) min_fftlen = 8192;
+		    if (fftlen < 8192) continue;
 
-/* Add the returned FFT lengths to our list of FFTs to benchmark */
+/* Add the FFT length to our list of FFTs to benchmark */
 
-		for (i = 0; ; i++) {
+		    for (i = 0; ; i++) {
 			if (i == num_ffts_to_bench) {
-				ffts_to_bench[num_ffts_to_bench].min_fftlen = min_fftlen;
-				ffts_to_bench[num_ffts_to_bench].max_fftlen = max_fftlen;
-				ffts_to_bench[num_ffts_to_bench].all_complex = all_complex;
+				ffts_to_bench[num_ffts_to_bench].fftlen = fftlen;
+				ffts_to_bench[num_ffts_to_bench].negacyclic = negacyclic;
 				num_ffts_to_bench++;
 				break;
 			}
-			if (ffts_to_bench[i].all_complex != all_complex) continue;
-			if (min_fftlen >= ffts_to_bench[i].min_fftlen && min_fftlen <= ffts_to_bench[i].max_fftlen) {
-				if (max_fftlen > ffts_to_bench[i].max_fftlen) ffts_to_bench[i].max_fftlen = max_fftlen;
-				break;
-			}
-			if (max_fftlen >= ffts_to_bench[i].min_fftlen && max_fftlen <= ffts_to_bench[i].max_fftlen) {
-				if (min_fftlen < ffts_to_bench[i].min_fftlen) ffts_to_bench[i].min_fftlen = min_fftlen;
-				break;
-			}
+			if (ffts_to_bench[i].fftlen == fftlen && ffts_to_bench[i].negacyclic == negacyclic) break;
+		    }
 		}
 	    }
 	}
@@ -9955,10 +9860,10 @@ void autoBench (void)
 		stop_reason = primeBenchMultipleWorkersInternal (
 			MAIN_THREAD_NUM,				/* Output messages to main window */
 			&pkt,
-			ffts_to_bench[i].min_fftlen / 1024,		/* Minimum FFT length (in K) to bench */
-			ffts_to_bench[i].max_fftlen / 1024,		/* Maximum FFT length (in K) to bench */
+			ffts_to_bench[i].fftlen / 1024,			/* Minimum FFT length (in K) to bench */
+			ffts_to_bench[i].fftlen / 1024,			/* Maximum FFT length (in K) to bench */
 			FALSE,						/* Do not limit FFT sizes benchmarked */
-			ffts_to_bench[i].all_complex,
+			ffts_to_bench[i].negacyclic,
 			TRUE,						/* Benchmark all FFT implementations */
 			bench_cores,
 			HYPERTHREAD_LL,					/* Benchmark hyperthreading if LL testing uses hyperthreads */
@@ -10012,7 +9917,7 @@ int primeBench (
 	char	buf[512];
 	char	bench_cores[512];
 	int	min_cores, max_cores, incr_cores, cores, hypercpu;
-	int	all_bench, only_time_5678, time_all_complex, plus1, stop_reason;
+	int	all_bench, only_time_5678, time_negacyclic, plus1, stop_reason;
 	int	is_a_5678, bench_hyperthreading, bench_arch;
 	unsigned long fftlen, min_FFT_length, max_FFT_length;
 	double	timers[2];
@@ -10078,7 +9983,7 @@ int primeBench (
 	min_FFT_length = IniGetInt (INI_FILE, "MinBenchFFT", 1024);
 	max_FFT_length = IniGetInt (INI_FILE, "MaxBenchFFT", 8192);
 	only_time_5678 = IniGetInt (INI_FILE, "OnlyBench5678", 1);
-	time_all_complex = IniGetInt (INI_FILE, "BenchAllComplex", 0);
+	time_negacyclic = IniGetInt (INI_FILE, "BenchNegacyclic", 0);
 	all_bench = 0; //IniGetInt (INI_FILE, "AllBench", 0);			/* Benchmark all implementations of each FFT length */
 	bench_arch = IniGetInt (INI_FILE, "BenchArch", 0);			/* CPU architecture to benchmark */
 	IniGetString (INI_FILE, "BenchCores", bench_cores, sizeof(bench_cores), NULL); /* Cpu cores to benchmark (comma separated list) */
@@ -10124,7 +10029,7 @@ int primeBench (
 	    if (!OS_CAN_SET_AFFINITY && hypercpu > 1 && cores != HW_NUM_CORES) continue;
 	    /* Output a message if using multi-threaded FFT */
 	    if (cores > 1 || hypercpu > 1) {
-	      if (! (CPU_FLAGS & CPU_SSE2)) continue;  // Only SSE2 code supports multi-threaded FFTs
+	      if (! (CPU_FLAGS & CPU_SSE2)) continue;  // Only SSE2 and later code supports multi-threaded FFTs
 	      sprintf (buf, "Timing%s FFTs using %d core%s.\n", hypercpu > 1 ? " hyperthreaded" : "", cores, cores > 1 ? "s" : "");
 	      OutputBothBench (thread_num, buf);
 	    }
@@ -10136,8 +10041,8 @@ int primeBench (
 /* Loop over a variety of FFT lengths */
 
 	    for (plus1 = 0; plus1 <= 1; plus1++) {
-	      if (plus1 == 0 && time_all_complex == 2) continue;
-	      if (plus1 == 1 && time_all_complex == 0) continue;
+	      if (plus1 == 0 && time_negacyclic == 2) continue;
+	      if (plus1 == 1 && time_negacyclic == 0) continue;
 	      for (fftlen = min_FFT_length * 1024; fftlen <= max_FFT_length * 1024; fftlen += 10) {
 	        for (impl = 1; ; impl++) {
 		  if (impl > 1 && !all_bench) break;
@@ -10146,15 +10051,14 @@ int primeBench (
 /* my 1400 MHz P4 to run 10 iterations of a 1792K FFT. */
 
 		  gwinit (&lldata.gwdata);
-		  gwset_sum_inputs_checking (&lldata.gwdata, SUM_INPUTS_ERRCHK);
-		  if (IniGetInt (LOCALINI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&lldata.gwdata);
-		  if (IniGetInt (INI_FILE, "HyperthreadPrefetch", 0)) gwset_hyperthread_prefetch (&lldata.gwdata);
+		  if (IniGetInt (INI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&lldata.gwdata);
 		  gwset_num_threads (&lldata.gwdata, get_ranked_num_threads (0, cores, hypercpu > 1));
 		  sp_info.bench_base_core_num = 0;
 		  sp_info.bench_hyperthreading = (hypercpu > 1);
 		  gwset_thread_callback (&lldata.gwdata, SetAuxThreadPriority);
 		  gwset_thread_callback_data (&lldata.gwdata, &sp_info);
 		  if (all_bench) lldata.gwdata.bench_pick_nth_fft = impl;
+		  gwset_use_spin_wait (&lldata.gwdata, IniGetInt (INI_FILE, "SpinWait", 0));
 		  stop_reason = lucasSetup (thread_num, fftlen * 17 + 1, fftlen + plus1, &lldata);
 		  if (stop_reason) {
 			/* An error during all_bench is expected.  Continue on to next FFT length. */
@@ -10854,7 +10758,7 @@ int generateProofFile (
 	char	proof_hash[33])		/* Returned MD5 hash of the entire proof file */
 {
 	int	proofgen_waits;
-	char	buf[512];
+	char	buf[512], filename[32], proof_filename[500], tmp_proof_filename[504];
 
 // Mihai's explanation for how a proof construction works for proof power N:
 //	Hashes must all be derived from the final residue B
@@ -10875,7 +10779,7 @@ int generateProofFile (
 
 	proofgen_waits = IniGetInt (INI_FILE, "MaxProofgenWaits", 48 * 60 / 5);		// Default is 48 hours
 	if (proofgen_waits < 1) proofgen_waits = 1;
-	proofgen_waits = IniGetInt (LOCALINI_FILE, "CurrentProofgenWaits", proofgen_waits);
+	proofgen_waits = IniGetInt (INI_FILE, "CurrentProofgenWaits", proofgen_waits);
 
 // Output startup message
 
@@ -10883,15 +10787,20 @@ int generateProofFile (
 		 ps->proof_power_mult > 1 ? " partial" : "", gwmodulo_as_string(gwdata), ps->proof_power, ps->hashlen);
 	OutputStr (ps->thread_num, buf);
 
-// Loop until we successfully generate the proof file
+// Proof file names
+
+	tempFileName (w, filename);
+	sprintf (proof_filename, "%s.proof", filename);
+	sprintf (tmp_proof_filename, "%s.proof.tmp", filename);
+
+// Loop until we successfully generate the proof file (or give up on ever being able to generate the proof file)
 
 	for ( ; ; ) {
 		int	fd, fdout, rc, i, stop_reason;
-		int64_t	proof_file_start_offset;	
+		int64_t	proof_header_size, proof_residues_size, proof_file_size, proof_file_start_offset;
 		uint64_t h[20];
 		hash256_t rooth, *prevh, thish;
 		gwnum	M;
-		char	filename[32], proof_filename[500], tmp_proof_filename[504];
 		MD5_CTX context;
 		unsigned char digest[16];
 		char	MD5_output[33];
@@ -10900,8 +10809,6 @@ int generateProofFile (
 
 		fd = -1;
 		fdout = -1;
-		M = NULL;
-
 		MD5Init (&context);
 		M = gwalloc (gwdata);
 		if (M == NULL) {
@@ -10921,81 +10828,94 @@ int generateProofFile (
 				goto pfail;
 			}
 		}
-		tempFileName (w, filename);
-		sprintf (proof_filename, "%s.proof", filename);
-		sprintf (tmp_proof_filename, "%s.proof.tmp", filename);
-		if (proof_number == 1)
-			fdout = _open (tmp_proof_filename, _O_BINARY | _O_WRONLY | _O_TRUNC | _O_CREAT, CREATE_FILE_ACCESS);
-		else
-			fdout = _open (tmp_proof_filename, _O_BINARY | _O_WRONLY | _O_APPEND | _O_CREAT, CREATE_FILE_ACCESS);
+		if (proof_number == 1) fdout = _open (tmp_proof_filename, _O_BINARY | _O_WRONLY | _O_CREAT, CREATE_FILE_ACCESS);
+		else fdout = _open (tmp_proof_filename, _O_BINARY | _O_WRONLY);
 		if (fdout < 0) {
-			sprintf (buf, "Cannot create PRP proof file: %s\n", proof_filename);
+			sprintf (buf, "Cannot %s PRP proof file: %s\n", proof_number == 1 ? "create" : "open", tmp_proof_filename);
 			OutputBoth (ps->thread_num, buf);
 			OutputBothErrno (ps->thread_num);
 			goto pfail;
 		}
-		// Get starting file offset for later rereading for MD5 comparison hash
-		proof_file_start_offset = _lseeki64 (fdout, 0, SEEK_END);
 
-// We need to be careful in the case where user rolls back to a much older save file.  If we've written out
-// one or more proofs then we cannot overwrite them as the needed interim residues file was deleted or may have been
-// partially overwritten after the proof was generated.  Determine how many proofs have been written based on the
-// size of the file.  Silently ignore attempts at overwriting.
-
-		int proofs_written = (int) (proof_file_start_offset / ((ps->proof_power + 1) * ps->residue_size));
-		if (proofs_written >= proof_number) {
-			_close (fd);
-			_close (fdout);
-			gwfree (gwdata, M);
-			break;
-		}
-
-// Reset counters and errors, turn on error checking
-
-		gwdata->fft_count = 0;			// Reset count of FFTs performed
-		gw_clear_error (gwdata);
-		gw_clear_maxerr (gwdata);
-		gwsetnormroutine (gwdata, 0, 1, 0);	// Error checking on
-
-// Create the proof file header.  The proof file header looks like this:
+// Create (or recreate) the proof file header.  The proof file header looks like this:
 // PRP PROOF\n
 // VERSION=1\n
 // HASHSIZE=64\n
 // POWER=7x2\n
 // NUMBER=M216091\n
 
-		if (proof_number == 1) {
-			sprintf (buf, "PRP PROOF\nVERSION=%d\nHASHSIZE=%d\n", ps->proof_version, ps->hashlen);
-			if (ps->proof_power_mult == 1)
-				sprintf (buf+strlen(buf), "POWER=%d\n", ps->proof_power);
-			else
-				sprintf (buf+strlen(buf), "POWER=%dx%d\n", ps->proof_power, ps->proof_power_mult);
-			if (ps->prp_base != 3) sprintf (buf+strlen(buf), "BASE=%u\n", ps->prp_base);
-			if (_write (fdout, buf, (unsigned int) strlen (buf)) != (int) strlen (buf)) {
-				OutputBoth (ps->thread_num, "Error writing proof file header.\n");
-				OutputBothErrno (ps->thread_num);
-				goto pfail;
-			}
-			MD5Update (&context, buf, (unsigned int) strlen (buf));
-
-			// Output number.  Enclose non-Mersennes with known factors in parentheses.  Append known factors.
-			sprintf (buf, "NUMBER=");
-			if ((w->k != 1.0 || w->c != -1) && w->known_factors != NULL) strcat (buf, "(");
-			strcat (buf, gwmodulo_as_string (gwdata));
-			if ((w->k != 1.0 || w->c != -1) && w->known_factors != NULL) strcat (buf, ")");
-			if (w->known_factors != NULL) {		// Output known factors list
-				char	*p;
-				sprintf (buf + strlen (buf), "/%s", w->known_factors);
-				while ((p = strchr (buf, ',')) != NULL) *p = '/';
-			}
-			strcat (buf, "\n");
-			if (_write (fdout, buf, (unsigned int) strlen (buf)) != (int) strlen (buf)) {
-				OutputBoth (ps->thread_num, "Error writing proof file header.\n");
-				OutputBothErrno (ps->thread_num);
-				goto pfail;
-			}
-			MD5Update (&context, buf, (unsigned int) strlen (buf));
+		sprintf (buf, "PRP PROOF\nVERSION=%d\nHASHSIZE=%d\n", ps->proof_version, ps->hashlen);
+		if (ps->proof_power_mult == 1) sprintf (buf+strlen(buf), "POWER=%d\n", ps->proof_power);
+		else sprintf (buf+strlen(buf), "POWER=%dx%d\n", ps->proof_power, ps->proof_power_mult);
+		if (ps->prp_base != 3) sprintf (buf+strlen(buf), "BASE=%u\n", ps->prp_base);
+		if (_write (fdout, buf, (unsigned int) strlen (buf)) != (int) strlen (buf)) {
+			OutputBoth (ps->thread_num, "Error writing proof file header.\n");
+			OutputBothErrno (ps->thread_num);
+			goto pfail;
 		}
+		MD5Update (&context, buf, (unsigned int) strlen (buf));
+
+		// Output number.  Enclose non-Mersennes with known factors in parentheses.  Append known factors.
+		sprintf (buf, "NUMBER=");
+		if ((w->k != 1.0 || w->c != -1) && w->known_factors != NULL) strcat (buf, "(");
+		strcat (buf, gwmodulo_as_string (gwdata));
+		if ((w->k != 1.0 || w->c != -1) && w->known_factors != NULL) strcat (buf, ")");
+		if (w->known_factors != NULL) {		// Output known factors list
+			char	*p;
+			sprintf (buf + strlen (buf), "/%s", w->known_factors);
+			while ((p = strchr (buf, ',')) != NULL) *p = '/';
+		}
+		strcat (buf, "\n");
+		if (_write (fdout, buf, (unsigned int) strlen (buf)) != (int) strlen (buf)) {
+			OutputBoth (ps->thread_num, "Error writing proof file header.\n");
+			OutputBothErrno (ps->thread_num);
+			goto pfail;
+		}
+		MD5Update (&context, buf, (unsigned int) strlen (buf));
+
+		// Get the header size
+		proof_header_size = _lseeki64 (fdout, 0, SEEK_CUR);
+
+// We need to be careful in the case where user rolls back to a much older save file.  If we've written out one or more partial proofs then we cannot
+// overwrite them as the needed interim residues file may have been deleted after the partial proof was written.  We determine how many partial proofs
+// have been written based on the size of the file.
+
+// Now determine if the full or partial proof has already been output.  There are three cases:
+// 1) The normal case is where none of this full or partial proof was previously output.  Output this proof.
+// 2) Part of this full or partial proof was previously output.  Perhaps the computer crashed in the middle of proof generation.  Output this proof.
+// 3) This full or partial proof was previously output in its entirety.  The residues file may then have been deleted.  Use the previously generated proof.
+
+		// Use current proof file size to determine how many partial proofs have been completely written to the proof file
+		proof_file_size = _lseeki64 (fdout, 0, SEEK_END);
+		proof_residues_size = (ps->proof_power + 1) * ps->residue_size;
+		int proofs_written = (int) ((proof_file_size - proof_header_size) / proof_residues_size);
+
+		// If this proof has already been completely written to the proof file, then we don't need to write this full or partial proof
+		if (proofs_written >= proof_number) {
+			_close (fd);
+			_close (fdout);
+			gwfree (gwdata, M);
+			sprintf (buf, "Proof has already been written to %s.\n", tmp_proof_filename);
+			OutputBoth (ps->thread_num, buf);
+			break;
+		}
+
+// Proof file start offset is the really the starting offset of the MD5 checksum we are computing.  We'll compare the MD5 of data we've written to
+// the MD5 once the data is on disk.  NOTE:  We don't MD5 check the proof header when the rarely used proof_power_multiplier option is selected.
+
+		// Position to the start of this full or partial proof
+		proof_file_start_offset = _lseeki64 (fdout, proof_header_size + (proof_number - 1) * proof_residues_size, SEEK_SET);
+		if (proof_number == 0) proof_file_start_offset = 0;	// We will check the MD5 of the header plus the MD5 of the proof
+		else MD5Init (&context);				// We will not check the MD5 of the header but will check the MD5 of the proof
+   
+// Reset counters and errors, turn on error checking
+
+		gw_clear_fft_count (gwdata);		// Reset count of FFTs performed
+		gw_clear_error (gwdata);
+		gw_clear_maxerr (gwdata);
+		gwsetnormroutine (gwdata, 0, 1, 0);	// Error checking on
+
+// Output this full or partial proof
 
 		// Output final residue
 		rc = readResidue (ps, gwdata, fd, (1 << ps->proof_power), M);
@@ -11046,21 +10966,6 @@ int generateProofFile (
 		if (fdout >= 0) _close (fdout), fdout = -1;
 		gwfree (gwdata, M); M = NULL;
 
-// Generate an MD5 hash of the bytes just written to the proof file.  This will be a unique identifier to thwart a bad actor from uploading a counterfeit proof file.
-// Compare the MD5 generated during output to the MD5 generated by re-reading the file			
-
-		md5_hexdigest_file_from_offset (proof_hash, tmp_proof_filename, proof_file_start_offset);
-		if (strcmp (MD5_output, proof_hash) != 0) {
-			OutputBoth (ps->thread_num, "The MD5 hash of the proof file is not correct.\n");
-			goto pfail;
-		}
-
-// Return an MD5 hash of the complete proof file.  This will be a unique identifier to thwart a bad actor from uploading
-// a counterfeit proof file.
-
-		if (proof_number == ps->proof_power_mult && proof_file_start_offset != 0)
-			md5_hexdigest_file (proof_hash, tmp_proof_filename);
-
 // Check if an error occurred before publishing our proof
 
 		if (gw_test_for_error (gwdata)) {
@@ -11073,39 +10978,33 @@ int generateProofFile (
 		if (gw_get_maxerr (gwdata) > 0.45) goto somewhere; ???
 #endif
 
-// Print messages, rename proof file (we used a temp file so that proof uploader thread does not see partial proof files)
-// Delete the large interim residues file
+// Print message on cost of proof construction
 
-		sprintf (buf, "Proof construction cost %d squarings\n", (int) ceil (gwdata->fft_count / 2.0));
+		sprintf (buf, "Proof construction cost %" PRIu64 " squarings\n", gw_get_fft_count (gwdata) / 2);
 		OutputStr (ps->thread_num, buf);
-		if (proof_number == ps->proof_power_mult) {
-			unsigned long verify_cost = divide_rounding_up (ps->proof_num_iters, 1 << ps->proof_power);
-			sprintf (buf, "Proof verification will cost %lu squarings\n", verify_cost);
-			OutputStr (ps->thread_num, buf);
-			_unlink (proof_filename);
-			if (rename (tmp_proof_filename, proof_filename)) {
-				sprintf (buf, "Error renaming from %s to %s\n", tmp_proof_filename, proof_filename);
-				OutputBoth (ps->thread_num, buf);
-			}
-			_unlink (ps->residues_filename);
-		}
-		// Otherwise, delete residues file if user has option set to keep interim residues file as small as possible
-		else if (!IniGetInt (LOCALINI_FILE, "PreallocateDisk", 1)) {
-			_unlink (ps->residues_filename);
-		}
-		for (i = 0; i < ps->num_emergency_allocs; i++) free (ps->emergency_allocs[i]);
-		ps->num_emergency_allocs = 0;
-		break;
 
+// Generate an MD5 hash of the bytes just written to the proof file.  This will be a unique identifier to thwart a bad actor from uploading a counterfeit proof file.
+// Compare the MD5 generated during output to the MD5 generated by re-reading the file.
+
+		md5_hexdigest_file_from_offset (proof_hash, tmp_proof_filename, proof_file_start_offset);
+		if (strcmp (MD5_output, proof_hash) != 0) {
+			OutputBoth (ps->thread_num, "The MD5 hash of the proof file is not correct.\n");
+			goto pfail;
+		}
+
+// Proof generation successful.  Break out of loop trying to generate the proof.
+
+		break;
+		
 // Cleanup after a proof failure, close and delete/truncate proof file
 
 pfail_wont_get_better:
 		if (proofgen_waits > 2) proofgen_waits = 2;
 pfail:		if (fd >= 0) _close (fd);
 		if (fdout >= 0) {
+			_chsize_s (fdout, proof_file_start_offset);
 			_close (fdout);
 			if (proof_file_start_offset == 0) _unlink (tmp_proof_filename);
-			else _chsize_s (fd, proof_file_start_offset);
 		}
 		if (M != NULL) gwfree (gwdata, M);
 
@@ -11116,8 +11015,6 @@ pfail:		if (fd >= 0) _close (fd);
 		if (proofgen_waits == 0) {		// We've run out of 5 minute waits.  Give up on trying to generate the proof file.
 			OutputBoth (ps->thread_num, "Proof generation failed.\n");
 			ps->proof_power = 0;		// Clear proof power so that JSON will report no proof file generated
-			for (i = 0; i < ps->num_emergency_allocs; i++) free (ps->emergency_allocs[i]);
-			ps->num_emergency_allocs = 0;
 			_unlink (ps->residues_filename);
 			break;
 		}
@@ -11127,14 +11024,43 @@ pfail:		if (fd >= 0) _close (fd);
 		OutputStr (ps->thread_num, "Waiting 5 minutes to try proof generation again.\n");
 		stop_reason = SleepFive (ps->thread_num);
 		if (stop_reason) {
-			IniWriteInt (LOCALINI_FILE, "CurrentProofgenWaits", proofgen_waits);
+			IniWriteInt (INI_FILE, "CurrentProofgenWaits", proofgen_waits);
 			return (stop_reason);
 		}
 	}
 
+// Either proof has been successfully generated or we've given up on ever being able to generate a proof.  If successful, print message on proof completion,
+// rename proof file (we used a temp file so that proof uploader thread does not see partial proof files).  Delete the large interim residues file
+
+	if (ps->proof_power) {
+		if (proof_number == ps->proof_power_mult) {
+			unsigned long verify_cost = divide_rounding_up (ps->proof_num_iters, 1 << ps->proof_power);
+			sprintf (buf, "Proof verification will cost %lu squarings\n", verify_cost);
+			OutputStr (ps->thread_num, buf);
+			_unlink (proof_filename);
+			if (rename (tmp_proof_filename, proof_filename)) {
+				sprintf (buf, "Error renaming from %s to %s\n", tmp_proof_filename, proof_filename);
+				OutputBoth (ps->thread_num, buf);
+			}
+			_unlink (ps->residues_filename);
+			// Return an MD5 hash of the complete proof file.  This unique identifier thwarts a bad actor from uploading a counterfeit proof file.
+			md5_hexdigest_file (proof_hash, proof_filename);
+
+		}
+		// Otherwise, delete residues file if user has option set to keep interim residues file as small as possible
+		else if (!IniGetInt (INI_FILE, "PreallocateDisk", 1)) {
+			_unlink (ps->residues_filename);
+		}
+	}
+
+// Free any emergency memory
+
+	for (int i = 0; i < ps->num_emergency_allocs; i++) free (ps->emergency_allocs[i]);
+	ps->num_emergency_allocs = 0;
+
 // Clear the waits counter, return no-need-to-stop code
 
-	IniWriteString (LOCALINI_FILE, "CurrentProofgenWaits", NULL);
+	IniWriteString (INI_FILE, "CurrentProofgenWaits", NULL);
 	return (0);
 }
 
@@ -11182,7 +11108,7 @@ int writePRPSaveFile (			// Returns TRUE if successful
 	struct prp_state *ps)
 {
 	int	fd;
-	unsigned long sum = 0;
+	uint32_t sum = 0;
 	char	buf[512];
 
 /* If there are interim proof residues sitting in emergency memory, do not write a save file.  This is because */
@@ -11293,7 +11219,8 @@ int readPRPSaveFile (
 	struct prp_state *ps)		/* PRP state structure to read and fill in */
 {
 	int	fd;
-	unsigned long savefile_prp_base, sum, filesum, version;
+	unsigned long savefile_prp_base;
+	uint32_t version, sum, filesum;
 
 	// Open the save file
 	fd = _open (filename, _O_BINARY | _O_RDONLY);
@@ -11437,7 +11364,7 @@ void good_news_prp (void *arg)
 
 	title (MAIN_THREAD_NUM, "New Probable Prime!!!");
 	sprintf (buf, "New Probable Prime!!!!  %s is a probable prime!\n", (char *) arg);
-	while (WORKER_THREADS_ACTIVE && ! WORKER_THREADS_STOPPING) {
+	while (WORKERS_ACTIVE && ! WORKERS_STOPPING) {
 		if ((i++ & 127) == 0) OutputStr (MAIN_THREAD_NUM, buf);
 		flashWindowAndBeep ();
 		Sleep (50);
@@ -11601,7 +11528,7 @@ int isPRPg (
 /* Do a PRP test */
 
 int prp (
-	int	thread_num,		/* Worker thread number */
+	int	thread_num,		/* Worker number */
 	struct PriorityInfo *sp_info,	/* SetPriority information */
 	struct work_unit *w,		/* Worktodo entry */
 	int	pass)			/* PrimeContinue pass */
@@ -11625,8 +11552,6 @@ int prp (
 	char	buf[1000], JSONbuf[4000], fft_desc[200];
 	unsigned long last_counter = 0xFFFFFFFF;/* Iteration of last error */
 	int	maxerr_recovery_mode = 0;	/* Big roundoff err rerun */
-	double	last_suminp = 0.0;
-	double	last_sumout = 0.0;
 	double	last_maxerr = 0.0;
 	double	allowable_maxerr, output_frequency, output_title_frequency;
 	char	string_rep[80];
@@ -11683,11 +11608,6 @@ int prp (
 /* Done with pass 1 priority work.  Return to do other priority work. */
 
 	if (pass == 1) return (0);
-
-/* Figure out which FFT size we should use */
-
-	stop_reason = pick_fft_size (thread_num, w);
-	if (stop_reason) return (stop_reason);
 
 /* Make sure the first-time user runs a successful self-test. */
 /* The one-hour self-test may have been useful when it was first introduced */
@@ -11794,7 +11714,7 @@ int prp (
 	ps.proof_power_mult = 1;
 	// We have a way for the PrimeNet server to change (reduce) the default hashlen.  This would reduce server proof
 	// processing load somewhat.  We hope to never use this option.
-	ps.hashlen = IniSectionGetInt (INI_FILE, "PrimeNet", "ProofHashLength", 64);
+	ps.hashlen = IniSectionGetInt (INI_FILE, SEC_PrimeNet, KEY_ProofHashLength, 64);
 	if (ps.hashlen < 32) ps.hashlen = 32;
 	if (ps.hashlen > 64) ps.hashlen = 64;
 	// Turn on storing MD5 hash of interim residues.  Versions 30.1 and 30.2 did not do this.
@@ -11836,8 +11756,8 @@ int prp (
 
 		// We have a way for the PrimeNet server to change (reduce) the proof power.  This would reduce server proof
 		// processing load somewhat and reduce the bandwidth required for obtaining proof files.  We hope to never use this option.
-		ps.proof_power = IniSectionGetInt (INI_FILE, "PrimeNet", "ProofPower", ps.proof_power);
-		ps.proof_power_mult = IniSectionGetInt (INI_FILE, "PrimeNet", "ProofPowerMult", ps.proof_power_mult);
+		ps.proof_power = IniSectionGetInt (INI_FILE, SEC_PrimeNet, KEY_ProofPower, ps.proof_power);
+		ps.proof_power_mult = IniSectionGetInt (INI_FILE, SEC_PrimeNet, KEY_ProofPowerMult, ps.proof_power_mult);
 	}
 
 /* Init the write save file state.  This remembers which save files are Gerbicz-checked.  Do this initialization */
@@ -11854,11 +11774,10 @@ begin:	N = exp = NULL;
 
 	gwinit (&gwdata);
 	gwsetmaxmulbyconst (&gwdata, ps.prp_base);
-	if (IniGetInt (LOCALINI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&gwdata);
-	if (IniGetInt (INI_FILE, "HyperthreadPrefetch", 0)) gwset_hyperthread_prefetch (&gwdata);
+	if (IniGetInt (INI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&gwdata);
 	if (HYPERTHREAD_LL) sp_info->normal_work_hyperthreading = TRUE, gwset_will_hyperthread (&gwdata, 2);
 	gwset_bench_cores (&gwdata, HW_NUM_CORES);
-	gwset_bench_workers (&gwdata, NUM_WORKER_THREADS);
+	gwset_bench_workers (&gwdata, NUM_WORKERS);
 	if (ERRCHK) gwset_will_error_check (&gwdata);
 	else gwset_will_error_check_near_limit (&gwdata);
 	gwset_num_threads (&gwdata, get_worker_num_threads (thread_num, HYPERTHREAD_LL));
@@ -11866,6 +11785,7 @@ begin:	N = exp = NULL;
 	gwset_thread_callback_data (&gwdata, sp_info);
 	gwset_minimum_fftlen (&gwdata, w->minimum_fftlen);
 	gwset_safety_margin (&gwdata, IniGetFloat (INI_FILE, "ExtraSafetyMargin", 0.0));
+	gwset_use_spin_wait (&gwdata, IniGetInt (INI_FILE, "SpinWait", 0));
 	res = gwsetup (&gwdata, w->k, w->b, w->n, w->c);
 
 /* If we were unable to init the FFT code, then print an error message */
@@ -12054,7 +11974,7 @@ begin:	N = exp = NULL;
 		int	max_emergency_memory;
 		double	disk_space, proof_file_size;
 
-		max_emergency_memory = IniGetInt (LOCALINI_FILE, "MaxEmergencyMemory", 1024);
+		max_emergency_memory = IniGetInt (INI_FILE, "MaxEmergencyMemory", 1024);
 		ps.residue_size = divide_rounding_up ((int) ceil(gwdata.bit_length), 8);
 		ps.max_emergency_allocs = (int) ((double) max_emergency_memory * 1000000.0 / (double) ps.residue_size);
 		if (ps.max_emergency_allocs < 1) ps.max_emergency_allocs = 1;
@@ -12063,11 +11983,11 @@ begin:	N = exp = NULL;
 
 // Create and optionally prefill the proof interim residues file
 
-		IniGetString (LOCALINI_FILE, "ProofResiduesDir", ps.residues_filename, sizeof (ps.residues_filename), NULL);
+		IniGetString (INI_FILE, "ProofResiduesDir", ps.residues_filename, sizeof (ps.residues_filename), NULL);
 		DirPlusFilename (ps.residues_filename, filename);
 		strcat (ps.residues_filename, ".residues");
 		if (ps.counter == 0)
-			createProofResiduesFile (&gwdata, &ps, IniGetInt (LOCALINI_FILE, "PreallocateDisk", 1));
+			createProofResiduesFile (&gwdata, &ps, IniGetInt (INI_FILE, "PreallocateDisk", 1));
 
 /* Calculate how many extra squarings are needed because of a version 1 PRP proof */
 
@@ -12488,34 +12408,6 @@ OutputStr (thread_num, "Iteration failed.\n");
 			restart_counter = -1;			/* rollback to any save file */
 			sleep5 = TRUE;
 			goto restart;
-		}
-
-/* Check that the sum of the input numbers squared is approximately equal to the sum of unfft results. */
-/* Since checking floats for equality is imperfect, check for identical results after a restart. */
-/* Note that if the SUMOUT value is extremely large the result is surely corrupt and we must rollback. */
-
-		if (gw_test_mismatched_sums (&gwdata)) {
-			if (ps.counter == last_counter &&
-			    gwsuminp (&gwdata, x) == last_suminp &&
-			    gwsumout (&gwdata, x) == last_sumout) {
-				OutputBoth (thread_num, ERROK);
-				inc_error_count (3, &ps.error_count);
-				gw_clear_error (&gwdata);
-			} else {
-				char	msg[100];
-				sprintf (msg, ERRMSG1B, gwsuminp (&gwdata, x), gwsumout (&gwdata, x));
-				sprintf (buf, ERRMSG0, ps.counter+1, final_counter, msg);
-				OutputBoth (thread_num, buf);
-				inc_error_count (0, &ps.error_count);
-				if (ps.error_check_type == PRP_ERRCHK_NONE || fabs (gwsumout (&gwdata, x)) > 1.0e40) {
-					last_counter = ps.counter;
-					last_suminp = gwsuminp (&gwdata, x);
-					last_sumout = gwsumout (&gwdata, x);
-					restart_counter = ps.counter;		/* rollback to this iteration or earlier */
-					sleep5 = TRUE;
-					goto restart;
-				}
-			}
 		}
 
 /* Check for excessive roundoff error.  If round off is too large, repeat the iteration to see if this was */
@@ -13091,24 +12983,6 @@ pushg(&gwdata.gdata, 2);}
 
 	sprintf (JSONbuf, "{\"status\":\"%s\"", ps.isProbablePrime ? "P" : "C");
 	JSONaddExponent (JSONbuf, w);
-	if (w->known_factors != NULL) {
-		char	fac_string[1210];
-		char	*in, *out;
-		fac_string[0] = 0;
-		// Copy known factors changing commas to quote-comma-quote
-		for (in = w->known_factors, out = fac_string; ; in++) {
-			if (*in == ',') {
-				strcpy (out, "\",\"");
-				out += 3;
-			} else if (out - fac_string > 1200) {
-				strcpy (out, "...");
-				break;
-			} else
-				*out++ = *in;
-			if (*in == 0) break;
-		}
-		sprintf (JSONbuf+strlen(JSONbuf), ", \"known-factors\":[\"%s\"]", fac_string);
-	}
 	sprintf (JSONbuf+strlen(JSONbuf), ", \"worktype\":\"PRP-%u\"", ps.prp_base);
 	if (!ps.isProbablePrime) {
 		sprintf (JSONbuf+strlen(JSONbuf), ", \"res64\":\"%s\"", ps.res64);
@@ -13130,8 +13004,9 @@ pushg(&gwdata.gdata, 2);}
 		if (ps.proof_power_mult > 1) sprintf (JSONbuf+strlen(JSONbuf), ", \"power-multiplier\":%d", ps.proof_power_mult);
 		sprintf (JSONbuf+strlen(JSONbuf), ", \"hashsize\":%d, \"md5\":\"%s\"}", ps.hashlen, proof_hash);
 	}
+	JSONaddExponentKnownFactors (JSONbuf, w);
 	JSONaddUserComputerAID (JSONbuf, w);
-	strcat (JSONbuf, "}\n");
+	strcat (JSONbuf, "}");
 	if (IniGetInt (INI_FILE, "OutputJSON", 1)) writeResultsJSON (JSONbuf);
 
 /* Output results to the server */
@@ -13167,6 +13042,11 @@ pushg(&gwdata.gdata, 2);}
 /* Delete the continuation files. */
 
 	unlinkSaveFiles (&write_save_file_state);
+
+/* If this is a PRP-CF test auto-generated by a newly found ECM test, then the next worktodo entry could be doing more ECM.  This would be pointless! */
+
+	if (ps.isProbablePrime && w->next != NULL && w->k == w->next->k && w->b == w->next->b && w->n == w->next->n && w->c == w->next->c)
+		deleteWorkToDoLine (thread_num, w->next, FALSE);
 
 /* Output good news to the screen in an infinite loop */
 

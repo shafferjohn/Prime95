@@ -1,4 +1,4 @@
-; Copyright 2011-2021 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -2713,7 +2713,7 @@ ENDIF
 ;; ************************************* four-complex-first-fft variants ******************************************
 ;;
 
-;; This code applies the roots-of-minus-1 premultipliers in an all-complex one-pass FFT.
+;; This code applies the roots-of-minus-1 premultipliers in an negacyclic one-pass FFT.
 ;; It also applies the three sin/cos multipliers after a radix-4 butterfly.  We save memory
 ;; by splitting the roots-of-minus-1 premultipliers such that every macro uses the 
 ;; same premultiplier data and we have 4 sin/cos postmultipliers.  Every sin/cos postmultiplier,
@@ -2875,7 +2875,7 @@ yr4_fs4cl_four_complex_first_djbfft MACRO srcreg,srcinc,d1,d2,screg,scinc,maxrpt
 	bump	screg, scinc
 	ENDM
 
-;; This code applies the roots-of-minus-1 premultipliers in an all-complex FFT.
+;; This code applies the roots-of-minus-1 premultipliers in an negacyclic FFT.
 ;; It also applies the three sin/cos multipliers after the first radix-4 butterfly.
 ;; We save memory by splitting the roots-of-minus-1 premultipliers such that every
 ;; macro uses the same premultiplier data.  The rest of the premultiplier is applied
@@ -3377,7 +3377,7 @@ ENDIF
 ;;
 
 ;; This code applies the sin/cos postmultipliers before a radix-4 butterfly.
-;; Then it applies the premultipliers since the all-complex inverse FFT is complete.
+;; Then it applies the premultipliers since the negacyclic inverse FFT is complete.
 ;; We save memory by splitting the roots-of-minus-1 premultipliers such that every
 ;; macro uses the same premultiplier data.  Every sin/cos postmultiplier, a very big
 ;; table anyway, is multiplied by the other part of the split roots-of-minus-1.
@@ -3551,7 +3551,7 @@ yr4_s4cl_four_complex_last_unfft MACRO srcreg,srcinc,d1,d2,screg,scinc,maxrpt,L1
 	ENDM
 
 ;; This code applies the sin/cos multipliers before a radix-4 butterfly.
-;; After the butterfly, it applies the all-complex premultipliers since the inverse FFT is complete.
+;; After the butterfly, it applies the negacyclic premultipliers since the inverse FFT is complete.
 ;; The screg and pmreg data is combined
 yr4_4cl_csc_four_complex_last_djbunfft MACRO srcreg,srcinc,d1,d2,screg,scinc,maxrpt,L1pt,L1pd
 	vmovapd	ymm0, [screg+256+64+32]		;; cosine/sine
@@ -5144,22 +5144,64 @@ back_to_orig:
 ;; Same as above code between orig and back_to_orig, except we implement mul4_opcode options
 
 yr4_4c_mult_opcode MACRO srcreg,d1,d2
-	LOCAL	fma_or_unfft, fma, fmasave, addmul, addmulsave, submul, submulsave, muladd, muladdhard, mulsub, mulsubhard, unfft, done
+	LOCAL	mulsave, fftsave, nofftsave, dispatch, disptab, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft, done
+	LOCAL	addmul312, addmul313, addmul132, addmul133, submul312, submul313, submul132, submul133
 
-	movzx	r10, mul4_opcode		;; Load the mul4_opcode
-	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
-	cmp	r10, 2				;; Test the mul4_opcode (part 1)
-	jb	addmul				;; opcode == 1, addmul
-	je	submul				;; opcode == 2, submul
-	cmp	r10, 82h			;; Test the mul4_opcode (part 2)
-	ja	fmasave				;; opcode == 0x83,0x84, muladd,mulsub with FFT save
-	je	submulsave			;; opcode == 0x82, submul with FFT save
-	cmp	r10, 80h			;; Test the mul4_opcode (part 3)
-	ja	addmulsave			;; opcode == 0x81, addmul with FFT save
-	jb	fma_or_unfft			;; opcode == 3,4,5 muladd,mulsub,unfft
+	movzx	r10, mul4_opcode		;; Load opcode
+	cmp	r10, 80h			;; Test for FFT save
+	ja	fftsave				;; opcode > 0x80, addmul,submul,muladd,mulsub,unfft with FFT save
+	jb	nofftsave			;; opcode < 0x80, addmul,submul,muladd,mulsub,unfft without FFT save
 						;; opcode == 0x80, plain mul with FFT save, fall through
 
-	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
+	;; Squaring with FFT save is handled here! 
+	test	rbp, rbp			;; If rbp is zero, this is a squaring
+	jnz	mulsave
+
+	ystore	[srcreg], ymm8			;; R1
+	vmulpd	ymm5, ymm8, ymm8		;; R1 * R1			; 12-16
+	vmulpd	ymm8, ymm8, ymm3		;; R1 * I1			; 13-17
+	ystore	[srcreg+32], ymm3		;; I1
+	vmulpd	ymm3, ymm3, ymm3		;; I1 * I1			; 14-18
+
+	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
+	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+
+	ystore	[srcreg+d1], ymm2		;; R2
+	vmulpd	ymm1, ymm2, ymm2		;; R2 * R2			; 16-20
+	vmulpd	ymm2, ymm2, ymm6		;; R2 * I2			; 17-21
+	ystore	[srcreg+d1+32], ymm6		;; I2
+	vmulpd	ymm6, ymm6, ymm6		;; I2 * I2			; 18-22
+
+	vsubpd	ymm5, ymm5, ymm3		;; R1*R1-I1*I1 (new R1)		; 19-21
+	vaddpd	ymm8, ymm8, ymm8		;; 2*R1*I1 (new I1)		; 20-22
+
+	ystore	[srcreg+d2], ymm7		;; R3
+	vmulpd	ymm3, ymm7, ymm7		;; R3 * R3			; 20-24
+	vmulpd	ymm7, ymm7, ymm9		;; R3 * I3			; 21-25
+	ystore	[srcreg+d2+32], ymm9		;; I3
+	vmulpd	ymm9, ymm9, ymm9		;; I3 * I3			; 22-26
+
+	ystore	[srcreg+d2+d1], ymm0		;; R4
+	ystore	[srcreg+d2+d1+32], ymm4		;; I4
+
+	vsubpd	ymm1, ymm1, ymm6		;; R2*R2-I2*I2 (new R2)		; 23-25
+	vaddpd	ymm2, ymm2, ymm2		;; 2*R2*I2 (new I2)		; 24-26
+
+	vmulpd	ymm6, ymm0, ymm0		;; R4 * R4			; 24-28
+	vmulpd	ymm0, ymm0, ymm4		;; R4 * I4			; 25-29
+	vmulpd	ymm4, ymm4, ymm4		;; I4 * I4			; 26-30
+
+	vaddpd	ymm10, ymm5, ymm1		;; R1 + R2 (new R1)		; 26-28
+	vsubpd	ymm5, ymm5, ymm1		;; R1 - R2 (new R2)		; 27-29
+
+	vsubpd	ymm3, ymm3, ymm9		;; R3*R3-I3*I3 (new R3)		; 28-30
+	vaddpd	ymm7, ymm7, ymm7		;; 2*R3*I3 (new I3)		; 29-31
+
+	vsubpd	ymm6, ymm6, ymm4		;; R4*R4-I4*I4 (new R4)		; 31-33
+	vaddpd	ymm0, ymm0, ymm0		;; 2*R4*I4 (new I4)		; 32-34
+	jmp	done
+
+mulsave:vmovapd	ymm9, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
 	ystore	[srcreg], ymm8			;; R1
 	vmulpd	ymm5, ymm8, ymm9		;; R1 * MemR1			; 12-16
@@ -5216,26 +5258,59 @@ yr4_4c_mult_opcode MACRO srcreg,d1,d2
 
 	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
 	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
-
 	jmp	done
 
-addmul:
-	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
-	vaddpd	ymm9, ymm9, [srcreg][r9]	;; MemR1
+fftsave:
+	ystore	[srcreg], ymm8			;; R1
+	ystore	[srcreg+32], ymm3		;; I1
+	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
+	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+	ystore	[srcreg+d1], ymm2		;; R2
+	ystore	[srcreg+d1+32], ymm6		;; I2
+	ystore	[srcreg+d2], ymm7		;; R3
+	ystore	[srcreg+d2+32], ymm9		;; I3
+	ystore	[srcreg+d2+d1], ymm0		;; R4
+	ystore	[srcreg+d2+d1+32], ymm4		;; I4
+	and	r10, 7fh			;; Strip the fft save bit from mul4_opcode
+	jmp	short dispatch			
+
+nofftsave:
+	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
+	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+
+dispatch:
+	mov	r9, OFFSET disptab		;; Jump table address
+	mov	r10, [r9+r10*8-8]		;; Jump table offset
+	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
+	jmp	r10
+disptab:
+	DQ	OFFSET addmul			;; 1 = addmul
+	DQ	OFFSET submul			;; 2 = submul
+	DQ	OFFSET muladd			;; 3 = muladd
+	DQ	OFFSET mulsub			;; 4 = mulsub
+	DQ	OFFSET unfft			;; 5 = unfft
+	DQ	OFFSET addmul312		;; 6 = addmul FFTval mem1 mem2
+	DQ	OFFSET addmul313		;; 7 = addmul FFTval mem1 FFTval
+	DQ	OFFSET addmul132		;; 8 = addmul mem1 FFTval mem2
+	DQ	OFFSET addmul133		;; 9 = addmul mem1 FFTval FFTval
+	DQ	OFFSET submul312		;; 10 = submul FFTval mem1 mem2
+	DQ	OFFSET submul313		;; 11 = submul FFTval mem1 FFTval
+	DQ	OFFSET submul132		;; 12 = submul mem1 FFTval mem2
+	DQ	OFFSET submul133		;; 13 = submul mem1 FFTval FFTval
+
+addmul:	vmovapd	ymm1, [srcreg][rbp]		;; MemR1
+	vaddpd	ymm1, ymm1, [srcreg][r9]	;; MemR1
 	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
-	vaddpd	ymm10, ymm10, [srcreg+32][r9]	;; MemR1
-	vmulpd	ymm5, ymm8, ymm9		;; R1 * MemR1			; 12-16
+	vaddpd	ymm10, ymm10, [srcreg+32][r9]	;; MemI1
+	vmulpd	ymm5, ymm8, ymm1		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
 	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
-	vmulpd	ymm3, ymm3, ymm9		;; I1 * MemR1			; 15-19
+	vmulpd	ymm3, ymm3, ymm1		;; I1 * MemR1			; 15-19
 
 	vmovapd	ymm10, [srcreg+d1][rbp]		;; MemR2
 	vaddpd	ymm10, ymm10, [srcreg+d1][r9]	;; MemR2
 	vmovapd	ymm12, [srcreg+d1+32][rbp]	;; MemI2
 	vaddpd	ymm12, ymm12, [srcreg+d1+32][r9];; MemI2
-
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
 
 	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
 	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
@@ -5276,58 +5351,37 @@ addmul:
 
 	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
 	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
-
 	jmp	done
 
-addmulsave:
-	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
-	vaddpd	ymm9, ymm9, [srcreg][r9]	;; MemR1
-	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
-	vaddpd	ymm10, ymm10, [srcreg+32][r9]	;; MemR1
-	ystore	[srcreg], ymm8			;; R1
-	vmulpd	ymm5, ymm8, ymm9		;; R1 * MemR1			; 12-16
+addmul133:
+addmul313:
+	vaddpd	ymm1, ymm8, [srcreg][rbp]	;; R1+MemR1
+	vaddpd	ymm10, ymm3, [srcreg+32][rbp]	;; I1+MemI1
+	vmulpd	ymm5, ymm8, ymm1		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
-	ystore	[srcreg+32], ymm3		;; I1
 	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
-	vmulpd	ymm3, ymm3, ymm9		;; I1 * MemR1			; 15-19
+	vmulpd	ymm3, ymm3, ymm1		;; I1 * MemR1			; 15-19
 
-	vmovapd	ymm10, [srcreg+d1][rbp]		;; MemR2
-	vaddpd	ymm10, ymm10, [srcreg+d1][r9]	;; MemR2
-	vmovapd	ymm12, [srcreg+d1+32][rbp]	;; MemI2
-	vaddpd	ymm12, ymm12, [srcreg+d1+32][r9];; MemI2
-
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
-
-	ystore	[srcreg+d1], ymm2		;; R2
+	vaddpd	ymm10, ymm2, [srcreg+d1][rbp]	;; R2+MemR2
+	vaddpd	ymm12, ymm6, [srcreg+d1+32][rbp];; I2+MemI2
 	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
 	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
-	ystore	[srcreg+d1+32], ymm6		;; I2
 	vmulpd	ymm13, ymm6, ymm12		;; I2 * MemI2			; 18-22
 	vmulpd	ymm6, ymm6, ymm10		;; I2 * MemR2			; 19-23
 
-	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
-	vaddpd	ymm10, ymm10, [srcreg+d2][r9]	;; MemR3
-	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
-	vaddpd	ymm12, ymm12, [srcreg+d2+32][r9];; MemI3
+	vaddpd	ymm10, ymm7, [srcreg+d2][rbp]	;; R3+MemR3
+	vaddpd	ymm12, ymm9, [srcreg+d2+32][rbp];; I3+MemI3
 
 	vsubpd	ymm5, ymm5, ymm11		;; R1*MemR1-I1*MemI1 (new R1)	; 19-21
 	vaddpd	ymm8, ymm8, ymm3		;; R1*MemI1+I1*MemR1 (new I1)	; 20-22
 
-	ystore	[srcreg+d2], ymm7		;; R3
 	vmulpd	ymm3, ymm7, ymm10		;; R3 * MemR3			; 20-24
 	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 21-25
-	ystore	[srcreg+d2+32], ymm9		;; I3
 	vmulpd	ymm11, ymm9, ymm12		;; I3 * MemI3			; 22-26
 	vmulpd	ymm9, ymm9, ymm10		;; I3 * MemR3			; 23-27
 
-	vmovapd	ymm10, [srcreg+d2+d1][rbp]	;; MemR4
-	vaddpd	ymm10, ymm10, [srcreg+d2+d1][r9];; MemR4
-	vmovapd	ymm12, [srcreg+d2+d1+32][rbp]	;; MemI4
-	vaddpd	ymm12, ymm12, [srcreg+d2+d1+32][r9];; MemI4
-
-	ystore	[srcreg+d2+d1], ymm0		;; R4
-	ystore	[srcreg+d2+d1+32], ymm4		;; I4
+	vaddpd	ymm10, ymm0, [srcreg+d2+d1][rbp];; R4+MemR4
+	vaddpd	ymm12, ymm4, [srcreg+d2+d1+32][rbp];; I4+MemI4
 
 	vsubpd	ymm1, ymm1, ymm13		;; R2*MemR2-I2*MemI2 (new R2)	; 23-25
 	vaddpd	ymm2, ymm2, ymm6		;; R2*MemI2+I2*MemR2 (new I2)	; 24-26
@@ -5345,26 +5399,77 @@ addmulsave:
 
 	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
 	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
-
 	jmp	done
 
-submul:
-	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
-	vsubpd	ymm9, ymm9, [srcreg][r9]	;; MemR1
-	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
-	vsubpd	ymm10, ymm10, [srcreg+32][r9]	;; MemR1
-	vmulpd	ymm5, ymm8, ymm9		;; R1 * MemR1			; 12-16
+addmul132:
+addmul312:
+	vaddpd	ymm1, ymm8, [srcreg][rbp]	;; R1+MemR1
+	vmovapd	ymm8, [srcreg][r9]		;; R1=MemR1
+	vaddpd	ymm10, ymm3, [srcreg+32][rbp]	;; I1+MemI1
+	vmovapd	ymm3, [srcreg+32][r9]		;; I1=MemI1
+	vmulpd	ymm5, ymm8, ymm1		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
 	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
-	vmulpd	ymm3, ymm3, ymm9		;; I1 * MemR1			; 15-19
+	vmulpd	ymm3, ymm3, ymm1		;; I1 * MemR1			; 15-19
+
+	vaddpd	ymm10, ymm2, [srcreg+d1][rbp]	;; R2+MemR2
+	vmovapd	ymm2, [srcreg+d1][r9]		;; R2=MemR2
+	vaddpd	ymm12, ymm6, [srcreg+d1+32][rbp];; I2+MemI2
+	vmovapd	ymm6, [srcreg+d1+32][r9]	;; I2=MemI2
+	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
+	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
+	vmulpd	ymm13, ymm6, ymm12		;; I2 * MemI2			; 18-22
+	vmulpd	ymm6, ymm6, ymm10		;; I2 * MemR2			; 19-23
+
+	vaddpd	ymm10, ymm7, [srcreg+d2][rbp]	;; R3+MemR3
+	vmovapd	ymm7, [srcreg+d2][r9]		;; R3=MemR3
+	vaddpd	ymm12, ymm9, [srcreg+d2+32][rbp];; I3+MemI3
+	vmovapd	ymm9, [srcreg+d2+32][r9]	;; I3=MemI3
+
+	vsubpd	ymm5, ymm5, ymm11		;; R1*MemR1-I1*MemI1 (new R1)	; 19-21
+	vaddpd	ymm8, ymm8, ymm3		;; R1*MemI1+I1*MemR1 (new I1)	; 20-22
+
+	vmulpd	ymm3, ymm7, ymm10		;; R3 * MemR3			; 20-24
+	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 21-25
+	vmulpd	ymm11, ymm9, ymm12		;; I3 * MemI3			; 22-26
+	vmulpd	ymm9, ymm9, ymm10		;; I3 * MemR3			; 23-27
+
+	vaddpd	ymm10, ymm0, [srcreg+d2+d1][rbp];; R4+MemR4
+	vmovapd	ymm0, [srcreg+d2+d1][r9]	;; R4=MemR4
+	vaddpd	ymm12, ymm4, [srcreg+d2+d1+32][rbp];; I4+MemI4
+	vmovapd	ymm4, [srcreg+d2+d1+32][r9]	;; I4=MemI4
+
+	vsubpd	ymm1, ymm1, ymm13		;; R2*MemR2-I2*MemI2 (new R2)	; 23-25
+	vaddpd	ymm2, ymm2, ymm6		;; R2*MemI2+I2*MemR2 (new I2)	; 24-26
+
+	vmulpd	ymm6, ymm0, ymm10		;; R4 * MemR4			; 24-28
+	vmulpd	ymm0, ymm0, ymm12		;; R4 * MemI4			; 25-29
+	vmulpd	ymm13, ymm4, ymm12		;; I4 * MemI4			; 26-30
+	vmulpd	ymm4, ymm4, ymm10		;; I4 * MemR4			; 27-31
+
+	vaddpd	ymm10, ymm5, ymm1		;; R1 + R2 (new R1)		; 26-28
+	vsubpd	ymm5, ymm5, ymm1		;; R1 - R2 (new R2)		; 27-29
+
+	vsubpd	ymm3, ymm3, ymm11		;; R3*MemR3-I3*MemI3 (new R3)	; 28-30
+	vaddpd	ymm7, ymm7, ymm9		;; R3*MemI3+I3*MemR3 (new I3)	; 29-31
+
+	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
+	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
+	jmp	done
+
+submul:	vmovapd	ymm1, [srcreg][rbp]		;; MemR1
+	vsubpd	ymm1, ymm1, [srcreg][r9]	;; MemR1
+	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
+	vsubpd	ymm10, ymm10, [srcreg+32][r9]	;; MemR1
+	vmulpd	ymm5, ymm8, ymm1		;; R1 * MemR1			; 12-16
+	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
+	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
+	vmulpd	ymm3, ymm3, ymm1		;; I1 * MemR1			; 15-19
 
 	vmovapd	ymm10, [srcreg+d1][rbp]		;; MemR2
 	vsubpd	ymm10, ymm10, [srcreg+d1][r9]	;; MemR2
 	vmovapd	ymm12, [srcreg+d1+32][rbp]	;; MemI2
 	vsubpd	ymm12, ymm12, [srcreg+d1+32][r9];; MemI2
-
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
 
 	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
 	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
@@ -5405,58 +5510,44 @@ submul:
 
 	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
 	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
-
 	jmp	done
 
-submulsave:
-	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
-	vsubpd	ymm9, ymm9, [srcreg][r9]	;; MemR1
+submul133:
+	vmovapd	ymm1, [srcreg][rbp]		;; MemR1
+	vsubpd	ymm1, ymm1, ymm8		;; MemR1-R1
 	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
-	vsubpd	ymm10, ymm10, [srcreg+32][r9]	;; MemR1
-	ystore	[srcreg], ymm8			;; R1
-	vmulpd	ymm5, ymm8, ymm9		;; R1 * MemR1			; 12-16
+	vsubpd	ymm10, ymm10, ymm3		;; MemI1-I1
+	vmulpd	ymm5, ymm8, ymm1		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
-	ystore	[srcreg+32], ymm3		;; I1
 	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
-	vmulpd	ymm3, ymm3, ymm9		;; I1 * MemR1			; 15-19
+	vmulpd	ymm3, ymm3, ymm1		;; I1 * MemR1			; 15-19
 
 	vmovapd	ymm10, [srcreg+d1][rbp]		;; MemR2
-	vsubpd	ymm10, ymm10, [srcreg+d1][r9]	;; MemR2
+	vsubpd	ymm10, ymm10, ymm2		;; MemR2-R2
 	vmovapd	ymm12, [srcreg+d1+32][rbp]	;; MemI2
-	vsubpd	ymm12, ymm12, [srcreg+d1+32][r9];; MemI2
-
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
-
-	ystore	[srcreg+d1], ymm2		;; R2
+	vsubpd	ymm12, ymm12, ymm6		;; MemI2-I2
 	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
 	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
-	ystore	[srcreg+d1+32], ymm6		;; I2
 	vmulpd	ymm13, ymm6, ymm12		;; I2 * MemI2			; 18-22
 	vmulpd	ymm6, ymm6, ymm10		;; I2 * MemR2			; 19-23
 
 	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
-	vsubpd	ymm10, ymm10, [srcreg+d2][r9]	;; MemR3
+	vsubpd	ymm10, ymm10, ymm7		;; MemR3-R3
 	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
-	vsubpd	ymm12, ymm12, [srcreg+d2+32][r9];; MemI3
+	vsubpd	ymm12, ymm12, ymm9		;; MemI3-I3
 
 	vsubpd	ymm5, ymm5, ymm11		;; R1*MemR1-I1*MemI1 (new R1)	; 19-21
 	vaddpd	ymm8, ymm8, ymm3		;; R1*MemI1+I1*MemR1 (new I1)	; 20-22
 
-	ystore	[srcreg+d2], ymm7		;; R3
 	vmulpd	ymm3, ymm7, ymm10		;; R3 * MemR3			; 20-24
 	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 21-25
-	ystore	[srcreg+d2+32], ymm9		;; I3
 	vmulpd	ymm11, ymm9, ymm12		;; I3 * MemI3			; 22-26
 	vmulpd	ymm9, ymm9, ymm10		;; I3 * MemR3			; 23-27
 
 	vmovapd	ymm10, [srcreg+d2+d1][rbp]	;; MemR4
-	vsubpd	ymm10, ymm10, [srcreg+d2+d1][r9];; MemR4
+	vsubpd	ymm10, ymm10, ymm0		;; MemR4-R4
 	vmovapd	ymm12, [srcreg+d2+d1+32][rbp]	;; MemI4
-	vsubpd	ymm12, ymm12, [srcreg+d2+d1+32][r9];; MemI4
-
-	ystore	[srcreg+d2+d1], ymm0		;; R4
-	ystore	[srcreg+d2+d1+32], ymm4		;; I4
+	vsubpd	ymm12, ymm12, ymm4		;; MemI4-I4
 
 	vsubpd	ymm1, ymm1, ymm13		;; R2*MemR2-I2*MemI2 (new R2)	; 23-25
 	vaddpd	ymm2, ymm2, ymm6		;; R2*MemI2+I2*MemR2 (new I2)	; 24-26
@@ -5474,13 +5565,172 @@ submulsave:
 
 	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
 	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
-
 	jmp	done
 
-fma_or_unfft:
-	cmp	r10, 4				;; Case off opcode
-	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
-	;;ja	unfft				;; 5=unfft
+submul313:
+	vsubpd	ymm1, ymm8, [srcreg][rbp]	;; R1-MemR1
+	vsubpd	ymm10, ymm3, [srcreg+32][rbp]	;; I1-MemI1
+	vmulpd	ymm5, ymm8, ymm1		;; R1 * MemR1			; 12-16
+	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
+	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
+	vmulpd	ymm3, ymm3, ymm1		;; I1 * MemR1			; 15-19
+
+	vsubpd	ymm10, ymm2, [srcreg+d1][rbp]	;; R2-MemR2
+	vsubpd	ymm12, ymm6, [srcreg+d1+32][rbp];; I2-MemI2
+	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
+	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
+	vmulpd	ymm13, ymm6, ymm12		;; I2 * MemI2			; 18-22
+	vmulpd	ymm6, ymm6, ymm10		;; I2 * MemR2			; 19-23
+
+	vsubpd	ymm10, ymm7, [srcreg+d2][rbp]	;; R3-MemR3
+	vsubpd	ymm12, ymm9, [srcreg+d2+32][rbp];; I3-MemI3
+
+	vsubpd	ymm5, ymm5, ymm11		;; R1*MemR1-I1*MemI1 (new R1)	; 19-21
+	vaddpd	ymm8, ymm8, ymm3		;; R1*MemI1+I1*MemR1 (new I1)	; 20-22
+
+	vmulpd	ymm3, ymm7, ymm10		;; R3 * MemR3			; 20-24
+	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 21-25
+	vmulpd	ymm11, ymm9, ymm12		;; I3 * MemI3			; 22-26
+	vmulpd	ymm9, ymm9, ymm10		;; I3 * MemR3			; 23-27
+
+	vsubpd	ymm10, ymm0, [srcreg+d2+d1][rbp];; R4-MemR4
+	vsubpd	ymm12, ymm4, [srcreg+d2+d1+32][rbp];; I4-MemI4
+
+	vsubpd	ymm1, ymm1, ymm13		;; R2*MemR2-I2*MemI2 (new R2)	; 23-25
+	vaddpd	ymm2, ymm2, ymm6		;; R2*MemI2+I2*MemR2 (new I2)	; 24-26
+
+	vmulpd	ymm6, ymm0, ymm10		;; R4 * MemR4			; 24-28
+	vmulpd	ymm0, ymm0, ymm12		;; R4 * MemI4			; 25-29
+	vmulpd	ymm13, ymm4, ymm12		;; I4 * MemI4			; 26-30
+	vmulpd	ymm4, ymm4, ymm10		;; I4 * MemR4			; 27-31
+
+	vaddpd	ymm10, ymm5, ymm1		;; R1 + R2 (new R1)		; 26-28
+	vsubpd	ymm5, ymm5, ymm1		;; R1 - R2 (new R2)		; 27-29
+
+	vsubpd	ymm3, ymm3, ymm11		;; R3*MemR3-I3*MemI3 (new R3)	; 28-30
+	vaddpd	ymm7, ymm7, ymm9		;; R3*MemI3+I3*MemR3 (new I3)	; 29-31
+
+	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
+	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
+	jmp	done
+
+submul132:
+	vmovapd	ymm1, [srcreg][rbp]		;; MemR1
+	vsubpd	ymm1, ymm1, ymm8		;; MemR1-R1
+	vmovapd	ymm8, [srcreg][r9]		;; R1=MemR1
+	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
+	vsubpd	ymm10, ymm10, ymm3		;; MemI1-I1
+	vmovapd	ymm3, [srcreg+32][r9]		;; I1=MemI1
+	vmulpd	ymm5, ymm8, ymm1		;; R1 * MemR1			; 12-16
+	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
+	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
+	vmulpd	ymm3, ymm3, ymm1		;; I1 * MemR1			; 15-19
+
+	vmovapd	ymm10, [srcreg+d1][rbp]		;; MemR2
+	vsubpd	ymm10, ymm10, ymm2		;; MemR2-R2
+	vmovapd	ymm2, [srcreg+d1][r9]		;; R2=MemR2
+	vmovapd	ymm12, [srcreg+d1+32][rbp]	;; MemI2
+	vsubpd	ymm12, ymm12, ymm6		;; MemI2-I2
+	vmovapd	ymm6, [srcreg+d1+32][r9]	;; I2=MemI2
+	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
+	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
+	vmulpd	ymm13, ymm6, ymm12		;; I2 * MemI2			; 18-22
+	vmulpd	ymm6, ymm6, ymm10		;; I2 * MemR2			; 19-23
+
+	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
+	vsubpd	ymm10, ymm10, ymm7		;; MemR3-R3
+	vmovapd	ymm7, [srcreg+d2][r9]		;; R3=MemR3
+	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
+	vsubpd	ymm12, ymm12, ymm9		;; MemI3-I3
+	vmovapd	ymm9, [srcreg+d2+32][r9]	;; I3=MemI3
+
+	vsubpd	ymm5, ymm5, ymm11		;; R1*MemR1-I1*MemI1 (new R1)	; 19-21
+	vaddpd	ymm8, ymm8, ymm3		;; R1*MemI1+I1*MemR1 (new I1)	; 20-22
+
+	vmulpd	ymm3, ymm7, ymm10		;; R3 * MemR3			; 20-24
+	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 21-25
+	vmulpd	ymm11, ymm9, ymm12		;; I3 * MemI3			; 22-26
+	vmulpd	ymm9, ymm9, ymm10		;; I3 * MemR3			; 23-27
+
+	vmovapd	ymm10, [srcreg+d2+d1][rbp]	;; MemR4
+	vsubpd	ymm10, ymm10, ymm0		;; MemR4-R4
+	vmovapd	ymm0, [srcreg+d2+d1][r9]	;; R4=MemR4
+	vmovapd	ymm12, [srcreg+d2+d1+32][rbp]	;; MemI4
+	vsubpd	ymm12, ymm12, ymm4		;; MemI4-I4
+	vmovapd	ymm4, [srcreg+d2+d1+32][r9]	;; I4=MemI4
+
+	vsubpd	ymm1, ymm1, ymm13		;; R2*MemR2-I2*MemI2 (new R2)	; 23-25
+	vaddpd	ymm2, ymm2, ymm6		;; R2*MemI2+I2*MemR2 (new I2)	; 24-26
+
+	vmulpd	ymm6, ymm0, ymm10		;; R4 * MemR4			; 24-28
+	vmulpd	ymm0, ymm0, ymm12		;; R4 * MemI4			; 25-29
+	vmulpd	ymm13, ymm4, ymm12		;; I4 * MemI4			; 26-30
+	vmulpd	ymm4, ymm4, ymm10		;; I4 * MemR4			; 27-31
+
+	vaddpd	ymm10, ymm5, ymm1		;; R1 + R2 (new R1)		; 26-28
+	vsubpd	ymm5, ymm5, ymm1		;; R1 - R2 (new R2)		; 27-29
+
+	vsubpd	ymm3, ymm3, ymm11		;; R3*MemR3-I3*MemI3 (new R3)	; 28-30
+	vaddpd	ymm7, ymm7, ymm9		;; R3*MemI3+I3*MemR3 (new I3)	; 29-31
+
+	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
+	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
+	jmp	done
+
+submul312:
+	vsubpd	ymm1, ymm8, [srcreg][rbp]	;; R1-MemR1
+	vmovapd	ymm8, [srcreg][r9]		;; R1=MemR1
+	vsubpd	ymm10, ymm3, [srcreg+32][rbp]	;; I1-MemI1
+	vmovapd	ymm3, [srcreg+32][r9]		;; I1=MemI1
+	vmulpd	ymm5, ymm8, ymm1		;; R1 * MemR1			; 12-16
+	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
+	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
+	vmulpd	ymm3, ymm3, ymm1		;; I1 * MemR1			; 15-19
+
+	vsubpd	ymm10, ymm2, [srcreg+d1][rbp]	;; R2-MemR2
+	vmovapd	ymm2, [srcreg+d1][r9]		;; R2=MemR2
+	vsubpd	ymm12, ymm6, [srcreg+d1+32][rbp];; I2-MemI2
+	vmovapd	ymm6, [srcreg+d1+32][r9]	;; I2=MemI2
+	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
+	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
+	vmulpd	ymm13, ymm6, ymm12		;; I2 * MemI2			; 18-22
+	vmulpd	ymm6, ymm6, ymm10		;; I2 * MemR2			; 19-23
+
+	vsubpd	ymm10, ymm7, [srcreg+d2][rbp]	;; R3-MemR3
+	vmovapd	ymm7, [srcreg+d2][r9]		;; R3=MemR3
+	vsubpd	ymm12, ymm9, [srcreg+d2+32][rbp];; I3-MemI3
+	vmovapd	ymm9, [srcreg+d2+32][r9]	;; I3=MemI3
+
+	vsubpd	ymm5, ymm5, ymm11		;; R1*MemR1-I1*MemI1 (new R1)	; 19-21
+	vaddpd	ymm8, ymm8, ymm3		;; R1*MemI1+I1*MemR1 (new I1)	; 20-22
+
+	vmulpd	ymm3, ymm7, ymm10		;; R3 * MemR3			; 20-24
+	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 21-25
+	vmulpd	ymm11, ymm9, ymm12		;; I3 * MemI3			; 22-26
+	vmulpd	ymm9, ymm9, ymm10		;; I3 * MemR3			; 23-27
+
+	vsubpd	ymm10, ymm0, [srcreg+d2+d1][rbp];; R4-MemR4
+	vmovapd	ymm0, [srcreg+d2+d1][r9]	;; R4=MemR4
+	vsubpd	ymm12, ymm4, [srcreg+d2+d1+32][rbp];; I4-MemI4
+	vmovapd	ymm4, [srcreg+d2+d1+32][r9]	;; I4=MemI4
+
+	vsubpd	ymm1, ymm1, ymm13		;; R2*MemR2-I2*MemI2 (new R2)	; 23-25
+	vaddpd	ymm2, ymm2, ymm6		;; R2*MemI2+I2*MemR2 (new I2)	; 24-26
+
+	vmulpd	ymm6, ymm0, ymm10		;; R4 * MemR4			; 24-28
+	vmulpd	ymm0, ymm0, ymm12		;; R4 * MemI4			; 25-29
+	vmulpd	ymm13, ymm4, ymm12		;; I4 * MemI4			; 26-30
+	vmulpd	ymm4, ymm4, ymm10		;; I4 * MemR4			; 27-31
+
+	vaddpd	ymm10, ymm5, ymm1		;; R1 + R2 (new R1)		; 26-28
+	vsubpd	ymm5, ymm5, ymm1		;; R1 - R2 (new R2)		; 27-29
+
+	vsubpd	ymm3, ymm3, ymm11		;; R3*MemR3-I3*MemI3 (new R3)	; 28-30
+	vaddpd	ymm7, ymm7, ymm9		;; R3*MemI3+I3*MemR3 (new I3)	; 29-31
+
+	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
+	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
+	jmp	done
 
 unfft:	vaddpd	ymm10, ymm8, ymm2		;; R1 + R2 (new R1)		; 26-28
 	vsubpd	ymm5, ymm8, ymm2		;; R1 - R2 (new R2)		; 27-29
@@ -5488,22 +5738,19 @@ unfft:	vaddpd	ymm10, ymm8, ymm2		;; R1 + R2 (new R1)		; 26-28
 	vmovapd ymm2, ymm6			;; I2
 	vmovapd ymm3, ymm7			;; R3
 	vmovapd ymm6, ymm0			;; R4
-	vaddpd	ymm7, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm0, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+	vmovapd	ymm7, ymm9			;; I3
+	vmovapd	ymm0, ymm4			;; I4
 	jmp	done
 
-fma:	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
+muladd:	vmovapd	ymm1, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
-	vmulpd	ymm5, ymm8, ymm9		;; R1 * MemR1			; 12-16
+	vmulpd	ymm5, ymm8, ymm1		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
 	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
-	vmulpd	ymm3, ymm3, ymm9		;; I1 * MemR1			; 15-19
+	vmulpd	ymm3, ymm3, ymm1		;; I1 * MemR1			; 15-19
 
 	vmovapd	ymm10, [srcreg+d1][rbp]		;; MemR2
 	vmovapd	ymm12, [srcreg+d1+32][rbp]	;; MemI2
-
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
 
 	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
 	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
@@ -5539,11 +5786,8 @@ fma:	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
 	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
 
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	je	mulsub				;; 4=mulsub
-	;jb	muladd				;; 3=muladd, fall through
-
-muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	muladdhard			;; Yes, do it the hard way
+	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	muladdhard			;; Yes, do it the hard way
 
 	vaddpd	ymm5, ymm5, [srcreg+r9]			;; R1 = R1 + MemR1
 	vaddpd	ymm8, ymm8, [srcreg+r9+32]		;; I1 = I1 + MemI1
@@ -5556,7 +5800,6 @@ muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 
 	vaddpd	ymm10, ymm5, ymm1		;; R1 + R2 (new R1)		; 26-28
 	vsubpd	ymm5, ymm5, ymm1		;; R1 - R2 (new R2)		; 27-29
-
 	jmp	done
 
 muladdhard:
@@ -5614,29 +5857,20 @@ muladdhard:
 
 	vaddpd	ymm10, ymm5, ymm1		;; R1 + R2 (new R1)		; 26-28
 	vsubpd	ymm5, ymm5, ymm1		;; R1 - R2 (new R2)		; 27-29
-
 	jmp	done
 
-fmasave:
-	vmovapd	ymm9, [srcreg][rbp]		;; MemR1
+mulsub:	vmovapd	ymm1, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm10, [srcreg+32][rbp]		;; MemI1
-	ystore	[srcreg], ymm8			;; R1
-	vmulpd	ymm5, ymm8, ymm9		;; R1 * MemR1			; 12-16
+	vmulpd	ymm5, ymm8, ymm1		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm10		;; R1 * MemI1			; 13-17
-	ystore	[srcreg+32], ymm3		;; I1
 	vmulpd	ymm11, ymm3, ymm10		;; I1 * MemI1			; 14-18
-	vmulpd	ymm3, ymm3, ymm9		;; I1 * MemR1			; 15-19
+	vmulpd	ymm3, ymm3, ymm1		;; I1 * MemR1			; 15-19
 
 	vmovapd	ymm10, [srcreg+d1][rbp]		;; MemR2
 	vmovapd	ymm12, [srcreg+d1+32][rbp]	;; MemI2
 
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
-
-	ystore	[srcreg+d1], ymm2		;; R2
 	vmulpd	ymm1, ymm2, ymm10		;; R2 * MemR2			; 16-20
 	vmulpd	ymm2, ymm2, ymm12		;; R2 * MemI2			; 17-21
-	ystore	[srcreg+d1+32], ymm6		;; I2
 	vmulpd	ymm13, ymm6, ymm12		;; I2 * MemI2			; 18-22
 	vmulpd	ymm6, ymm6, ymm10		;; I2 * MemR2			; 19-23
 
@@ -5646,18 +5880,13 @@ fmasave:
 	vsubpd	ymm5, ymm5, ymm11		;; R1*MemR1-I1*MemI1 (new R1)	; 19-21
 	vaddpd	ymm8, ymm8, ymm3		;; R1*MemI1+I1*MemR1 (new I1)	; 20-22
 
-	ystore	[srcreg+d2], ymm7		;; R3
 	vmulpd	ymm3, ymm7, ymm10		;; R3 * MemR3			; 20-24
 	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 21-25
-	ystore	[srcreg+d2+32], ymm9		;; I3
 	vmulpd	ymm11, ymm9, ymm12		;; I3 * MemI3			; 22-26
 	vmulpd	ymm9, ymm9, ymm10		;; I3 * MemR3			; 23-27
 
 	vmovapd	ymm10, [srcreg+d2+d1][rbp]	;; MemR4
 	vmovapd	ymm12, [srcreg+d2+d1+32][rbp]	;; MemI4
-
-	ystore	[srcreg+d2+d1], ymm0		;; R4
-	ystore	[srcreg+d2+d1+32], ymm4		;; I4
 
 	vsubpd	ymm1, ymm1, ymm13		;; R2*MemR2-I2*MemI2 (new R2)	; 23-25
 	vaddpd	ymm2, ymm2, ymm6		;; R2*MemI2+I2*MemR2 (new I2)	; 24-26
@@ -5673,13 +5902,9 @@ fmasave:
 	vsubpd	ymm6, ymm6, ymm13		;; R4*MemR4-I4*MemI4 (new R4)	; 31-33
 	vaddpd	ymm0, ymm0, ymm4		;; R4*MemI4+I4*MemR4 (new I4)	; 32-34
 
-	cmp	r10, 84h			;; Case off opcode
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	jb	muladd				;; 83=muladd
-	;;je	mulsub				;; 84=mulsub
-
-mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	mulsubhard			;; Yes, do it the hard way
+	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	mulsubhard			;; Yes, do it the hard way
 
 	vsubpd	ymm5, ymm5, [srcreg+r9]			;; R1 = R1 - MemR1
 	vsubpd	ymm8, ymm8, [srcreg+r9+32]		;; I1 = I1 - MemI1
@@ -5692,7 +5917,6 @@ mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 
 	vaddpd	ymm10, ymm5, ymm1		;; R1 + R2 (new R1)		; 26-28
 	vsubpd	ymm5, ymm5, ymm1		;; R1 - R2 (new R2)		; 27-29
-
 	jmp	done
 
 mulsubhard:
@@ -5872,22 +6096,57 @@ back_to_orig:
 ;; Same as above code between orig and back_to_orig, except we implement mul4_opcode options
 
 yr4_4c_mult_opcode MACRO srcreg,d1,d2
-	LOCAL	fma_or_unfft, fma, fmasave, addmul, addmulsave, submul, submulsave, muladd, muladdhard, mulsub, mulsubhard, unfft, done
+	LOCAL	mulsave, fftsave, nofftsave, dispatch, disptab, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft, done
+	LOCAL	addmul312, addmul313, addmul132, addmul133, submul312, submul313, submul132, submul133
 
-	movzx	r10, mul4_opcode		;; Load the mul4_opcode
-	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
-	cmp	r10, 2				;; Test the mul4_opcode (part 1)
-	jb	addmul				;; opcode == 1, addmul
-	je	submul				;; opcode == 2, submul
-	cmp	r10, 82h			;; Test the mul4_opcode (part 2)
-	ja	fmasave				;; opcode == 0x83,0x84, muladd,mulsub with FFT save
-	je	submulsave			;; opcode == 0x82, submul with FFT save
-	cmp	r10, 80h			;; Test the mul4_opcode (part 3)
-	ja	addmulsave			;; opcode == 0x81, addmul with FFT save
-	jb	fma_or_unfft			;; opcode == 3,4,5 muladd,mulsub,unfft
+	movzx	r10, mul4_opcode		;; Load opcode
+	cmp	r10, 80h			;; Test for FFT save
+	ja	fftsave				;; opcode > 0x80, addmul,submul,muladd,mulsub,unfft with FFT save
+	jb	nofftsave			;; opcode < 0x80, addmul,submul,muladd,mulsub,unfft without FFT save
 						;; opcode == 0x80, plain mul with FFT save, fall through
 
-	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
+	;; Squaring with FFT save is handled here! 
+	test	rbp, rbp			;; If rbp is zero, this is a squaring
+	jnz	mulsave
+
+	ystore	[srcreg], ymm8			;; R1
+	vmulpd	ymm5, ymm8, ymm8		;; R1 * R1			; 12-16
+	vmulpd	ymm8, ymm8, ymm3		;; R1 * I1			; 13-17
+
+	ystore	[srcreg+d1], ymm2		;; R2
+	vmulpd	ymm14, ymm2, ymm2		;; R2 * R2			; 14-18
+	vmulpd	ymm2, ymm2, ymm6		;; R2 * I2			; 15-19
+
+	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
+	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+
+	ystore	[srcreg+32], ymm3		;; I1
+	yfnmaddpd ymm5, ymm3, ymm3, ymm5	;; R1*R1-I1*I1 (new R1)		; 17-21
+	vaddpd	ymm8, ymm8, ymm8		;; 2*R1*I1 (new I1)		; 18-22
+
+	ystore	[srcreg+d2], ymm7		;; R3
+	vmulpd	ymm1, ymm7, ymm7		;; R3 * R3			; 16-20
+	vmulpd	ymm7, ymm7, ymm9		;; R3 * I3			; 17-21
+
+	ystore	[srcreg+d1+32], ymm6		;; I2
+	yfnmaddpd ymm14, ymm6, ymm6, ymm14	;; R2*R2-I2*I2 (new R2)		; 19-23
+	vaddpd	ymm2, ymm2, ymm2		;; 2*R2*I2 (new I2)		; 20-24
+
+	ystore	[srcreg+d2+32], ymm9		;; I3
+	ystore	[srcreg+d2+d1], ymm0		;; R4
+	ystore	[srcreg+d2+d1+32], ymm4		;; I4
+
+	vmulpd	ymm3, ymm0, ymm0		;; R4 * R4			; 18-22
+	vmulpd	ymm0, ymm0, ymm4		;; R4 * I4			; 19-23
+
+	yfnmaddpd ymm1, ymm9, ymm9, ymm1	;; R3*R3-I3*I3 (new R3)		; 21-25
+	vaddpd	ymm7, ymm7, ymm7		;; 2*R3*I3 (new I3)		; 22-26
+
+	yfnmaddpd ymm3, ymm4, ymm4, ymm3	;; R4*R4-I4*I4 (new R4)		; 23-27
+	vaddpd	ymm0, ymm0, ymm0		;; 2*R4*I4 (new I4)		; 24-28
+	jmp	done
+
+mulsave:vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
 	ystore	[srcreg], ymm8			;; R1
 	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
@@ -5931,11 +6190,46 @@ yr4_4c_mult_opcode MACRO srcreg,d1,d2
 
 	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
 	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
-
 	jmp	done
 
-addmul:
-	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
+fftsave:ystore	[srcreg], ymm8			;; R1
+	ystore	[srcreg+d1], ymm2		;; R2
+	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
+	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+	ystore	[srcreg+32], ymm3		;; I1
+	ystore	[srcreg+d2], ymm7		;; R3
+	ystore	[srcreg+d1+32], ymm6		;; I2
+	ystore	[srcreg+d2+32], ymm9		;; I3
+	ystore	[srcreg+d2+d1], ymm0		;; R4
+	ystore	[srcreg+d2+d1+32], ymm4		;; I4
+	and	r10, 7fh			;; Strip the fft save bit from mul4_opcode
+	jmp	short dispatch			
+
+nofftsave:
+	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
+	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+
+dispatch:
+	mov	r9, OFFSET disptab		;; Jump table address
+	mov	r10, [r9+r10*8-8]		;; Jump table offset
+	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
+	jmp	r10
+disptab:
+	DQ	OFFSET addmul			;; 1 = addmul
+	DQ	OFFSET submul			;; 2 = submul
+	DQ	OFFSET muladd			;; 3 = muladd
+	DQ	OFFSET mulsub			;; 4 = mulsub
+	DQ	OFFSET unfft			;; 5 = unfft
+	DQ	OFFSET addmul312		;; 6 = addmul FFTval mem1 mem2
+	DQ	OFFSET addmul313		;; 7 = addmul FFTval mem1 FFTval
+	DQ	OFFSET addmul132		;; 8 = addmul mem1 FFTval mem2
+	DQ	OFFSET addmul133		;; 9 = addmul mem1 FFTval FFTval
+	DQ	OFFSET submul312		;; 10 = submul FFTval mem1 mem2
+	DQ	OFFSET submul313		;; 11 = submul FFTval mem1 FFTval
+	DQ	OFFSET submul132		;; 12 = submul mem1 FFTval mem2
+	DQ	OFFSET submul133		;; 13 = submul mem1 FFTval FFTval
+
+addmul:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vaddpd	ymm10, ymm10, [srcreg][r9]	;; MemR1
 	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
 	vaddpd	ymm12, ymm12, [srcreg+32][r9]	;; MemI1
@@ -5948,9 +6242,6 @@ addmul:
 	vaddpd	ymm13, ymm13, [srcreg+d1+32][r9];; MemI2
 	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
 	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
-
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
 
 	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
 	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
@@ -5978,54 +6269,33 @@ addmul:
 
 	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
 	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
-
 	jmp	done
 
-addmulsave:
-	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
-	vaddpd	ymm10, ymm10, [srcreg][r9]	;; MemR1
-	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
-	vaddpd	ymm12, ymm12, [srcreg+32][r9]	;; MemI1
-	ystore	[srcreg], ymm8			;; R1
+addmul133:
+addmul313:
+	vaddpd	ymm10, ymm8, [srcreg][rbp]	;; R1+MemR1
+	vaddpd	ymm12, ymm3, [srcreg+32][rbp]	;; I1+MemI1
 	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
 
-	vmovapd	ymm11, [srcreg+d1][rbp]		;; MemR2
-	vaddpd	ymm11, ymm11, [srcreg+d1][r9]	;; MemR2
-	vmovapd	ymm13, [srcreg+d1+32][rbp]	;; MemI2
-	vaddpd	ymm13, ymm13, [srcreg+d1+32][r9];; MemI2
-	ystore	[srcreg+d1], ymm2		;; R2
+	vaddpd	ymm11, ymm2, [srcreg+d1][rbp]	;; R2+MemR2
+	vaddpd	ymm13, ymm6, [srcreg+d1+32][rbp];; I2+MemI2
 	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
 	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
 
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
-
-	ystore	[srcreg+32], ymm3		;; I1
 	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
 	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
 
-	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
-	vaddpd	ymm10, ymm10, [srcreg+d2][r9]	;; MemR3
-	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
-	vaddpd	ymm12, ymm12, [srcreg+d2+32][r9];; MemI3
-	ystore	[srcreg+d2], ymm7		;; R3
+	vaddpd	ymm10, ymm7, [srcreg+d2][rbp]	;; R3+MemR3
+	vaddpd	ymm12, ymm9, [srcreg+d2+32][rbp];; I3+MemI3
 	vmulpd	ymm1, ymm7, ymm10		;; R3 * MemR3			; 16-20
 	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 17-21
 
-	ystore	[srcreg+d1+32], ymm6		;; I2
 	yfnmaddpd ymm14, ymm6, ymm13, ymm14	;; R2*MemR2-I2*MemI2 (new R2)	; 19-23
 	yfmaddpd ymm2, ymm6, ymm11, ymm2	;; R2*MemI2+I2*MemR2 (new I2)	; 20-24
 
-	vmovapd	ymm11, [srcreg+d2+d1][rbp]	;; MemR4
-	vaddpd	ymm11, ymm11, [srcreg+d2+d1][r9];; MemR4
-	vmovapd	ymm13, [srcreg+d2+d1+32][rbp]	;; MemI4
-	vaddpd	ymm13, ymm13, [srcreg+d2+d1+32][r9];; MemI4
-
-	ystore	[srcreg+d2+32], ymm9		;; I3
-	ystore	[srcreg+d2+d1], ymm0		;; R4
-	ystore	[srcreg+d2+d1+32], ymm4		;; I4
-
+	vaddpd	ymm11, ymm0, [srcreg+d2+d1][rbp];; R4+MemR4
+	vaddpd	ymm13, ymm4, [srcreg+d2+d1+32][rbp];; I4+MemI4
 	vmulpd	ymm3, ymm0, ymm11		;; R4 * MemR4			; 18-22
 	vmulpd	ymm0, ymm0, ymm13		;; R4 * MemI4			; 19-23
 
@@ -6034,11 +6304,52 @@ addmulsave:
 
 	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
 	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
-
 	jmp	done
 
-submul:
-	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
+addmul132:
+addmul312:
+	vaddpd	ymm10, ymm8, [srcreg][rbp]	;; R1+MemR1
+	vmovapd	ymm8, [srcreg][r9]		;; R1=MemR1
+	vaddpd	ymm12, ymm3, [srcreg+32][rbp]	;; I1+MemI1
+	vmovapd	ymm3, [srcreg+32][r9]		;; I1=MemI1
+	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
+	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
+
+	vaddpd	ymm11, ymm2, [srcreg+d1][rbp]	;; R2+MemR2
+	vmovapd	ymm2, [srcreg+d1][r9]		;; R2=MemR2
+	vaddpd	ymm13, ymm6, [srcreg+d1+32][rbp];; I2+MemI2
+	vmovapd	ymm6, [srcreg+d1+32][r9]	;; I2=MemI2
+	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
+	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
+
+	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
+	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
+
+	vaddpd	ymm10, ymm7, [srcreg+d2][rbp]	;; R3+MemR3
+	vmovapd	ymm7, [srcreg+d2][r9]		;; R3=MemR3
+	vaddpd	ymm12, ymm9, [srcreg+d2+32][rbp];; I3+MemI3
+	vmovapd	ymm9, [srcreg+d2+32][r9]	;; I3=MemI3
+	vmulpd	ymm1, ymm7, ymm10		;; R3 * MemR3			; 16-20
+	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 17-21
+
+	yfnmaddpd ymm14, ymm6, ymm13, ymm14	;; R2*MemR2-I2*MemI2 (new R2)	; 19-23
+	yfmaddpd ymm2, ymm6, ymm11, ymm2	;; R2*MemI2+I2*MemR2 (new I2)	; 20-24
+
+	vaddpd	ymm11, ymm0, [srcreg+d2+d1][rbp];; R4+MemR4
+	vmovapd	ymm0, [srcreg+d2+d1][r9]	;; R4=MemR4
+	vaddpd	ymm13, ymm4, [srcreg+d2+d1+32][rbp];; I4+MemI4
+	vmovapd	ymm4, [srcreg+d2+d1+32][r9]	;; I4=MemI4
+	vmulpd	ymm3, ymm0, ymm11		;; R4 * MemR4			; 18-22
+	vmulpd	ymm0, ymm0, ymm13		;; R4 * MemI4			; 19-23
+
+	yfnmaddpd ymm1, ymm9, ymm12, ymm1	;; R3*MemR3-I3*MemI3 (new R3)	; 21-25
+	yfmaddpd ymm7, ymm9, ymm10, ymm7	;; R3*MemI3+I3*MemR3 (new I3)	; 22-26
+
+	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
+	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
+	jmp	done
+
+submul:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vsubpd	ymm10, ymm10, [srcreg][r9]	;; MemR1
 	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
 	vsubpd	ymm12, ymm12, [srcreg+32][r9]	;; MemI1
@@ -6051,9 +6362,6 @@ submul:
 	vsubpd	ymm13, ymm13, [srcreg+d1+32][r9];; MemI2
 	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
 	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
-
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
 
 	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
 	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
@@ -6081,54 +6389,40 @@ submul:
 
 	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
 	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
-
 	jmp	done
 
-submulsave:
+submul133:
 	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
-	vsubpd	ymm10, ymm10, [srcreg][r9]	;; MemR1
+	vsubpd	ymm10, ymm10, ymm8		;; MemR1-R1
 	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
-	vsubpd	ymm12, ymm12, [srcreg+32][r9]	;; MemI1
-	ystore	[srcreg], ymm8			;; R1
+	vsubpd	ymm12, ymm12, ymm3		;; MemI1-I1
 	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
 
 	vmovapd	ymm11, [srcreg+d1][rbp]		;; MemR2
-	vsubpd	ymm11, ymm11, [srcreg+d1][r9]	;; MemR2
+	vsubpd	ymm11, ymm11, ymm2		;; MemR2-R2
 	vmovapd	ymm13, [srcreg+d1+32][rbp]	;; MemI2
-	vsubpd	ymm13, ymm13, [srcreg+d1+32][r9];; MemI2
-	ystore	[srcreg+d1], ymm2		;; R2
+	vsubpd	ymm13, ymm13, ymm6		;; MemI2-I2
 	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
 	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
 
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
-
-	ystore	[srcreg+32], ymm3		;; I1
 	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
 	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
 
 	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
-	vsubpd	ymm10, ymm10, [srcreg+d2][r9]	;; MemR3
+	vsubpd	ymm10, ymm10, ymm7		;; MemR3-R3
 	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
-	vsubpd	ymm12, ymm12, [srcreg+d2+32][r9];; MemI3
-	ystore	[srcreg+d2], ymm7		;; R3
+	vsubpd	ymm12, ymm12, ymm9		;; MemI3-I3
 	vmulpd	ymm1, ymm7, ymm10		;; R3 * MemR3			; 16-20
 	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 17-21
 
-	ystore	[srcreg+d1+32], ymm6		;; I2
 	yfnmaddpd ymm14, ymm6, ymm13, ymm14	;; R2*MemR2-I2*MemI2 (new R2)	; 19-23
 	yfmaddpd ymm2, ymm6, ymm11, ymm2	;; R2*MemI2+I2*MemR2 (new I2)	; 20-24
 
 	vmovapd	ymm11, [srcreg+d2+d1][rbp]	;; MemR4
-	vsubpd	ymm11, ymm11, [srcreg+d2+d1][r9];; MemR4
+	vsubpd	ymm11, ymm11, ymm0		;; MemR4-R4
 	vmovapd	ymm13, [srcreg+d2+d1+32][rbp]	;; MemI4
-	vsubpd	ymm13, ymm13, [srcreg+d2+d1+32][r9];; MemI4
-
-	ystore	[srcreg+d2+32], ymm9		;; I3
-	ystore	[srcreg+d2+d1], ymm0		;; R4
-	ystore	[srcreg+d2+d1+32], ymm4		;; I4
-
+	vsubpd	ymm13, ymm13, ymm4		;; MemI4-I4
 	vmulpd	ymm3, ymm0, ymm11		;; R4 * MemR4			; 18-22
 	vmulpd	ymm0, ymm0, ymm13		;; R4 * MemI4			; 19-23
 
@@ -6137,26 +6431,145 @@ submulsave:
 
 	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
 	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
-
 	jmp	done
 
-fma_or_unfft:
-	cmp	r10, 4				;; Case off opcode
-	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
-	;;ja	unfft				;; 5=unfft
+submul313:
+	vsubpd	ymm10, ymm8, [srcreg][rbp]	;; R1-MemR1
+	vsubpd	ymm12, ymm3, [srcreg+32][rbp]	;; I1-MemI1
+	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
+	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
+
+	vsubpd	ymm11, ymm2, [srcreg+d1][rbp]	;; R2-MemR2
+	vsubpd	ymm13, ymm6, [srcreg+d1+32][rbp];; I2-MemI2
+	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
+	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
+
+	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
+	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
+
+	vsubpd	ymm10, ymm7, [srcreg+d2][rbp]	;; R3-MemR3
+	vsubpd	ymm12, ymm9, [srcreg+d2+32][rbp];; I3-MemI3
+	vmulpd	ymm1, ymm7, ymm10		;; R3 * MemR3			; 16-20
+	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 17-21
+
+	yfnmaddpd ymm14, ymm6, ymm13, ymm14	;; R2*MemR2-I2*MemI2 (new R2)	; 19-23
+	yfmaddpd ymm2, ymm6, ymm11, ymm2	;; R2*MemI2+I2*MemR2 (new I2)	; 20-24
+
+	vsubpd	ymm11, ymm0, [srcreg+d2+d1][rbp];; R4-MemR4
+	vsubpd	ymm13, ymm4, [srcreg+d2+d1+32][rbp];; I4-MemI4
+	vmulpd	ymm3, ymm0, ymm11		;; R4 * MemR4			; 18-22
+	vmulpd	ymm0, ymm0, ymm13		;; R4 * MemI4			; 19-23
+
+	yfnmaddpd ymm1, ymm9, ymm12, ymm1	;; R3*MemR3-I3*MemI3 (new R3)	; 21-25
+	yfmaddpd ymm7, ymm9, ymm10, ymm7	;; R3*MemI3+I3*MemR3 (new I3)	; 22-26
+
+	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
+	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
+	jmp	done
+
+submul132:
+	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
+	vsubpd	ymm10, ymm10, ymm8		;; MemR1-R1
+	vmovapd	ymm8, [srcreg][r9]		;; R1=MemR1
+	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
+	vsubpd	ymm12, ymm12, ymm3		;; MemI1-I1
+	vmovapd	ymm3, [srcreg+32][r9]		;; I1=MemI1
+	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
+	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
+
+	vmovapd	ymm11, [srcreg+d1][rbp]		;; MemR2
+	vsubpd	ymm11, ymm11, ymm2		;; MemR2-R2
+	vmovapd	ymm2, [srcreg+d1][r9]		;; R2=MemR2
+	vmovapd	ymm13, [srcreg+d1+32][rbp]	;; MemI2
+	vsubpd	ymm13, ymm13, ymm6		;; MemI2-I2
+	vmovapd	ymm6, [srcreg+d1+32][r9]	;; I2=MemI2
+	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
+	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
+
+	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
+	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
+
+	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
+	vsubpd	ymm10, ymm10, ymm7		;; MemR3-R3
+	vmovapd	ymm7, [srcreg+d2][r9]		;; R3=MemR3
+	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
+	vsubpd	ymm12, ymm12, ymm9		;; MemI3-I3
+	vmovapd	ymm9, [srcreg+d2+32][r9]	;; I3=MemI3
+	vmulpd	ymm1, ymm7, ymm10		;; R3 * MemR3			; 16-20
+	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 17-21
+
+	yfnmaddpd ymm14, ymm6, ymm13, ymm14	;; R2*MemR2-I2*MemI2 (new R2)	; 19-23
+	yfmaddpd ymm2, ymm6, ymm11, ymm2	;; R2*MemI2+I2*MemR2 (new I2)	; 20-24
+
+	vmovapd	ymm11, [srcreg+d2+d1][rbp]	;; MemR4
+	vsubpd	ymm11, ymm11, ymm0		;; MemR4-R4
+	vmovapd	ymm0, [srcreg+d2+d1][r9]	;; R4=MemR4
+	vmovapd	ymm13, [srcreg+d2+d1+32][rbp]	;; MemI4
+	vsubpd	ymm13, ymm13, ymm4		;; MemI4-I4
+	vmovapd	ymm4, [srcreg+d2+d1+32][r9]	;; I4=MemI4
+	vmulpd	ymm3, ymm0, ymm11		;; R4 * MemR4			; 18-22
+	vmulpd	ymm0, ymm0, ymm13		;; R4 * MemI4			; 19-23
+
+	yfnmaddpd ymm1, ymm9, ymm12, ymm1	;; R3*MemR3-I3*MemI3 (new R3)	; 21-25
+	yfmaddpd ymm7, ymm9, ymm10, ymm7	;; R3*MemI3+I3*MemR3 (new I3)	; 22-26
+
+	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
+	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
+	jmp	done
+
+submul312:
+	vsubpd	ymm10, ymm8, [srcreg][rbp]	;; R1-MemR1
+	vmovapd	ymm8, [srcreg][r9]		;; R1=MemR1
+	vsubpd	ymm12, ymm3, [srcreg+32][rbp]	;; I1-MemI1
+	vmovapd	ymm3, [srcreg+32][r9]		;; I1=MemI1
+	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
+	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
+
+	vsubpd	ymm11, ymm2, [srcreg+d1][rbp]	;; R2-MemR2
+	vmovapd	ymm2, [srcreg+d1][r9]		;; R2=MemR2
+	vsubpd	ymm13, ymm6, [srcreg+d1+32][rbp];; I2-MemI2
+	vmovapd	ymm6, [srcreg+d1+32][r9]	;; I2=MemI2
+	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
+	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
+
+	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
+	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
+
+	vsubpd	ymm10, ymm7, [srcreg+d2][rbp]	;; R3-MemR3
+	vmovapd	ymm7, [srcreg+d2][r9]		;; R3=MemR3
+	vsubpd	ymm12, ymm9, [srcreg+d2+32][rbp];; I3-MemI3
+	vmovapd	ymm9, [srcreg+d2+32][r9]	;; I3=MemI3
+	vmulpd	ymm1, ymm7, ymm10		;; R3 * MemR3			; 16-20
+	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 17-21
+
+	yfnmaddpd ymm14, ymm6, ymm13, ymm14	;; R2*MemR2-I2*MemI2 (new R2)	; 19-23
+	yfmaddpd ymm2, ymm6, ymm11, ymm2	;; R2*MemI2+I2*MemR2 (new I2)	; 20-24
+
+	vsubpd	ymm11, ymm0, [srcreg+d2+d1][rbp];; R4-MemR4
+	vmovapd	ymm0, [srcreg+d2+d1][r9]	;; R4=MemR4
+	vsubpd	ymm13, ymm4, [srcreg+d2+d1+32][rbp];; I4-MemI4
+	vmovapd	ymm4, [srcreg+d2+d1+32][r9]	;; I4=MemI4
+	vmulpd	ymm3, ymm0, ymm11		;; R4 * MemR4			; 18-22
+	vmulpd	ymm0, ymm0, ymm13		;; R4 * MemI4			; 19-23
+
+	yfnmaddpd ymm1, ymm9, ymm12, ymm1	;; R3*MemR3-I3*MemI3 (new R3)	; 21-25
+	yfmaddpd ymm7, ymm9, ymm10, ymm7	;; R3*MemI3+I3*MemR3 (new I3)	; 22-26
+
+	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
+	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
+	jmp	done
 
 unfft:	vmovapd ymm5, ymm8			;; R1
 	vmovapd ymm8, ymm3			;; I1
 	vmovapd ymm14, ymm2			;; R2
 	vmovapd ymm2, ymm6			;; I2
 	vmovapd ymm3, ymm0			;; R4
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm0, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
+	vmovapd	ymm0, ymm4			;; I4
 	vmovapd ymm1, ymm7			;; R3
 	vmovapd ymm7, ymm9			;; I3
 	jmp	done
 
-fma:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
+muladd:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
 	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
@@ -6165,9 +6578,6 @@ fma:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm13, [srcreg+d1+32][rbp]	;; MemI2
 	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
 	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
-
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
 
 	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
 	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
@@ -6193,11 +6603,8 @@ fma:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
 
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	je	mulsub				;; 4=mulsub
-	;jb	muladd				;; 3=muladd, fall through
-
-muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	muladdhard			;; Yes, do it the hard way
+	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	muladdhard			;; Yes, do it the hard way
 
 	vaddpd	ymm5, ymm5, [srcreg+r9]			;; R1 = R1 + MemR1
 	vaddpd	ymm8, ymm8, [srcreg+r9+32]		;; I1 = I1 + MemI1
@@ -6207,7 +6614,6 @@ muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	vaddpd	ymm7, ymm7, [srcreg+r9+d2+32]		;; I3 = I3 + MemI3
 	vaddpd	ymm3, ymm3, [srcreg+r9+d2+d1]		;; R4 = R4 + MemR4
 	vaddpd	ymm0, ymm0, [srcreg+r9+d2+d1+32]	;; I4 = I4 + MemI4
-
 	jmp	done
 
 muladdhard:
@@ -6246,45 +6652,31 @@ muladdhard:
 	vmovapd	ymm4, [srcreg+r9+d2+d1+32]		;; MemI4
 	yfnmaddpd ymm3, ymm4, ymm10, ymm3		;; R4 = R4 - MemI4*MemI4#2
 	yfmaddpd ymm0, ymm4, ymm9, ymm0			;; I4 = I4 + MemI4*MemR4#2
-
 	jmp	done
 
-fmasave:
-	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
+mulsub:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm12, [srcreg+32][rbp]		;; MemI1
-	ystore	[srcreg], ymm8			;; R1
 	vmulpd	ymm5, ymm8, ymm10		;; R1 * MemR1			; 12-16
 	vmulpd	ymm8, ymm8, ymm12		;; R1 * MemI1			; 13-17
 
 	vmovapd	ymm11, [srcreg+d1][rbp]		;; MemR2
 	vmovapd	ymm13, [srcreg+d1+32][rbp]	;; MemI2
-	ystore	[srcreg+d1], ymm2		;; R2
 	vmulpd	ymm14, ymm2, ymm11		;; R2 * MemR2			; 14-18
 	vmulpd	ymm2, ymm2, ymm13		;; R2 * MemI2			; 15-19
 
-	vaddpd	ymm9, ymm4, ymm1		;; I3 + R4 (final I3)		; 15-17
-	vsubpd	ymm4, ymm4, ymm1		;; I3 - R4 (final I4)		; 16-18
-
-	ystore	[srcreg+32], ymm3		;; I1
 	yfnmaddpd ymm5, ymm3, ymm12, ymm5	;; R1*MemR1-I1*MemI1 (new R1)	; 17-21
 	yfmaddpd ymm8, ymm3, ymm10, ymm8	;; R1*MemI1+I1*MemR1 (new I1)	; 18-22
 
 	vmovapd	ymm10, [srcreg+d2][rbp]		;; MemR3
 	vmovapd	ymm12, [srcreg+d2+32][rbp]	;; MemI3
-	ystore	[srcreg+d2], ymm7		;; R3
 	vmulpd	ymm1, ymm7, ymm10		;; R3 * MemR3			; 16-20
 	vmulpd	ymm7, ymm7, ymm12		;; R3 * MemI3			; 17-21
 
-	ystore	[srcreg+d1+32], ymm6		;; I2
 	yfnmaddpd ymm14, ymm6, ymm13, ymm14	;; R2*MemR2-I2*MemI2 (new R2)	; 19-23
 	yfmaddpd ymm2, ymm6, ymm11, ymm2	;; R2*MemI2+I2*MemR2 (new I2)	; 20-24
 
 	vmovapd	ymm11, [srcreg+d2+d1][rbp]	;; MemR4
 	vmovapd	ymm13, [srcreg+d2+d1+32][rbp]	;; MemI4
-
-	ystore	[srcreg+d2+32], ymm9		;; I3
-	ystore	[srcreg+d2+d1], ymm0		;; R4
-	ystore	[srcreg+d2+d1+32], ymm4		;; I4
 
 	vmulpd	ymm3, ymm0, ymm11		;; R4 * MemR4			; 18-22
 	vmulpd	ymm0, ymm0, ymm13		;; R4 * MemI4			; 19-23
@@ -6295,13 +6687,9 @@ fmasave:
 	yfnmaddpd ymm3, ymm4, ymm13, ymm3	;; R4*MemR4-I4*MemI4 (new R4)	; 23-27
 	yfmaddpd ymm0, ymm4, ymm11, ymm0	;; R4*MemI4+I4*MemR4 (new I4)	; 24-28
 
-	cmp	r10, 84h			;; Case off opcode
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	jb	muladd				;; 83=muladd
-	;;je	mulsub				;; 84=mulsub
-
-mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	mulsubhard			;; Yes, do it the hard way
+	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	mulsubhard			;; Yes, do it the hard way
 
 	vsubpd	ymm5, ymm5, [srcreg+r9]			;; R1 = R1 + MemR1
 	vsubpd	ymm8, ymm8, [srcreg+r9+32]		;; I1 = I1 + MemI1
@@ -6311,7 +6699,6 @@ mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	vsubpd	ymm7, ymm7, [srcreg+r9+d2+32]		;; I3 = I3 + MemI3
 	vsubpd	ymm3, ymm3, [srcreg+r9+d2+d1]		;; R4 = R4 + MemR4
 	vsubpd	ymm0, ymm0, [srcreg+r9+d2+d1+32]	;; I4 = I4 + MemI4
-
 	jmp	done
 
 mulsubhard:
@@ -6563,7 +6950,6 @@ addmul:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 
 	vsubpd	ymm10, ymm10, ymm11		;; R4*MemR4 - I4*MemI4 (new R4)	; 20-22
 	vaddpd	ymm5, ymm5, ymm7		;; R4*MemI4 + I4*MemR4 (new I4)	; 21-23
-
 	jmp	done
 
 submul:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
@@ -6625,7 +7011,6 @@ submul:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 
 	vsubpd	ymm10, ymm10, ymm11		;; R4*MemR4 - I4*MemI4 (new R4)	; 20-22
 	vaddpd	ymm5, ymm5, ymm7		;; R4*MemI4 + I4*MemR4 (new I4)	; 21-23
-
 	jmp	done
 
 fma_or_unfft:
@@ -6698,8 +7083,8 @@ fma:	vmovapd	ymm10, [srcreg][rbp]		;; MemR1
 	je	mulsub				;; 4=mulsub
 	;jb	muladd				;; 3=muladd, fall through
 
-muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	muladdhard			;; Yes, do it the hard way
+muladd:	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	muladdhard			;; Yes, do it the hard way
 
 	vaddpd	ymm2, ymm2, [srcreg+r9]			;; R1 = R1 + MemR1
 	vaddpd	ymm0, ymm0, [srcreg+r9+32]		;; I1 = I1 + MemI1
@@ -6712,7 +7097,6 @@ muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 
 	vaddpd	ymm12, ymm2, ymm6		;; R1 + R2 (new R1)		; 15-17
 	vsubpd	ymm2, ymm2, ymm6		;; R1 - R2 (new R2)		; 16-17
-
 	jmp	done
 
 muladdhard:
@@ -6770,11 +7154,10 @@ muladdhard:
 
 	vaddpd	ymm12, ymm2, ymm6		;; R1 + R2 (new R1)		; 15-17
 	vsubpd	ymm2, ymm2, ymm6		;; R1 - R2 (new R2)		; 16-17
-
 	jmp	done
 
-mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	mulsubhard			;; Yes, do it the hard way
+mulsub:	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	mulsubhard			;; Yes, do it the hard way
 
 	vsubpd	ymm2, ymm2, [srcreg+r9]			;; R1 = R1 - MemR1
 	vsubpd	ymm0, ymm0, [srcreg+r9+32]		;; I1 = I1 - MemI1
@@ -6787,7 +7170,6 @@ mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 
 	vaddpd	ymm12, ymm2, ymm6		;; R1 + R2 (new R1)		; 15-17
 	vsubpd	ymm2, ymm2, ymm6		;; R1 - R2 (new R2)		; 16-17
-
 	jmp	done
 
 mulsubhard:
@@ -7000,7 +7382,6 @@ addmul:	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm9, [srcreg+d2+d1+32][rbx]	;; I4
 	yfnmaddpd ymm4, ymm9, ymm15, ymm4	;; R4*MemR4-I4*MemI4 (new R4)	; 12-16
 	yfmaddpd ymm1, ymm9, ymm14, ymm1	;; R4*MemI4+I4*MemR4 (new I4)	; 13-17
-
 	jmp	done
 
 submul:	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
@@ -7051,7 +7432,6 @@ submul:	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
 	vmovapd	ymm9, [srcreg+d2+d1+32][rbx]	;; I4
 	yfnmaddpd ymm4, ymm9, ymm15, ymm4	;; R4*MemR4-I4*MemI4 (new R4)	; 12-16
 	yfmaddpd ymm1, ymm9, ymm14, ymm1	;; R4*MemI4+I4*MemR4 (new I4)	; 13-17
-
 	jmp	done
 
 fma_or_unfft:
@@ -7114,8 +7494,8 @@ fma:	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
 	je	mulsub				;; 4=mulsub
 	;jb	muladd				;; 3=muladd, fall through
 
-muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	muladdhard			;; Yes, do it the hard way
+muladd:	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	muladdhard			;; Yes, do it the hard way
 
 	vaddpd	ymm2, ymm2, [srcreg+r9]			;; R1 = R1 + MemR1
 	vaddpd	ymm0, ymm0, [srcreg+r9+32]		;; I1 = I1 + MemI1
@@ -7125,7 +7505,6 @@ muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	vaddpd	ymm6, ymm6, [srcreg+r9+d2+32]		;; I3 = I3 + MemI3
 	vaddpd	ymm4, ymm4, [srcreg+r9+d2+d1]		;; R4 = R4 + MemR4
 	vaddpd	ymm1, ymm1, [srcreg+r9+d2+d1+32]	;; I4 = I4 + MemI4
-
 	jmp	done
 
 muladdhard:
@@ -7164,11 +7543,10 @@ muladdhard:
 	vmovapd	ymm8, [srcreg+r9+d2+d1+32]		;; MemI4
 	yfnmaddpd ymm4, ymm8, ymm10, ymm4		;; R4 = R4 - MemI4*MemI4#2
 	yfmaddpd ymm1, ymm8, ymm9, ymm1			;; I4 = I4 + MemI4*MemR4#2
-
 	jmp	done
 
-mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	mulsubhard			;; Yes, do it the hard way
+mulsub:	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	mulsubhard			;; Yes, do it the hard way
 
 	vsubpd	ymm2, ymm2, [srcreg+r9]			;; R1 = R1 + MemR1
 	vsubpd	ymm0, ymm0, [srcreg+r9+32]		;; I1 = I1 + MemI1
@@ -7178,7 +7556,6 @@ mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	vsubpd	ymm6, ymm6, [srcreg+r9+d2+32]		;; I3 = I3 + MemI3
 	vsubpd	ymm4, ymm4, [srcreg+r9+d2+d1]		;; R4 = R4 + MemR4
 	vsubpd	ymm1, ymm1, [srcreg+r9+d2+d1+32]	;; I4 = I4 + MemI4
-
 	jmp	done
 
 mulsubhard:
@@ -12231,7 +12608,8 @@ yr4_4cl_eight_reals_four_complex_with_mult MACRO srcreg,srcinc,d1,d2
 IFDEF X86_64
 
 yr4_4cl_eight_reals_four_complex_with_mult MACRO srcreg,srcinc,d1,d2
-	LOCAL	orig, back_to_orig, no_save_fft, fma_or_unfft, fma, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft
+	LOCAL	orig, back_to_orig, nofftsave, disptab, addmul, submul, muladd, muladdhard, mulsub, mulsubhard, unfft, done
+	LOCAL	addmul312, addmul313, addmul132, addmul133, submul312, submul313, submul132, submul133
 
 	ymult7	srcreg, srcreg+rbp
 						;; Eight-reals comments		; Three four-complex comments
@@ -12295,10 +12673,10 @@ yr4_4cl_eight_reals_four_complex_with_mult MACRO srcreg,srcinc,d1,d2
 	vblendpd ymm0, ymm0, ymm4, 1		;; final I1			; final I1
 	vblendpd ymm3, ymm3, ymm9, 1		;; final R1			; final R1
 
-	mov	al, mul4_opcode			;; Load the mul4_opcode
-	cmp	al, 0				;; See if we need to do more than the original type-3 FFT multiply
-	je	orig				;; Jump if nothing special
-	jg	no_save_fft			;; Jump if not saving result of the forward FFT?
+	movzx	r10, mul4_opcode		;; Load opcode
+	cmp	r10, 80h			;; Test for FFT save
+	jb	nofftsave			;; opcode < 0x80, plain,addmul,submul,muladd,mulsub,unfft without FFT save
+	;;ja	fftsave				;; opcode >= 0x80, plain,addmul,submul,muladd,mulsub,unfft with FFT save
 
 	;; Store FFT results
 	ystore	[srcreg], ymm3			;; R1			R1a
@@ -12309,17 +12687,29 @@ yr4_4cl_eight_reals_four_complex_with_mult MACRO srcreg,srcinc,d1,d2
 	ystore	[srcreg+d2+32], ymm5		;; I3
 	ystore	[srcreg+d2+d1], ymm7		;; R4
 	ystore	[srcreg+d2+d1+32], ymm2		;; I4
-	and	al, 7Fh				;; Mask out the save-FFT-results bit
-	jz	orig				;; opcode == 0
+	and	r10, 7fh			;; Strip the fft save bit from mul4_opcode
 
-no_save_fft:
+nofftsave:
+	mov	r9, OFFSET disptab		;; Jump table address
+	mov	r10, [r9+r10*8]			;; Jump table offset
 	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
-	cmp	al, 2				;; Case off opcode
-	jg	fma_or_unfft			;; 3,4,5=muladd,mulsub,unfft
-	je	submul				;; 2=submul
-	;jl	addmul				;; 1=addmul, fall through
+	jmp	r10
+disptab:
+	DQ	OFFSET orig			;; 0 = plain
+	DQ	OFFSET addmul			;; 1 = addmul
+	DQ	OFFSET submul			;; 2 = submul
+	DQ	OFFSET muladd			;; 3 = muladd
+	DQ	OFFSET mulsub			;; 4 = mulsub
+	DQ	OFFSET unfft			;; 5 = unfft
+	DQ	OFFSET addmul312		;; 6 = addmul FFTval mem1 mem2
+	DQ	OFFSET addmul313		;; 7 = addmul FFTval mem1 FFTval
+	DQ	OFFSET addmul132		;; 8 = addmul mem1 FFTval mem2
+	DQ	OFFSET addmul133		;; 9 = addmul mem1 FFTval FFTval
+	DQ	OFFSET submul312		;; 10 = submul FFTval mem1 mem2
+	DQ	OFFSET submul313		;; 11 = submul FFTval mem1 FFTval
+	DQ	OFFSET submul132		;; 12 = submul mem1 FFTval mem2
+	DQ	OFFSET submul133		;; 13 = submul mem1 FFTval FFTval
 
-	;; Multiply the results
 addmul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vaddpd	ymm14, ymm14, [srcreg+d1][r9]	;; MemR2
 	vmovapd	ymm15, [srcreg+d1+32][rbp]	;; MemI2
@@ -12363,7 +12753,92 @@ addmul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
 	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
 	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
+	jmp	back_to_orig
 
+addmul133:
+addmul313:
+	vaddpd	ymm14, ymm8, [srcreg+d1][rbp]	;; R2+MemR2
+	vaddpd	ymm15, ymm6, [srcreg+d1+32][rbp];; I2+MemI2
+	vmulpd	ymm4, ymm8, ymm14		;; R2 * MemR2
+	vmulpd	ymm8, ymm8, ymm15		;; R2 * MemI2
+	vmulpd	ymm9, ymm6, ymm15		;; I2 * MemI2
+	vmulpd	ymm6, ymm6, ymm14		;; I2 * MemR2
+	vsubpd	ymm4, ymm4, ymm9		;; R2*MemR2 - I2*MemI2 (new R2)
+	vaddpd	ymm8, ymm8, ymm6		;; R2*MemI2 + I2*MemR2 (new I2)
+
+	vaddpd	ymm14, ymm1, [srcreg+d2][rbp]	;; R3+MemR3
+	vaddpd	ymm15, ymm5, [srcreg+d2+32][rbp];; I3+MemI3
+	vmulpd	ymm6, ymm1, ymm14		;; R3 * MemR3
+	vmulpd	ymm1, ymm1, ymm15		;; R3 * MemI3
+	vmulpd	ymm9, ymm5, ymm15		;; I3 * MemI3
+	vmulpd	ymm5, ymm5, ymm14		;; I3 * MemR3
+	vsubpd	ymm6, ymm6, ymm9		;; R3*MemR3 - I3*MemI3 (new R3)
+	vaddpd	ymm1, ymm1, ymm5		;; R3*MemI3 + I3*MemR3 (new I3)
+
+	vaddpd	ymm14, ymm7, [srcreg+d2+d1][rbp];; R4+MemR4
+	vaddpd	ymm15, ymm2, [srcreg+d2+d1+32][rbp];; I4+MemI4
+	vmulpd	ymm5, ymm7, ymm14		;; R4 * MemR4
+	vmulpd	ymm7, ymm7, ymm15		;; R4 * MemI4
+	vmulpd	ymm9, ymm2, ymm15		;; I4 * MemI4
+	vmulpd	ymm2, ymm2, ymm14		;; I4 * MemR4
+	vsubpd	ymm5, ymm5, ymm9		;; R4*MemR4 - I4*MemI4 (new R4)
+	vaddpd	ymm7, ymm7, ymm2		;; R4*MemI4 + I4*MemR4 (new I4)
+
+	vaddpd	ymm14, ymm3, [srcreg][rbp]	;; R1+MemR1
+	vaddpd	ymm15, ymm0, [srcreg+32][rbp]	;; I1+MemI1
+	vmulpd	ymm2, ymm3, ymm14		;; R1 * MemR1		(new real R1)
+	vmulpd	ymm3, ymm3, ymm15		;; R1 * MemI1
+	vmulpd	ymm9, ymm0, ymm15		;; I1 * MemI1		(new real I1)
+	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
+	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
+	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
+	jmp	back_to_orig
+
+addmul132:
+addmul312:
+	vaddpd	ymm14, ymm8, [srcreg+d1][rbp]	;; R2+MemR2
+	vmovapd	ymm8, [srcreg+d1][r9]		;; R2=MemR2
+	vaddpd	ymm15, ymm6, [srcreg+d1+32][rbp];; I2+MemI2
+	vmovapd	ymm6, [srcreg+d1+32][r9]	;; I2=MemI2
+	vmulpd	ymm4, ymm8, ymm14		;; R2 * MemR2
+	vmulpd	ymm8, ymm8, ymm15		;; R2 * MemI2
+	vmulpd	ymm9, ymm6, ymm15		;; I2 * MemI2
+	vmulpd	ymm6, ymm6, ymm14		;; I2 * MemR2
+	vsubpd	ymm4, ymm4, ymm9		;; R2*MemR2 - I2*MemI2 (new R2)
+	vaddpd	ymm8, ymm8, ymm6		;; R2*MemI2 + I2*MemR2 (new I2)
+
+	vaddpd	ymm14, ymm1, [srcreg+d2][rbp]	;; R3+MemR3
+	vmovapd	ymm1, [srcreg+d2][r9]		;; R3=MemR3
+	vaddpd	ymm15, ymm5, [srcreg+d2+32][rbp];; I3+MemI3
+	vmovapd	ymm5, [srcreg+d2+32][r9]	;; I3=MemI3
+	vmulpd	ymm6, ymm1, ymm14		;; R3 * MemR3
+	vmulpd	ymm1, ymm1, ymm15		;; R3 * MemI3
+	vmulpd	ymm9, ymm5, ymm15		;; I3 * MemI3
+	vmulpd	ymm5, ymm5, ymm14		;; I3 * MemR3
+	vsubpd	ymm6, ymm6, ymm9		;; R3*MemR3 - I3*MemI3 (new R3)
+	vaddpd	ymm1, ymm1, ymm5		;; R3*MemI3 + I3*MemR3 (new I3)
+
+	vaddpd	ymm14, ymm7, [srcreg+d2+d1][rbp];; R4+MemR4
+	vmovapd	ymm7, [srcreg+d2+d1][r9]	;; R4=MemR4
+	vaddpd	ymm15, ymm2, [srcreg+d2+d1+32][rbp];; I4+MemI4
+	vmovapd	ymm2, [srcreg+d2+d1+32][r9]	;; I4=MemI4
+	vmulpd	ymm5, ymm7, ymm14		;; R4 * MemR4
+	vmulpd	ymm7, ymm7, ymm15		;; R4 * MemI4
+	vmulpd	ymm9, ymm2, ymm15		;; I4 * MemI4
+	vmulpd	ymm2, ymm2, ymm14		;; I4 * MemR4
+	vsubpd	ymm5, ymm5, ymm9		;; R4*MemR4 - I4*MemI4 (new R4)
+	vaddpd	ymm7, ymm7, ymm2		;; R4*MemI4 + I4*MemR4 (new I4)
+
+	vaddpd	ymm14, ymm3, [srcreg][rbp]	;; R1+MemR1
+	vmovapd	ymm3, [srcreg][r9]		;; R1=MemR1
+	vaddpd	ymm15, ymm0, [srcreg+32][rbp]	;; I1+MemI1
+	vmovapd	ymm0, [srcreg+32][r9]		;; I1=MemI1
+	vmulpd	ymm2, ymm3, ymm14		;; R1 * MemR1		(new real R1)
+	vmulpd	ymm3, ymm3, ymm15		;; R1 * MemI1
+	vmulpd	ymm9, ymm0, ymm15		;; I1 * MemI1		(new real I1)
+	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
+	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
+	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
 	jmp	back_to_orig
 
 submul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
@@ -12409,13 +12884,191 @@ submul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
 	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
 	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
-
 	jmp	back_to_orig
 
-fma_or_unfft:
-	cmp	al, 4				;; Case off opcode
-	jbe	fma				;; 3=muladd, 4=mulsub, fma MUST NOT ALTER CONDITION CODES!
-	;;ja	unfft				;; 5=unfft
+submul133:
+	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
+	vsubpd	ymm14, ymm14, ymm8		;; MemR2-R2
+	vmovapd	ymm15, [srcreg+d1+32][rbp]	;; MemI2
+	vsubpd	ymm15, ymm15, ymm6		;; MemI2-I2
+	vmulpd	ymm4, ymm8, ymm14		;; R2 * MemR2
+	vmulpd	ymm8, ymm8, ymm15		;; R2 * MemI2
+	vmulpd	ymm9, ymm6, ymm15		;; I2 * MemI2
+	vmulpd	ymm6, ymm6, ymm14		;; I2 * MemR2
+	vsubpd	ymm4, ymm4, ymm9		;; R2*MemR2 - I2*MemI2 (new R2)
+	vaddpd	ymm8, ymm8, ymm6		;; R2*MemI2 + I2*MemR2 (new I2)
+
+	vmovapd	ymm14, [srcreg+d2][rbp]		;; MemR3
+	vsubpd	ymm14, ymm14, ymm1		;; MemR3-R3
+	vmovapd	ymm15, [srcreg+d2+32][rbp]	;; MemI3
+	vsubpd	ymm15, ymm15, ymm5		;; MemI3-I3
+	vmulpd	ymm6, ymm1, ymm14		;; R3 * MemR3
+	vmulpd	ymm1, ymm1, ymm15		;; R3 * MemI3
+	vmulpd	ymm9, ymm5, ymm15		;; I3 * MemI3
+	vmulpd	ymm5, ymm5, ymm14		;; I3 * MemR3
+	vsubpd	ymm6, ymm6, ymm9		;; R3*MemR3 - I3*MemI3 (new R3)
+	vaddpd	ymm1, ymm1, ymm5		;; R3*MemI3 + I3*MemR3 (new I3)
+
+	vmovapd	ymm14, [srcreg+d2+d1][rbp]	;; MemR4
+	vsubpd	ymm14, ymm14, ymm7		;; MemR4-R4
+	vmovapd	ymm15, [srcreg+d2+d1+32][rbp]	;; MemI4
+	vsubpd	ymm15, ymm15, ymm2		;; MemI4-I4
+	vmulpd	ymm5, ymm7, ymm14		;; R4 * MemR4
+	vmulpd	ymm7, ymm7, ymm15		;; R4 * MemI4
+	vmulpd	ymm9, ymm2, ymm15		;; I4 * MemI4
+	vmulpd	ymm2, ymm2, ymm14		;; I4 * MemR4
+	vsubpd	ymm5, ymm5, ymm9		;; R4*MemR4 - I4*MemI4 (new R4)
+	vaddpd	ymm7, ymm7, ymm2		;; R4*MemI4 + I4*MemR4 (new I4)
+
+	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
+	vsubpd	ymm14, ymm14, ymm3		;; MemR1-R1
+	vmovapd	ymm15, [srcreg+32][rbp]		;; MemI1
+	vsubpd	ymm15, ymm15, ymm0		;; MemI1-I1
+	vmulpd	ymm2, ymm3, ymm14		;; R1 * MemR1		(new real R1)
+	vmulpd	ymm3, ymm3, ymm15		;; R1 * MemI1
+	vmulpd	ymm9, ymm0, ymm15		;; I1 * MemI1		(new real I1)
+	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
+	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
+	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
+	jmp	back_to_orig
+
+submul313:
+	vsubpd	ymm14, ymm8, [srcreg+d1][rbp]	;; R2-MemR2
+	vsubpd	ymm15, ymm6, [srcreg+d1+32][rbp];; I2-MemI2
+	vmulpd	ymm4, ymm8, ymm14		;; R2 * MemR2
+	vmulpd	ymm8, ymm8, ymm15		;; R2 * MemI2
+	vmulpd	ymm9, ymm6, ymm15		;; I2 * MemI2
+	vmulpd	ymm6, ymm6, ymm14		;; I2 * MemR2
+	vsubpd	ymm4, ymm4, ymm9		;; R2*MemR2 - I2*MemI2 (new R2)
+	vaddpd	ymm8, ymm8, ymm6		;; R2*MemI2 + I2*MemR2 (new I2)
+
+	vsubpd	ymm14, ymm1, [srcreg+d2][rbp]	;; R3-MemR3
+	vsubpd	ymm15, ymm5, [srcreg+d2+32][rbp];; I3-MemI3
+	vmulpd	ymm6, ymm1, ymm14		;; R3 * MemR3
+	vmulpd	ymm1, ymm1, ymm15		;; R3 * MemI3
+	vmulpd	ymm9, ymm5, ymm15		;; I3 * MemI3
+	vmulpd	ymm5, ymm5, ymm14		;; I3 * MemR3
+	vsubpd	ymm6, ymm6, ymm9		;; R3*MemR3 - I3*MemI3 (new R3)
+	vaddpd	ymm1, ymm1, ymm5		;; R3*MemI3 + I3*MemR3 (new I3)
+
+	vsubpd	ymm14, ymm7, [srcreg+d2+d1][rbp];; R4-MemR4
+	vsubpd	ymm15, ymm2, [srcreg+d2+d1+32][rbp];; I4-MemI4
+	vmulpd	ymm5, ymm7, ymm14		;; R4 * MemR4
+	vmulpd	ymm7, ymm7, ymm15		;; R4 * MemI4
+	vmulpd	ymm9, ymm2, ymm15		;; I4 * MemI4
+	vmulpd	ymm2, ymm2, ymm14		;; I4 * MemR4
+	vsubpd	ymm5, ymm5, ymm9		;; R4*MemR4 - I4*MemI4 (new R4)
+	vaddpd	ymm7, ymm7, ymm2		;; R4*MemI4 + I4*MemR4 (new I4)
+
+	vsubpd	ymm14, ymm3, [srcreg][rbp]	;; R1-MemR1
+	vsubpd	ymm15, ymm0, [srcreg+32][rbp]	;; I1-MemI1
+	vmulpd	ymm2, ymm3, ymm14		;; R1 * MemR1		(new real R1)
+	vmulpd	ymm3, ymm3, ymm15		;; R1 * MemI1
+	vmulpd	ymm9, ymm0, ymm15		;; I1 * MemI1		(new real I1)
+	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
+	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
+	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
+	jmp	back_to_orig
+
+submul132:
+	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
+	vsubpd	ymm14, ymm14, ymm8		;; MemR2-R2
+	vmovapd	ymm8, [srcreg+d1][r9]		;; R2=MemR2
+	vmovapd	ymm15, [srcreg+d1+32][rbp]	;; MemI2
+	vsubpd	ymm15, ymm15, ymm6		;; MemI2-I2
+	vmovapd	ymm6, [srcreg+d1+32][r9]	;; I2=MemI2
+	vmulpd	ymm4, ymm8, ymm14		;; R2 * MemR2
+	vmulpd	ymm8, ymm8, ymm15		;; R2 * MemI2
+	vmulpd	ymm9, ymm6, ymm15		;; I2 * MemI2
+	vmulpd	ymm6, ymm6, ymm14		;; I2 * MemR2
+	vsubpd	ymm4, ymm4, ymm9		;; R2*MemR2 - I2*MemI2 (new R2)
+	vaddpd	ymm8, ymm8, ymm6		;; R2*MemI2 + I2*MemR2 (new I2)
+
+	vmovapd	ymm14, [srcreg+d2][rbp]		;; MemR3
+	vsubpd	ymm14, ymm14, ymm1		;; MemR3-R3
+	vmovapd	ymm1, [srcreg+d2][r9]		;; R3=MemR3
+	vmovapd	ymm15, [srcreg+d2+32][rbp]	;; MemI3
+	vsubpd	ymm15, ymm15, ymm5		;; MemI3-I3
+	vmovapd	ymm5, [srcreg+d2+32][r9]	;; I3=MemI3
+	vmulpd	ymm6, ymm1, ymm14		;; R3 * MemR3
+	vmulpd	ymm1, ymm1, ymm15		;; R3 * MemI3
+	vmulpd	ymm9, ymm5, ymm15		;; I3 * MemI3
+	vmulpd	ymm5, ymm5, ymm14		;; I3 * MemR3
+	vsubpd	ymm6, ymm6, ymm9		;; R3*MemR3 - I3*MemI3 (new R3)
+	vaddpd	ymm1, ymm1, ymm5		;; R3*MemI3 + I3*MemR3 (new I3)
+
+	vmovapd	ymm14, [srcreg+d2+d1][rbp]	;; MemR4
+	vsubpd	ymm14, ymm14, ymm7		;; MemR4-R4
+	vmovapd	ymm7, [srcreg+d2+d1][r9]	;; R4=MemR4
+	vmovapd	ymm15, [srcreg+d2+d1+32][rbp]	;; MemI4
+	vsubpd	ymm15, ymm15, ymm2		;; MemI4-I4
+	vmovapd	ymm2, [srcreg+d2+d1+32][r9]	;; I4=MemI4
+	vmulpd	ymm5, ymm7, ymm14		;; R4 * MemR4
+	vmulpd	ymm7, ymm7, ymm15		;; R4 * MemI4
+	vmulpd	ymm9, ymm2, ymm15		;; I4 * MemI4
+	vmulpd	ymm2, ymm2, ymm14		;; I4 * MemR4
+	vsubpd	ymm5, ymm5, ymm9		;; R4*MemR4 - I4*MemI4 (new R4)
+	vaddpd	ymm7, ymm7, ymm2		;; R4*MemI4 + I4*MemR4 (new I4)
+
+	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
+	vsubpd	ymm14, ymm14, ymm3		;; MemR1-R1
+	vmovapd	ymm3, [srcreg][r9]		;; R1=MemR1
+	vmovapd	ymm15, [srcreg+32][rbp]		;; MemI1
+	vsubpd	ymm15, ymm15, ymm0		;; MemI1-I1
+	vmovapd	ymm0, [srcreg+32][r9]		;; I1=MemI1
+	vmulpd	ymm2, ymm3, ymm14		;; R1 * MemR1		(new real R1)
+	vmulpd	ymm3, ymm3, ymm15		;; R1 * MemI1
+	vmulpd	ymm9, ymm0, ymm15		;; I1 * MemI1		(new real I1)
+	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
+	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
+	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
+	jmp	back_to_orig
+
+submul312:
+	vsubpd	ymm14, ymm8, [srcreg+d1][rbp]	;; R2-MemR2
+	vmovapd	ymm8, [srcreg+d1][r9]		;; R2=MemR2
+	vsubpd	ymm15, ymm6, [srcreg+d1+32][rbp];; I2-MemI2
+	vmovapd	ymm6, [srcreg+d1+32][r9]	;; I2=MemI2
+	vmulpd	ymm4, ymm8, ymm14		;; R2 * MemR2
+	vmulpd	ymm8, ymm8, ymm15		;; R2 * MemI2
+	vmulpd	ymm9, ymm6, ymm15		;; I2 * MemI2
+	vmulpd	ymm6, ymm6, ymm14		;; I2 * MemR2
+	vsubpd	ymm4, ymm4, ymm9		;; R2*MemR2 - I2*MemI2 (new R2)
+	vaddpd	ymm8, ymm8, ymm6		;; R2*MemI2 + I2*MemR2 (new I2)
+
+	vsubpd	ymm14, ymm1, [srcreg+d2][rbp]	;; R3-MemR3
+	vmovapd	ymm1, [srcreg+d2][r9]		;; R3=MemR3
+	vsubpd	ymm15, ymm5, [srcreg+d2+32][rbp];; I3-MemI3
+	vmovapd	ymm5, [srcreg+d2+32][r9]	;; I3=MemI3
+	vmulpd	ymm6, ymm1, ymm14		;; R3 * MemR3
+	vmulpd	ymm1, ymm1, ymm15		;; R3 * MemI3
+	vmulpd	ymm9, ymm5, ymm15		;; I3 * MemI3
+	vmulpd	ymm5, ymm5, ymm14		;; I3 * MemR3
+	vsubpd	ymm6, ymm6, ymm9		;; R3*MemR3 - I3*MemI3 (new R3)
+	vaddpd	ymm1, ymm1, ymm5		;; R3*MemI3 + I3*MemR3 (new I3)
+
+	vsubpd	ymm14, ymm7, [srcreg+d2+d1][rbp];; R4-MemR4
+	vmovapd	ymm7, [srcreg+d2+d1][r9]	;; R4=MemR4
+	vsubpd	ymm15, ymm2, [srcreg+d2+d1+32][rbp];; I4-MemI4
+	vmovapd	ymm2, [srcreg+d2+d1+32][r9]	;; I4=MemI4
+	vmulpd	ymm5, ymm7, ymm14		;; R4 * MemR4
+	vmulpd	ymm7, ymm7, ymm15		;; R4 * MemI4
+	vmulpd	ymm9, ymm2, ymm15		;; I4 * MemI4
+	vmulpd	ymm2, ymm2, ymm14		;; I4 * MemR4
+	vsubpd	ymm5, ymm5, ymm9		;; R4*MemR4 - I4*MemI4 (new R4)
+	vaddpd	ymm7, ymm7, ymm2		;; R4*MemI4 + I4*MemR4 (new I4)
+
+	vsubpd	ymm14, ymm3, [srcreg][rbp]	;; R1-MemR1
+	vmovapd	ymm3, [srcreg][r9]		;; R1=MemR1
+	vsubpd	ymm15, ymm0, [srcreg+32][rbp]	;; I1-MemI1
+	vmovapd	ymm0, [srcreg+32][r9]		;; I1=MemI1
+	vmulpd	ymm2, ymm3, ymm14		;; R1 * MemR1		(new real R1)
+	vmulpd	ymm3, ymm3, ymm15		;; R1 * MemI1
+	vmulpd	ymm9, ymm0, ymm15		;; I1 * MemI1		(new real I1)
+	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
+	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
+	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
+	jmp	back_to_orig
 
 unfft:	vmovapd ymm10, ymm3			;; R1
 	vmovapd ymm3, ymm0			;; I1
@@ -12429,7 +13082,7 @@ unfft:	vmovapd ymm10, ymm3			;; R1
 	vmovapd	ymm9, ymm3			;; I1 (back_to_orig uses low double)
 	jmp	back_to_orig
 
-fma:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
+muladd:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vmovapd	ymm15, [srcreg+d1+32][rbp]	;; MemI2
 	vmulpd	ymm4, ymm8, ymm14		;; R2 * MemR2
 	vmulpd	ymm8, ymm8, ymm15		;; R2 * MemI2
@@ -12466,11 +13119,8 @@ fma:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
 
 	mov	r10, SRC3ARG			;; Load distance to FFT(1)
-	je	mulsub				;; 4=mulsub
-	;jb	muladd				;; 3=muladd, fall through
-
-muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	muladdhard			;; Yes, do it the hard way
+	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	muladdhard			;; Yes, do it the hard way
 
 	vaddpd	ymm4, ymm4, [srcreg+r9+d1]		;; R2 = R2 + MemR2
 	vaddpd	ymm8, ymm8, [srcreg+r9+d1+32]		;; I2 = I2 + MemI2
@@ -12484,7 +13134,6 @@ muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	vmovapd	ymm0, [srcreg+r9+32]			;; MemI1
 	vaddpd	ymm3, ymm3, ymm0			;; I1 = I1 + MemI1 (lower word is irrelevant)
 	vaddpd	ymm9, ymm9, ymm0			;; R1b = R1b + MemR1b in MemI1 (upper 3 words are irrelevant)
-
 	jmp	back_to_orig
 
 muladdhard:
@@ -12541,11 +13190,47 @@ muladdhard:
 	vaddpd	ymm9, ymm9, ymm11			;; R1b = R1b + MemR1b in MemI1*MemI1#2 (upper 3 words are irrelevant)
 	vmulpd	ymm11, ymm0, ymm12			;; MemI1*MemR1#2
 	vaddpd	ymm3, ymm3, ymm11			;; I1 = I1 + MemI1*MemR1#2 (lower word is irrelevant)
-
 	jmp	back_to_orig
 
-mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	mulsubhard			;; Yes, do it the hard way
+mulsub:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
+	vmovapd	ymm15, [srcreg+d1+32][rbp]	;; MemI2
+	vmulpd	ymm4, ymm8, ymm14		;; R2 * MemR2
+	vmulpd	ymm8, ymm8, ymm15		;; R2 * MemI2
+	vmulpd	ymm9, ymm6, ymm15		;; I2 * MemI2
+	vmulpd	ymm6, ymm6, ymm14		;; I2 * MemR2
+	vsubpd	ymm4, ymm4, ymm9		;; R2*MemR2 - I2*MemI2 (new R2)
+	vaddpd	ymm8, ymm8, ymm6		;; R2*MemI2 + I2*MemR2 (new I2)
+
+	vmovapd	ymm14, [srcreg+d2][rbp]		;; MemR3
+	vmovapd	ymm15, [srcreg+d2+32][rbp]	;; MemI3
+	vmulpd	ymm6, ymm1, ymm14		;; R3 * MemR3
+	vmulpd	ymm1, ymm1, ymm15		;; R3 * MemI3
+	vmulpd	ymm9, ymm5, ymm15		;; I3 * MemI3
+	vmulpd	ymm5, ymm5, ymm14		;; I3 * MemR3
+	vsubpd	ymm6, ymm6, ymm9		;; R3*MemR3 - I3*MemI3 (new R3)
+	vaddpd	ymm1, ymm1, ymm5		;; R3*MemI3 + I3*MemR3 (new I3)
+
+	vmovapd	ymm14, [srcreg+d2+d1][rbp]	;; MemR4
+	vmovapd	ymm15, [srcreg+d2+d1+32][rbp]	;; MemI4
+	vmulpd	ymm5, ymm7, ymm14		;; R4 * MemR4
+	vmulpd	ymm7, ymm7, ymm15		;; R4 * MemI4
+	vmulpd	ymm9, ymm2, ymm15		;; I4 * MemI4
+	vmulpd	ymm2, ymm2, ymm14		;; I4 * MemR4
+	vsubpd	ymm5, ymm5, ymm9		;; R4*MemR4 - I4*MemI4 (new R4)
+	vaddpd	ymm7, ymm7, ymm2		;; R4*MemI4 + I4*MemR4 (new I4)
+
+	vmovapd	ymm14, [srcreg][rbp]		;; MemR1
+	vmovapd	ymm15, [srcreg+32][rbp]		;; MemI1
+	vmulpd	ymm2, ymm3, ymm14		;; R1 * MemR1		(new real R1)
+	vmulpd	ymm3, ymm3, ymm15		;; R1 * MemI1
+	vmulpd	ymm9, ymm0, ymm15		;; I1 * MemI1		(new real I1)
+	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
+	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
+	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
+
+	mov	r10, SRC3ARG			;; Load distance to FFT(1)
+	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	mulsubhard			;; Yes, do it the hard way
 
 	vsubpd	ymm4, ymm4, [srcreg+r9+d1]		;; R2 = R2 - MemR2
 	vsubpd	ymm8, ymm8, [srcreg+r9+d1+32]		;; I2 = I2 - MemI2
@@ -12559,7 +13244,6 @@ mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	vmovapd	ymm0, [srcreg+r9+32]			;; MemI1
 	vsubpd	ymm3, ymm3, ymm0			;; I1 = I1 - MemI1 (lower word is irrelevant)
 	vsubpd	ymm9, ymm9, ymm0			;; R1b = R1b - MemR1b in MemI1 (upper 3 words are irrelevant)
-
 	jmp	back_to_orig
 
 mulsubhard:
@@ -12616,7 +13300,6 @@ mulsubhard:
 	vsubpd	ymm9, ymm9, ymm11			;; R1b = R1b - MemR1b in MemI1*MemI1#2 (upper 3 words are irrelevant)
 	vmulpd	ymm11, ymm0, ymm12			;; MemI1*MemR1#2
 	vsubpd	ymm3, ymm3, ymm11			;; I1 = I1 - MemI1*MemR1#2 (lower word is irrelevant)
-
 	jmp	back_to_orig
 
 orig:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
@@ -12832,7 +13515,6 @@ addmul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
 	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
 	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
-
 	jmp	back_to_orig
 
 submul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
@@ -12886,7 +13568,6 @@ submul:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	vmulpd	ymm0, ymm0, ymm14		;; I1 * MemR1
 	vsubpd	ymm10, ymm2, ymm9		;; R1*MemR1 - I1*MemI1 (new complex R1)
 	vaddpd	ymm3, ymm3, ymm0		;; R1*MemI1 + I1*MemR1 (new complex I1)
-
 	jmp	back_to_orig
 
 fma_or_unfft:
@@ -12954,8 +13635,8 @@ fma:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2
 	je	mulsub				;; 4=mulsub
 	;jb	muladd				;; 3=muladd, fall through
 
-muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	muladdhard			;; Yes, do it the hard way
+muladd:	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	muladdhard			;; Yes, do it the hard way
 
 	vaddpd	ymm4, ymm4, [srcreg+r9+d1]		;; R2 = R2 + MemR2
 	vaddpd	ymm8, ymm8, [srcreg+r9+d1+32]		;; I2 = I2 + MemI2
@@ -12969,7 +13650,6 @@ muladd:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	vmovapd	ymm0, [srcreg+r9+32]			;; MemI1
 	vaddpd	ymm3, ymm3, ymm0			;; I1 = I1 + MemI1 (lower word is irrelevant)
 	vaddpd	ymm9, ymm9, ymm0			;; R1b = R1b + MemR1b in MemI1 (upper 3 words are irrelevant)
-
 	jmp	back_to_orig
 
 muladdhard:
@@ -13026,11 +13706,10 @@ muladdhard:
 	vaddpd	ymm9, ymm9, ymm11			;; R1b = R1b + MemR1b in MemI1*MemI1#2 (upper 3 words are irrelevant)
 	vmulpd	ymm11, ymm0, ymm12			;; MemI1*MemR1#2
 	vaddpd	ymm3, ymm3, ymm11			;; I1 = I1 + MemI1*MemR1#2 (lower word is irrelevant)
-
 	jmp	back_to_orig
 
-mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
-	jne	mulsubhard			;; Yes, do it the hard way
+mulsub:	test	r10, 3				;; Check if we need to multiply add-in by FFT(1)
+	jz	mulsubhard			;; Yes, do it the hard way
 
 	vsubpd	ymm4, ymm4, [srcreg+r9+d1]		;; R2 = R2 - MemR2
 	vsubpd	ymm8, ymm8, [srcreg+r9+d1+32]		;; I2 = I2 - MemI2
@@ -13044,7 +13723,6 @@ mulsub:	cmp	r10, 1				;; Check if we need to multiply add-in by FFT(1)
 	vmovapd	ymm0, [srcreg+r9+32]			;; MemI1
 	vsubpd	ymm3, ymm3, ymm0			;; I1 = I1 - MemI1 (lower word is irrelevant)
 	vsubpd	ymm9, ymm9, ymm0			;; R1b = R1b - MemR1b in MemI1 (upper 3 words are irrelevant)
-
 	jmp	back_to_orig
 
 mulsubhard:
@@ -13101,7 +13779,6 @@ mulsubhard:
 	vsubpd	ymm9, ymm9, ymm11			;; R1b = R1b - MemR1b in MemI1*MemI1#2 (upper 3 words are irrelevant)
 	vmulpd	ymm11, ymm0, ymm12			;; MemI1*MemR1#2
 	vsubpd	ymm3, ymm3, ymm11			;; I1 = I1 - MemI1*MemR1#2 (lower word is irrelevant)
-
 	jmp	back_to_orig
 
 orig:	vmovapd	ymm14, [srcreg+d1][rbp]		;; MemR2

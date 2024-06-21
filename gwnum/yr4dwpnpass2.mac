@@ -1,4 +1,4 @@
-; Copyright 2011-2020 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -6,7 +6,7 @@
 ;
 
 ;;
-;; Estimated memory requirements for all-complex pass 2 macros:
+;; Estimated memory requirements for complex pass 2 macros:
 ;;
 ;; Pass 2 size:		48	64	80	192	256	320	768	1024	1280	1536	2048	2560	2304	3072
 ;; FFT data:		<1K	1K	2K	3K	4K	5K	12K	16K	20K	24K	32K	40K	36K	48K

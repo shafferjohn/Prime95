@@ -1,4 +1,4 @@
-; Copyright 2001-2012 Mersenne Research, Inc.  All rights reserved
+; Copyright 2001-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -102,11 +102,11 @@ buildfor                 + P4TP              ,	xpass2gen 13
 
 buildfor CORE    + P4    + P4TP + K8    + K10,	hg_pass1levels6pfa5 10K, 8, 4
 buildfor CORE    + P4    + P4TP + K8    + K10,	hg_pass1levels6pfa6 12K, 8, 4
-buildfor CORE_64 + P4    + P4TP + K8_32      ,	hg_pass1levels6pfa7 14K, 8, 4
+buildfor CORE_64 + P4           + K8_32      ,	hg_pass1levels6pfa7 14K, 8, 4
 buildfor         + P4_32                     ,	hg_pass1levels6pfa8 16K, 8, 4
 buildfor         + P4_32                     ,	hg_pass1levels7pfa5 20K, 8, 4
 buildfor         + P4    + P4TP              ,	hg_pass1levels7pfa6 24K, 8, 4
-buildfor CORE    + P4_32 + P4TP              ,	hg_pass1levels7pfa7 28K, 8, 4
+buildfor CORE    + P4_32                     ,	hg_pass1levels7pfa7 28K, 8, 4
 buildfor         + P4                        ,	hg_pass1levels7pfa8 32K, 8, 4
 
 buildfor CORE_64 + P4    + P4TP + K8    + K10,	hg_pass1levels6complex3	12K, 8, 4
@@ -117,22 +117,22 @@ buildfor         + P4                        ,	hg_pass1levels7complex4 32K, 8, 4
 buildfor                 + P4TP              ,	hg_pass1sclevels8pfa5 160K, 10, 4
 buildfor                                     ,	hg_pass1sclevels8pfa5 160K, 10, 2
 buildfor                 + P4TP              ,	hg_pass1sclevels8pfa6 192K, 10, 4
-buildfor CORE            + P4TP              ,	hg_pass1sclevels8pfa6 192K, 10, 2
-buildfor         + P4_32                     ,	hg_pass1sclevels8pfa6 192K, 10, 1
+buildfor                                     ,	hg_pass1sclevels8pfa6 192K, 10, 2
+buildfor                                     ,	hg_pass1sclevels8pfa6 192K, 10, 1
 buildfor                 + P4TP              ,	hg_pass1sclevels8pfa7 224K, 10, 4
-buildfor                 + P4TP + K8         ,	hg_pass1sclevels8pfa7 224K, 10, 2
+buildfor                                     ,	hg_pass1sclevels8pfa7 224K, 10, 2
 buildfor                 + P4TP              ,	hg_pass1sclevels8pfa8 256K, 10, 4
 buildfor                                     ,	hg_pass1sclevels8pfa8 256K, 10, 2
 buildfor         + P4_32 + P4TP              ,	hg_pass1sclevels9pfa5 320K, 10, 4
 buildfor                                     ,	hg_pass1sclevels9pfa5 320K, 10, 2
-buildfor                        + K8_32      ,	hg_pass1sclevels9pfa5 320K, 10, 1
-buildfor         + P4_32 + P4TP              ,	hg_pass1sclevels9pfa6 384K, 10, 4
+buildfor                                     ,	hg_pass1sclevels9pfa5 320K, 10, 1
+buildfor                 + P4TP              ,	hg_pass1sclevels9pfa6 384K, 10, 4
 buildfor                                     ,	hg_pass1sclevels9pfa6 384K, 10, 2
 buildfor                                     ,	hg_pass1sclevels9pfa6 384K, 10, 1
 buildfor                 + P4TP              ,	hg_pass1sclevels9pfa7 448K, 10, 4
 buildfor                                     ,	hg_pass1sclevels9pfa7 448K, 10, 2
 buildfor                                     ,	hg_pass1sclevels9pfa7 448K, 10, 1
-buildfor         + P4_32 + P4TP              ,	hg_pass1sclevels9pfa8 512K, 10, 4
+buildfor                 + P4TP              ,	hg_pass1sclevels9pfa8 512K, 10, 4
 buildfor                                     ,	hg_pass1sclevels9pfa8 512K, 10, 2
 buildfor                                     ,	hg_pass1sclevels9pfa8 512K, 10, 1
 
@@ -157,13 +157,13 @@ buildfor                                     ,	hg_pass1levels6pfa5 80K, 11, 4
 buildfor                                     ,	hg_pass1levels6pfa6 96K, 11, 4
 buildfor                                     ,	hg_pass1levels6pfa7 112K, 11, 4
 buildfor                                     ,	hg_pass1levels6pfa8 128K, 11, 4
-buildfor                 + P4TP              ,	hg_pass1sclevels9pfa5 640K, 11, 4
-buildfor                        + K8_32      ,	hg_pass1sclevels9pfa5 640K, 11, 1
+buildfor                                     ,	hg_pass1sclevels9pfa5 640K, 11, 4
+buildfor                                     ,	hg_pass1sclevels9pfa5 640K, 11, 1
 buildfor                 + P4TP              ,	hg_pass1sclevels9pfa6 768K, 11, 4
 buildfor                                     ,	hg_pass1sclevels9pfa6 768K, 11, 2
 buildfor                 + P4TP              ,	hg_pass1sclevels9pfa7 896K, 11, 4
 buildfor                                     ,	hg_pass1sclevels9pfa7 896K, 11, 2
-buildfor         + P4_32 + P4TP              ,	hg_pass1sclevels9pfa8 1024K, 11, 4
+buildfor                 + P4TP              ,	hg_pass1sclevels9pfa8 1024K, 11, 4
 buildfor                                     ,	hg_pass1sclevels9pfa8 1024K, 11, 2
 buildfor                                     ,	hg_pass1sclevels10pfa5 1280K, 11, 2
 buildfor                                     ,	hg_pass1sclevels10pfa6 1536K, 11, 1
@@ -181,31 +181,31 @@ buildfor                                     ,	hg_pass1sclevels10complex3 1536K,
 
 buildfor                                     ,	hg_pass1sclevels8pfa5 640K, 12, 2
 buildfor         + P4                        ,	hg_pass1sclevels8pfa6 768K, 12, 2
-buildfor                        + K8_32      ,	hg_pass1sclevels8pfa7 896K, 12, 2
+buildfor                                     ,	hg_pass1sclevels8pfa7 896K, 12, 2
 buildfor                                     ,	hg_pass1sclevels8pfa7 896K, 12, 1
 buildfor                                     ,	hg_pass1sclevels8pfa8 1024K, 12, 4
 buildfor                                     ,	hg_pass1sclevels8pfa8 1024K, 12, 2
 buildfor                                     ,	hg_pass1sclevels8pfa8 1024K, 12, 1
-buildfor         + P4_32 + P4TP              ,	hg_pass1sclevels9pfa5 1280K, 12, 4
-buildfor                        + K8_32      ,	hg_pass1sclevels9pfa5 1280K, 12, 1
+buildfor                                     ,	hg_pass1sclevels9pfa5 1280K, 12, 4
+buildfor                                     ,	hg_pass1sclevels9pfa5 1280K, 12, 1
 buildfor CORE_64 + P4_32 + P4TP              ,	hg_pass1sclevels9pfa6 1536K, 12, 4
 buildfor                                     ,	hg_pass1sclevels9pfa6 1536K, 12, 1
 buildfor                 + P4TP              ,	hg_pass1sclevels9pfa7 1792K, 12, 4
-buildfor                        + K8_32      ,	hg_pass1sclevels9pfa7 1792K, 12, 1
-buildfor         + P4    + P4TP              ,	hg_pass1sclevels9pfa8 2048K, 12, 4
+buildfor                                     ,	hg_pass1sclevels9pfa7 1792K, 12, 1
+buildfor         + P4_32 + P4TP              ,	hg_pass1sclevels9pfa8 2048K, 12, 4
 buildfor                                     ,	hg_pass1sclevels9pfa8 2048K, 12, 2
 buildfor                                     ,	hg_pass1sclevels9pfa8 2048K, 12, 1
-buildfor                 + P4TP              ,	hg_pass1sclevels10pfa5 2560K, 12, 4
+buildfor                                     ,	hg_pass1sclevels10pfa5 2560K, 12, 4
 buildfor                                     ,	hg_pass1sclevels10pfa5 2560K, 12, 1
-buildfor CORE_64 + P4_32                     ,	hg_pass1sclevels10pfa6 3072K, 12, 4
+buildfor           P4_32                     ,	hg_pass1sclevels10pfa6 3072K, 12, 4
 buildfor                                     ,	hg_pass1sclevels10pfa6 3072K, 12, 1
 buildfor                                     ,	hg_pass1sclevels10pfa7 3584K, 12, 4
 buildfor                                     ,	hg_pass1sclevels10pfa7 3584K, 12, 2
 buildfor                                     ,	hg_pass1sclevels10pfa7 3584K, 12, 1
-buildfor         + P4_32                     ,	hg_pass1sclevels10pfa8 4096K, 12, 4
+buildfor           P4_32                     ,	hg_pass1sclevels10pfa8 4096K, 12, 4
 buildfor                                     ,	hg_pass1sclevels10pfa8 4096K, 12, 2
 buildfor                                     ,	hg_pass1sclevels10pfa8 4096K, 12, 1
-buildfor         + P4_32        + K8_32      ,	hg_pass1sclevels11pfa5 5M, 12, 4
+buildfor                                     ,	hg_pass1sclevels11pfa5 5M, 12, 4
 buildfor                                     ,	hg_pass1sclevels11pfa5 5M, 12, 1
 buildfor                                     ,	hg_pass1sclevels11pfa6 6M, 12, 4
 buildfor                                     ,	hg_pass1sclevels11pfa6 6M, 12, 2
@@ -241,7 +241,7 @@ buildfor                                     ,	hg_pass1sclevels11complex4 8M, 12
 buildfor                                     ,	hg_pass1sclevels9pfa5 2560K, 13, 1
 buildfor                                     ,	hg_pass1sclevels9pfa6 3072K, 13, 1
 buildfor                 + P4TP              ,	hg_pass1sclevels9pfa7 3584K, 13, 1
-buildfor                 + P4TP              ,	hg_pass1sclevels9pfa8 4096K, 13, 1
+buildfor                                     ,	hg_pass1sclevels9pfa8 4096K, 13, 1
 buildfor                                     ,	hg_pass1sclevels11pfa5 10M, 13, 4
 buildfor                                     ,	hg_pass1sclevels11pfa6 12M, 13, 4
 buildfor                                     ,	hg_pass1sclevels11pfa7 14M, 13, 4

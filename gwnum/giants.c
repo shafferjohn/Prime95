@@ -7,7 +7,7 @@
  *  Massive rewrite by G. Woltman for 32-bit support
  *
  *  c. 1997,1998 Perfectly Scientific, Inc.
- *  c. 1998-2015 Mersenne Research, Inc.
+ *  c. 1998-2023 Mersenne Research, Inc.
  *  All Rights Reserved.
  *
  **************************************************************/
@@ -150,7 +150,7 @@ giant allocgiant (		/* Create a new giant */
 }
 
 void itog (		/* The giant g becomes set to the integer value i. */
-	int	i,
+	int32_t	i,
 	giant	g)
 {
 	if (i > 0) {
@@ -175,6 +175,18 @@ void ultog (		/* The giant g becomes set to the integer value i. */
 	} else {
 		g->sign = 1;
 		g->n[0] = i;
+	}
+}
+
+void slltog (		/* The giant g becomes set to the integer value i. */
+	int64_t i,
+	giant	g)
+{
+	if (i >= 0) {
+		ulltog (i, g);
+	} else {
+		ulltog (-i, g);
+		g->sign = -g->sign;
 	}
 }
 
@@ -759,6 +771,10 @@ void modgi (		/* n becomes n%d. n is arbitrary, but the
 	ASSERTG (d->sign > 0);
 	ASSERTG (d->n[d->sign-1] != 0);
 	ASSERTG (n->sign == 0 || n->n[abs(n->sign)-1] != 0);
+
+/* Quick check for n already less than d */
+
+	if (n->sign >= 0 && (n->sign < d->sign || (n->sign == d->sign && gcompg (n, d) < 0))) return;
 
 /* Use divg to compute the mod */
 
@@ -1431,6 +1447,117 @@ void gtogshiftright (	/* shift src right. Equivalent to dest = src/2^bits. */
 	ASSERTG (dest->sign == 0 || dest->n[abs(dest->sign)-1] != 0);
 }
 
+// Highly specialized routine for gwnum's gwtogiant.  Like gtogshiftright extract top bits of src and copy them to dest.
+// However if accum == -1 then flip dest bits and make dest negative.  Also clear src bits that were copied to dest.
+
+void gtogshiftrightsplit (
+	int	bits,
+	giant	src,			// Must be positive
+	giant	dest,
+	int64_t	accum)			// Must be 0 or -1
+{
+	int	src_size = src->sign;
+	int 	word = bits >> 5;
+	int 	bit = bits & 31;
+	uint32_t carry, *sptr, *dptr;
+
+	ASSERTG (bits > 0);
+	ASSERTG (src != dest);
+	ASSERTG (src->sign >= 0 && (src->sign == 0 || src->n[src->sign-1] != 0));
+
+	if (word >= src_size) {
+		// The normal case is accum is zero and we set dest = 0.  The abnormal case is accum = -1.  This only happens for generic reduction
+		// where gwtogiant is converting roughly half of the FFT data.  In this case, make src negative and set dest = 0.
+		if (accum == -1) {
+			for (int i = 0; i < src_size; i++) src->n[i] = ~src->n[i];
+			while (src->sign && src->n[src->sign-1] == 0) src->sign--;
+			iaddg (1, src);
+			src->sign = -src->sign;
+		}
+		dest->sign = 0;
+		return;
+	}
+
+	// Init pointers
+	sptr = src->n + word;
+	dptr = dest->n;
+
+	// Split first source word
+	if (bit) {
+		carry = *sptr >> bit;
+		*sptr -= (carry << bit);
+		word++;
+		sptr++;
+	}
+	src->sign = word;
+
+	// Split subsequent words without modifying source
+	for ( ; word < src_size; word++, sptr++, dptr++) {
+		if (bit == 0) *dptr = *sptr;
+		else *dptr = (*sptr << (32 - bit)) + carry, carry = *sptr >> bit;
+		if (accum == -1) *dptr = ~*dptr;
+	}
+
+	// Output the carry
+	if (bit) {
+		if (accum == 0) *dptr = carry;
+		else *dptr = (~(carry << bit)) >> bit;		// Bit flip only the relevant carry bits 
+		dptr++;
+	}
+
+	// Trim source
+	while (src->sign && src->n[src->sign-1] == 0) src->sign--;
+
+	// Trim dest, increment result if accum = -1
+	dest->sign = (int) (dptr - dest->n);
+	while (dest->sign && dest->n[dest->sign-1] == 0) dest->sign--;
+	if (accum == -1) iaddg (1, dest), dest->sign = -dest->sign;
+
+	ASSERTG (src->sign == 0 || src->n[src->sign-1] != 0);
+	ASSERTG (dest->sign == 0 || dest->n[abs(dest->sign)-1] != 0);
+}
+
+// Highly specialized routine for gwnum's gwtogiant, sets top bits of dest.  dest = (dest % 2^bits) + (src * 2^bits)
+
+void gtogshiftleftunsplit (
+	int	bits,
+	giant	src,			// Must be positive
+	giant	dest)			// Must be positive
+{
+	int	src_size = src->sign;
+	int	dest_size = dest->sign;
+	int 	word = bits >> 5;
+	int 	bit = bits & 31;
+	uint32_t carry, *sptr, *dptr;
+
+	ASSERTG (bits > 0);
+	ASSERTG (src != dest);
+	ASSERTG (src->sign >= 0 && (src->sign == 0 || src->n[src->sign-1] != 0));
+	ASSERTG (dest->sign >= 0 && (dest->sign == 0 || dest->n[dest->sign-1] != 0));
+
+	// We assume dest has already been trimmed.  If src is zero, then we're done.
+	if (src_size == 0) return;
+
+	// Zero upper word of dest if needed
+	if (word > dest_size) memset (dest->n + dest_size, 0, (word - dest_size) * sizeof (uint32_t));
+
+	// Split source words while copying to dest
+	sptr = src->n;
+	dptr = dest->n + word;
+	carry = (bit == 0) ? 0 : *dptr;
+	for ( ; src_size; src_size--, sptr++, dptr++) {
+		*dptr = (*sptr << bit) + carry;
+		carry = (bit == 0) ? 0 : *sptr >> (32 - bit);
+	}
+	if (carry) *dptr++ = carry;
+
+	// Trim dest, increment result if accum = -1
+	dest->sign = (int) (dptr - dest->n);
+	while (dest->sign && dest->n[dest->sign-1] == 0) dest->sign--;
+
+	ASSERTG (dest->sign == 0 || dest->n[dest->sign-1] != 0);
+}
+
 int invg (		/* Computes 1/y, that is the number n such that */
 			/* n * y mod x = 1.  If x and y are not */
 			/* relatively prime, y is the -1 * GCD (x, y). */
@@ -1482,15 +1609,13 @@ int invg_common (	/* Common invg code */
 	while (y->sign < 0) addg (x, y);
 	modgi (gdata, x, y);
 
-/* Compute the GCD and inverse the fastest way possible */
-/* The inverse is computed in the matrix A, and only the */
-/* right side of the matrix is needed.  However, the recursive */
-/* ggcd code needs the left side of the array allocated. */
+/* Compute the GCD and inverse the fastest way possible.  The inverse is computed in the matrix A, and only the */
+/* right side of the matrix is needed.  However, the recursive ggcd code needs the left side of the array allocated. */
 
-	A.ur = popg (gdata, x->sign);
+	A.ur = popg (gdata, x->sign + 1);			// In theory, +1 not needed.  See second test_paul.c in mersenne forum thread mentioned below.
 	if (A.ur == NULL) { stop_reason = GIANT_OUT_OF_MEMORY; goto done; }
 	setzero (A.ur);
-	A.lr = popg (gdata, x->sign);
+	A.lr = popg (gdata, x->sign + 1);			// In theory, +1 not needed.  But https://www.mersenneforum.org/showpost.php?p=638742&postcount=75 fails.
 	if (A.lr == NULL) { stop_reason = GIANT_OUT_OF_MEMORY; goto done; }
 	setone (A.lr);
 	if (y->sign <= GCDLIMIT) {
@@ -2499,7 +2624,7 @@ int ggcd (		/* A giant gcd.  Modifies its arguments. */
 	return (cextgcdg (gdata, x, y, NULL, interruptable));
 
 /* Error exit */
-	
+
 done:	pushall (gdata, ss);
 	return (stop_reason);
 }
@@ -2522,10 +2647,10 @@ int rhgcd (	/* recursive hgcd calls accumulating extended GCD info */
 	A.ll = popg (gdata, (*x)->sign);
 	if (A.ll == NULL) { stop_reason = GIANT_OUT_OF_MEMORY; goto done; }
 	setzero (A.ll);
-	A.ur = popg (gdata, (*x)->sign);
+	A.ur = popg (gdata, (*x)->sign + 1);					// In theory, +1 not needed.  But general mod on 27*2^100000-1 will then fail.
 	if (A.ur == NULL) { stop_reason = GIANT_OUT_OF_MEMORY; goto done; }
 	setzero (A.ur);
-	A.lr = popg (gdata, (*x)->sign);
+	A.lr = popg (gdata, (*x)->sign + 1);					// In theory, +1 not needed.  But general mod on 2163*2^1255556+1 will then fail.
 	if (A.lr == NULL) { stop_reason = GIANT_OUT_OF_MEMORY; goto done; }
 	setone (A.lr);
 
@@ -2560,7 +2685,15 @@ int hgcd (	/* hgcd(n,x,y,A) chops n words off x and y and computes the
 	giant 	x, y;
 	int	half_size, stop_reason;
 
-	ASSERTG (n >= 0);
+	ASSERTG (n >= 0 && n < (*xx)->sign && n < (*yy)->sign);
+
+#ifdef DEBUG_CODE
+giant t1 = allocgiant (10000);
+giant t2 = allocgiant (10000);
+int A1 = (A->ur->sign == 0);
+gtog (*xx, t1);
+gtog (*yy, t2);
+#endif
 
 /* Don't do anything if y isn't more than n words long */
 
@@ -2626,7 +2759,8 @@ int hgcd (	/* hgcd(n,x,y,A) chops n words off x and y and computes the
 		a_size = half_size >> 1;
 		stop_reason = hgcd (gdata, y->sign - (a_size + a_size + 1), &x, &y, A, interruptable);
 		if (stop_reason) return (stop_reason);
-		a_size = abs (A->lr->sign);
+		a_size = intmax (abs (A->lr->sign), abs (A->ur->sign));
+		ASSERTG (a_size >= abs (A->ll->sign) && a_size >= abs (A->ul->sign));
 
 /* Do the second recursion.  Note how we use the upper half of the gmatrix A */
 /* in order to save a lot of memory.  Be wary of the matrix multiply of B */
@@ -2711,6 +2845,25 @@ int hgcd (	/* hgcd(n,x,y,A) chops n words off x and y and computes the
 	else {
 		if (*xx != x) gswap (xx, yy);
 	}
+
+#ifdef DEBUG_CODE
+if (A1) {
+giant t3 = allocgiant (10000);
+giant t4 = allocgiant (10000);
+gtog (t1, t3);  mulg (A->ul, t3);
+gtog (t2, t4);  mulg (A->ur, t4);
+addg (t3, t4);
+ASSERTG (gcompg (*xx, t4) == 0);
+gtog (t1, t3);  mulg (A->ll, t3);
+gtog (t2, t4);  mulg (A->lr, t4);
+addg (t3, t4);
+ASSERTG (gcompg (*yy, t4) == 0);
+free (t3);
+free (t4);
+}
+free (t1);
+free (t2);
+#endif
 
 /* All done */
 

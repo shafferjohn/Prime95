@@ -1,4 +1,4 @@
-; Copyright 1995-2012 Mersenne Research, Inc.  All rights reserved
+; Copyright 1995-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -62,7 +62,7 @@ saved_edx	EQU	DPTR [rsp+first_local+12]
 saved_esi	EQU	DPTR [rsp+first_local+16]
 
 inorm	MACRO	lab, ttp, zero, echk, const
-	LOCAL	noadd, ilp0, ilp1, ilpdn, done
+	LOCAL	noadd, ilp0, ilp1, ilpdn, noadd2, done
 	PROCFLP	lab
 	int_prolog 20,0,0,rcx,rbp
 	mov	saved_edx, edx		;; Save registers for top_carry_adjust
@@ -116,10 +116,16 @@ ilpdn:	fstp	SUMOUT			;; Save SUMOUT
 echk	fstp	MAXERR			;; Save maximum error
 ttp	mov	norm_ptr1, edi		;; Save big/little flags array ptr
 ttp	mov	norm_ptr2, ebx		;; Save column multipliers ptr
-
-	;; Handle adjusting the carry out of the topmost FFT word
 	mov	edx, saved_edx		;; Restore edx (pass1 loop counter)
 	mov	esi, saved_esi		;; Restore esi (FFT data pointer)
+no zero	cmp	edx, ADDIN_ROW		;; Is this the time to do our addin?
+no zero	jne	short noadd2		;; Jump if addin does not occur now
+no zero	mov	edi, ADDIN_OFFSET	;; Get address to add value into
+no zero	fld	QWORD PTR [esi][edi]	;; Get the value
+no zero	fadd	POSTADDIN_VALUE		;; Add in the requested value
+no zero	fstp	QWORD PTR [esi][edi]	;; Save the new value
+noadd2:
+	;; Handle adjusting the carry out of the topmost FFT word
 	cmp	edx, 65536+256		;; Check for last iteration
 	jne	done			;; Top carry may require adjusting
 	norm_top_carry_2d		;; Adjust carry for k > 1

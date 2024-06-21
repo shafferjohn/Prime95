@@ -1,4 +1,4 @@
-; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -735,7 +735,7 @@ zr5_csc_wpn_five_complex_last_djbunfft MACRO srcreg,srcinc,d1,screg,scinc,maskre
 	L1prefetchw srcreg+4*d1+64+L1pd, L1pt
 
 ;;; BUG  BUG  BUG  -- for now simply apply weights using uncompressed masks without any FMA attempts or merging with sin/cos data
-;; Ideas include: merge the group multiplier with the fixed sin data above (only works for all-complex FFTs) or do the group
+;; Ideas include: merge the group multiplier with the fixed sin data above (only works for negacyclic FFTs) or do the group
 ;; multiplier in the normalize step -- it is FREE when done as an FMA that adds in the carry.
 
 	kmovw	k1, [maskreg+0]			;; Load R1 and I1 fudge factor mask

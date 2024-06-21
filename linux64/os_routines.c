@@ -2,11 +2,11 @@
 /* so that they can be included in both the command-line mprime version as */
 /* well as the Mac OS X GUI version. */
 
-/* Copyright 1995-2021 Mersenne Research, Inc. */
+/* Copyright 1995-2023 Mersenne Research, Inc. */
 /* Author:  George Woltman */
 /* Email: woltman@alum.mit.edu */
 
-/* Do some work prior to launching worker threads */
+/* Do some work prior to launching workers */
 /* Windows uses this to implement boot delay. */
 /* On the Mac, we use this to disable OS X Mavericks power-saving heuristics */
 
@@ -31,7 +31,7 @@ void PreLaunchCallback (
 #endif
 }
 
-/* Do some work after worker threads have terminated */
+/* Do some work after workers have terminated */
 /* NOTE: We can't use DEFEAT_POWER_SAVE in the if statement because the global */
 /* variable can be changed in the preferences page before PostLaunchCallback is called. */
 
@@ -223,7 +223,7 @@ unsigned long physical_memory (void)
 		return (value.ui32 >> 20);
 	else
 		return ((unsigned long) (value.ui64 >> 20));
-#elif defined (__HAIKU__)
+#elif defined (__HAIKU__) || defined (__EMX__)
 	long phys_pages;
 	long page_size;
 
@@ -274,18 +274,15 @@ void clearThreadHandleArray (void)
 {
 }
 
-/* Register a thread termination.  We remove the thread handle from the */
-/* list of active worker threads. */
+/* Register a thread termination.  We remove the thread handle from the list of active workers. */
 
 void registerThreadTermination (void)
 {
 }
 
-/* When stopping or exiting we raise the priority of all worker threads */
-/* so that they can terminate in a timely fashion even if there are other */
-/* CPU bound tasks running. */
+/* When stopping or exiting we raise the priority of all workersso that they can terminate in a timely fashion even if there are other CPU bound tasks running. */
 
-void raiseAllWorkerThreadPriority (void)
+void raiseAllWorkersPriority (void)
 {
 }
 
@@ -399,7 +396,7 @@ int LoadPrimeNet (void)
 	int	lines = 0;
 	FILE	*fd;
 	char	buffer[4096];
-	int	RtReq = IniSectionGetInt (INI_FILE, "PrimeNet", "RouteRequired", 99);
+	int	RtReq = IniSectionGetInt (INI_FILE, SEC_PrimeNet, "RouteRequired", 99);
 	if (RtReq == 0) return (TRUE);
 	fd = fopen("/proc/net/route","r");
 	if (fd == NULL) return (RtReq == 99);
@@ -429,7 +426,7 @@ int LoadPrimeNet (void)
 		}
 	}
 	fclose(fd);
-#elif defined (__FreeBSD__) || defined (__APPLE__) || defined (__WATCOMC__) || defined (__HAIKU__)
+#elif defined (__FreeBSD__) || defined (__APPLE__) || defined (__WATCOMC__) || defined (__HAIKU__) || defined (__EMX__)
 	/* The /proc/net/route test is only really meaningfulunder linux. */
 	/* For other OSes, there doesn't seem to be any meaningful test to see whether the */
 	/* computer is connected to the Internet at the time using a non- */

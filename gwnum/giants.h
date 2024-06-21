@@ -10,7 +10,7 @@
  *	    20 Apr 97  RDW
  *
  *	c. 1997 Perfectly Scientific, Inc.
- *	c. 1998-2017 Mersenne Research, Inc.
+ *	c. 1998-2023 Mersenne Research, Inc.
  *	All Rights Reserved.
  *
  **************************************************************/
@@ -18,8 +18,7 @@
 #ifndef _GIANTS_H_
 #define _GIANTS_H_
 
-/* This is a C library.  If used in a C++ program, don't let the C++ */
-/* compiler mangle names. */
+/* This is a C library.  If used in a C++ program, don't let the C++ compiler mangle names. */
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,11 +55,9 @@ extern "C" {
 
 typedef struct
 {
-	 int	sign;
-	 uint32_t *n;		/* ptr to array of longs */
-#ifdef GDEBUG
-	int	maxsize;
-#endif
+	int	maxsize;	/* not used except for debugging.  Makes giantstruct compatible with GMP library! */
+	int	sign;		/* abs(sign) is number of uint32_t's in n.  If sign is negative, giant is negative. */
+	uint32_t *n;		/* ptr to array of longs */
 } giantstruct;
 
 typedef giantstruct *giant;
@@ -78,11 +75,7 @@ typedef giantstruct *giant;
  **************************************************************/
 
 /* Create a new giant variable on the stack */
-#ifdef GDEBUG
-#define stackgiant(name,count) uint32_t name##_data[count]; giantstruct name##_struct = {0, (uint32_t *) &name##_data, count}; const giant name = &name##_struct
-#else
-#define stackgiant(name,count) uint32_t name##_data[count]; giantstruct name##_struct = {0, (uint32_t *) &name##_data}; const giant name = &name##_struct
-#endif
+#define stackgiant(name,count) uint32_t name##_data[count]; giantstruct name##_struct = {count, 0, (uint32_t *) &name##_data}; const giant name = &name##_struct
 
 /* Creates a new giant allocating an array of uint32_t */
 giant 	allocgiant(int count);
@@ -108,10 +101,11 @@ void 	gtog(giant src, giant dest);
 /* Integer -> giant. */
 #define setzero(g)	(g)->sign = 0
 #define setone(g)	(g)->sign = (g)->n[0] = 1
-void 	itog(int n, giant g);
+void 	itog(int32_t n, giant g);
 void 	ultog(uint32_t n, giant g);
 
 /* Long long -> giant. */
+void 	slltog(int64_t n, giant g);
 void 	ulltog(uint64_t n, giant g);
 
 /* Double -> giant. */
@@ -195,6 +189,13 @@ void 	gshiftleft(int bits, giant g);
 #define	gshiftright(n,g)	{if (n) gtogshiftright (n, g, g);}
 void 	gtogshiftright (int bits, giant src, giant dest);
 
+// Highly specialized routine for gwnum's gwtogiant.  Like gtogshiftright extract top bits of src and copy them to dest.
+// However if accum == -1 then flip dest bits and make dest negative.  Also clear src bits that were copied to dest.
+void gtogshiftrightsplit (int bits, giant src, giant dest, int64_t accum);
+
+// Highly specialized routine for gwnum's gwtogiant, sets top bits of dest.  dest = (dest % 2^bits) + (src * 2^bits)
+void gtogshiftleftunsplit (int bits, giant src, giant dest);
+
 /* If 1/x exists (mod n), then x := 1/x.  If
  * inverse does not exist, then x := - GCD(n, x). */
 int 	invg(giant n, giant x);
@@ -262,12 +263,9 @@ int 	gcdgi(ghandle *, int, giant n, giant x);
 
 extern void addhlp (uint32_t *res, uint32_t *carry, uint32_t val);
 extern void subhlp (uint32_t *res, uint32_t *carry, uint32_t val);
-extern void muladdhlp (uint32_t *res, uint32_t *carryl,
-		       uint32_t *carryh, uint32_t val1, uint32_t val2);
-extern void muladd2hlp (uint32_t *res, uint32_t *carryl,
-			uint32_t *carryh, uint32_t val1, uint32_t val2);
-extern void mulsubhlp (uint32_t *res, uint32_t *carryl,
-		       uint32_t *carryh, uint32_t val1, uint32_t val2);
+extern void muladdhlp (uint32_t *res, uint32_t *carryl, uint32_t *carryh, uint32_t val1, uint32_t val2);
+extern void muladd2hlp (uint32_t *res, uint32_t *carryl, uint32_t *carryh, uint32_t val1, uint32_t val2);
+extern void mulsubhlp (uint32_t *res, uint32_t *carryl, uint32_t *carryh, uint32_t val1, uint32_t val2);
 
 /* External routine pointers. */
 

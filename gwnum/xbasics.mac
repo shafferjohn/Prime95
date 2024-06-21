@@ -301,95 +301,95 @@ xmult7	MACRO	src1, src2
 	LOCAL	nozpad
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	nozpad			;; No, skip 7 word multiply
-	movsd	xmm0, Q [src1-40]	;; Result0 = word0 * word0
-	mulsd	xmm0, Q [src2-40]
-	movsd	xmm1, Q [src1-48]	;;	   + word1 * word-1
+	movsd	xmm0, Q [src1-64]	;; Result0 = word0 * word0
+	mulsd	xmm0, Q [src2-64]
+	movsd	xmm1, Q [src1-56]	;;	   + word1 * word-1
 	mulsd	xmm1, Q [src2-72]
 	addsd	xmm0, xmm1
-	movsd	xmm2, Q [src1-56]	;;	   + word2 * word-2
+	movsd	xmm2, Q [src1-48]	;;	   + word2 * word-2
 	mulsd	xmm2, Q [src2-80]
 	addsd	xmm0, xmm2
-	movsd	xmm3, Q [src1-64]	;;	   + word3 * word-3
+	movsd	xmm3, Q [src1-40]	;;	   + word3 * word-3
 	mulsd	xmm3, Q [src2-88]
 	addsd	xmm0, xmm3
 	movsd	xmm1, Q [src1-72]	;;	   + word-1 * word1
-	mulsd	xmm1, Q [src2-48]
+	mulsd	xmm1, Q [src2-56]
 	addsd	xmm0, xmm1
 	movsd	xmm2, Q [src1-80]	;;	   + word-2 * word2
-	mulsd	xmm2, Q [src2-56]
+	mulsd	xmm2, Q [src2-48]
 	addsd	xmm0, xmm2
 	movsd	xmm3, Q [src1-88]	;;	   + word-3 * word3
-	mulsd	xmm3, Q [src2-64]
+	mulsd	xmm3, Q [src2-40]
 	addsd	xmm0, xmm3
 	movsd	ZPAD0, xmm0
 
-	movsd	xmm0, Q [src1-40]	;; Result1 = word0 * word1
-	mulsd	xmm0, Q [src2-48]
-	movsd	xmm1, Q [src1-48]	;;	   + word1 * word0
-	mulsd	xmm1, Q [src2-40]
+	movsd	xmm0, Q [src1-64]	;; Result1 = word0 * word1
+	mulsd	xmm0, Q [src2-56]
+	movsd	xmm1, Q [src1-56]	;;	   + word1 * word0
+	mulsd	xmm1, Q [src2-64]
 	addsd	xmm0, xmm1
-	movsd	xmm2, Q [src1-56]	;;	   + word2 * word-1
+	movsd	xmm2, Q [src1-48]	;;	   + word2 * word-1
 	mulsd	xmm2, Q [src2-72]
 	addsd	xmm0, xmm2
-	movsd	xmm3, Q [src1-64]	;;	   + word3 * word-2
+	movsd	xmm3, Q [src1-40]	;;	   + word3 * word-2
 	mulsd	xmm3, Q [src2-80]
 	addsd	xmm0, xmm3
 	movsd	xmm2, Q [src1-72]	;;	   + word-1 * word2
-	mulsd	xmm2, Q [src2-56]
+	mulsd	xmm2, Q [src2-48]
 	addsd	xmm0, xmm2
 	movsd	xmm3, Q [src1-80]	;;	   + word-2 * word3
-	mulsd	xmm3, Q [src2-64]
+	mulsd	xmm3, Q [src2-40]
 	addsd	xmm0, xmm3
 	movsd	ZPAD1, xmm0
 
-	movsd	xmm0, Q [src1-40]	;; Result2 = word0 * word2
-	mulsd	xmm0, Q [src2-56]
-	movsd	xmm1, Q [src1-48]	;;	   + word1 * word1
-	mulsd	xmm1, Q [src2-48]
+	movsd	xmm0, Q [src1-64]	;; Result2 = word0 * word2
+	mulsd	xmm0, Q [src2-48]
+	movsd	xmm1, Q [src1-56]	;;	   + word1 * word1
+	mulsd	xmm1, Q [src2-56]
 	addsd	xmm0, xmm1
-	movsd	xmm2, Q [src1-56]	;;	   + word2 * word0
-	mulsd	xmm2, Q [src2-40]
+	movsd	xmm2, Q [src1-48]	;;	   + word2 * word0
+	mulsd	xmm2, Q [src2-64]
 	addsd	xmm0, xmm2
-	movsd	xmm3, Q [src1-64]	;;	   + word3 * word-1
+	movsd	xmm3, Q [src1-40]	;;	   + word3 * word-1
 	mulsd	xmm3, Q [src2-72]
 	addsd	xmm0, xmm3
 	movsd	xmm3, Q [src1-72]	;;	   + word-1 * word3
-	mulsd	xmm3, Q [src2-64]
+	mulsd	xmm3, Q [src2-40]
 	addsd	xmm0, xmm3
 	movsd	ZPAD2, xmm0
 
-	movsd	xmm0, Q [src1-40]	;; Result3 = word0 * word3
-	mulsd	xmm0, Q [src2-64]
-	movsd	xmm1, Q [src1-48]	;;	   + word1 * word2
-	mulsd	xmm1, Q [src2-56]
+	movsd	xmm0, Q [src1-64]	;; Result3 = word0 * word3
+	mulsd	xmm0, Q [src2-40]
+	movsd	xmm1, Q [src1-56]	;;	   + word1 * word2
+	mulsd	xmm1, Q [src2-48]
 	addsd	xmm0, xmm1
-	movsd	xmm2, Q [src1-56]	;;	   + word2 * word1
-	mulsd	xmm2, Q [src2-48]
+	movsd	xmm2, Q [src1-48]	;;	   + word2 * word1
+	mulsd	xmm2, Q [src2-56]
 	addsd	xmm0, xmm2
-	movsd	xmm3, Q [src1-64]	;;	   + word3 * word0
-	mulsd	xmm3, Q [src2-40]
+	movsd	xmm3, Q [src1-40]	;;	   + word3 * word0
+	mulsd	xmm3, Q [src2-64]
 	addsd	xmm0, xmm3
 	movsd	ZPAD3, xmm0
 
-	movsd	xmm0, Q [src1-48]	;; Result4 = word1 * word3
-	mulsd	xmm0, Q [src2-64]
-	movsd	xmm1, Q [src1-56]	;;	   + word2 * word2
-	mulsd	xmm1, Q [src2-56]
+	movsd	xmm0, Q [src1-56]	;; Result4 = word1 * word3
+	mulsd	xmm0, Q [src2-40]
+	movsd	xmm1, Q [src1-48]	;;	   + word2 * word2
+	mulsd	xmm1, Q [src2-48]
 	addsd	xmm0, xmm1
-	movsd	xmm2, Q [src1-64]	;;	   + word3 * word1
-	mulsd	xmm2, Q [src2-48]
+	movsd	xmm2, Q [src1-40]	;;	   + word3 * word1
+	mulsd	xmm2, Q [src2-56]
 	addsd	xmm0, xmm2
 	movsd	ZPAD4, xmm0
 
-	movsd	xmm0, Q [src1-56]	;; Result5 = word2 * word3
-	mulsd	xmm0, Q [src2-64]
-	movsd	xmm1, Q [src1-64]	;;	   + word3 * word2
-	mulsd	xmm1, Q [src2-56]
+	movsd	xmm0, Q [src1-48]	;; Result5 = word2 * word3
+	mulsd	xmm0, Q [src2-40]
+	movsd	xmm1, Q [src1-40]	;;	   + word3 * word2
+	mulsd	xmm1, Q [src2-48]
 	addsd	xmm0, xmm1
 	movsd	ZPAD5, xmm0
 
-	movsd	xmm0, Q [src1-64]	;; Result6 = word3 * word3
-	mulsd	xmm0, Q [src2-64]
+	movsd	xmm0, Q [src1-40]	;; Result6 = word3 * word3
+	mulsd	xmm0, Q [src2-40]
 	movsd	ZPAD6, xmm0
 
 nozpad:

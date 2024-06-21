@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------
-| Copyright 2020-2021 Mersenne Research, Inc.  All rights reserved
+| Copyright 2020-2023 Mersenne Research, Inc.  All rights reserved
 |
 | This file contains routines to certify a PRP proof.
 +---------------------------------------------------------------------*/
@@ -37,7 +37,7 @@ int writeCertSaveFile (			/* Returns TRUE if successful */
 	struct work_unit *w)		/* Work unit */
 {
 	int	fd;
-	unsigned long sum = 0;
+	uint32_t sum = 0;
 	char	buf[512];
 
 /* Now save to the intermediate file */
@@ -84,7 +84,7 @@ int readCertSaveFile (			/* Returns TRUE if succsessful */
 	struct work_unit *w)		/* Work unit */
 {
 	int	fd;
-	unsigned long sum, filesum, version;
+	uint32_t version, sum = 0, filesum;
 
 	// Open the save file
 	fd = _open (filename, _O_BINARY | _O_RDONLY);
@@ -96,7 +96,6 @@ int readCertSaveFile (			/* Returns TRUE if succsessful */
 	if (version == 0 || version > CERT_VERSION) goto err;
 
 	// Read fields that are in all versions of the save file
-	sum = 0;
 	if (!read_long (fd, &cs->error_count, &sum)) goto err;
 	if (!read_long (fd, &cs->counter, &sum)) goto err;
 	if (!read_long (fd, &cs->units_bit, &sum)) goto err;
@@ -113,7 +112,7 @@ err:	_close (fd);
 /* Do a PRP proof certification */
 
 int cert (
-	int	thread_num,		/* Worker thread number */
+	int	thread_num,		/* Worker number */
 	struct PriorityInfo *sp_info,	/* SetPriority information */
 	struct work_unit *w,		/* Worktodo entry */
 	int	pass)			/* PrimeContinue pass */
@@ -150,11 +149,6 @@ int cert (
 		goto abandon_work;
 	}
 
-/* Figure out which FFT size we should use */
-
-	stop_reason = pick_fft_size (thread_num, w);
-	if (stop_reason) goto exit;
-
 /* Init the write save file state */
 
 	tempFileName (w, filename);
@@ -162,11 +156,10 @@ int cert (
 
 /* Init the FFT code for squaring modulo k*b^n+c */
 
-	if (IniGetInt (LOCALINI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&cs.gwdata);
-	if (IniGetInt (INI_FILE, "HyperthreadPrefetch", 0)) gwset_hyperthread_prefetch (&cs.gwdata);
+	if (IniGetInt (INI_FILE, "UseLargePages", 0)) gwset_use_large_pages (&cs.gwdata);
 	if (HYPERTHREAD_LL) sp_info->normal_work_hyperthreading = TRUE, gwset_will_hyperthread (&cs.gwdata, 2);
 	gwset_bench_cores (&cs.gwdata, HW_NUM_CORES);
-	gwset_bench_workers (&cs.gwdata, NUM_WORKER_THREADS);
+	gwset_bench_workers (&cs.gwdata, NUM_WORKERS);
 	if (ERRCHK) gwset_will_error_check (&cs.gwdata);
 	else gwset_will_error_check_near_limit (&cs.gwdata);
 	gwset_num_threads (&cs.gwdata, get_worker_num_threads (thread_num, HYPERTHREAD_LL));
@@ -174,6 +167,7 @@ int cert (
 	gwset_thread_callback_data (&cs.gwdata, sp_info);
 	gwset_minimum_fftlen (&cs.gwdata, w->minimum_fftlen);
 	gwset_safety_margin (&cs.gwdata, IniGetFloat (INI_FILE, "CertificationSafetyMargin", 0.0));
+	gwset_use_spin_wait (&cs.gwdata, IniGetInt (INI_FILE, "SpinWait", 0));
 	res = gwsetup (&cs.gwdata, w->k, w->b, w->n, w->c);
 
 /* If we were unable to init the FFT code, then print an error message and return an error code. */
@@ -500,7 +494,7 @@ int cert (
 
 /* Format a JSON version of the result.  An example follows: */
 /* {"exponent":25000000, "worktype":"Cert", "sha3-hash":"0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF", */
-/* "fft-length":4096000, "error-code":"00010000", */
+/* "fft-length":4096000, "squarings":100000, "error-code":"00010000", */
 /* "security-code":"C6B0B26C", "program":{"name":"prime95", "version":"30.1", "build":"1"}, "timestamp":"2019-01-15 23:28:16", */
 /* "user":"gw_2", "cpu":"basement", "aid":"FF00AA00FF00AA00FF00AA00FF00AA00"} */
 
@@ -509,12 +503,14 @@ int cert (
 	JSONaddExponent (JSONbuf, w);
 	sprintf (JSONbuf+strlen(JSONbuf), ", \"sha3-hash\":\"%s\"", hash_to_string (hash));
 	sprintf (JSONbuf+strlen(JSONbuf), ", \"fft-length\":%lu", cs.gwdata.FFTLEN);
+	sprintf (JSONbuf+strlen(JSONbuf), ", \"squarings\":%d", w->cert_squarings);
 	if (cs.units_bit) sprintf (JSONbuf+strlen(JSONbuf), ", \"shift-count\":%ld", cs.units_bit);
 	sprintf (JSONbuf+strlen(JSONbuf), ", \"error-code\":\"%08lX\"", cs.error_count);
 	sprintf (JSONbuf+strlen(JSONbuf), ", \"security-code\":\"%08lX\"", SEC1(w->n));
 	JSONaddProgramTimestamp (JSONbuf);
+	JSONaddExponentKnownFactors (JSONbuf, w);
 	JSONaddUserComputerAID (JSONbuf, w);
-	strcat (JSONbuf, "}\n");
+	strcat (JSONbuf, "}");
 	if (IniGetInt (INI_FILE, "OutputJSONCerts", 1)) writeResultsJSON (JSONbuf);
 
 /* Output results to the server */
@@ -547,8 +543,8 @@ int cert (
 /* Retry up to 8 times.  Output retry work later message and return. */
 
 retry_work:
-	echk = IniGetInt (LOCALINI_FILE, "CertErrorCount", 0) + 1;
-	IniWriteInt (LOCALINI_FILE, "CertErrorCount", echk);
+	echk = IniSectionGetInt (INI_FILE, SEC_Internals, KEY_CertErrorCount, 0) + 1;
+	IniSectionWriteInt (INI_FILE, SEC_Internals, KEY_CertErrorCount, echk);
 	if (echk >= 8) goto abandon_work;
 	OutputStr (thread_num, "Will retry certification later.\n");
 	stop_reason = STOP_RETRY_LATER;
@@ -565,7 +561,7 @@ abandon_work:
 /* Return work unit complete "error" code */
 			
 work_complete:
-	IniWriteString (LOCALINI_FILE, "CertErrorCount", NULL);
+	IniSectionWriteString (INI_FILE, SEC_Internals, KEY_CertErrorCount, NULL);
 	stop_reason = STOP_WORK_UNIT_COMPLETE;
 	goto exit;
 

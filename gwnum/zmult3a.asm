@@ -1,4 +1,4 @@
-; Copyright 2011-2018 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -45,18 +45,9 @@ _TEXT SEGMENT
 ;; r14 = distance between 1st and 2nd FFT data area (as well as 3rd and 4th)
 
 inorm	MACRO	lab, ttp, zero, echk, const
-	LOCAL	noadd, ilp1, ilp2, not8, done
+	LOCAL	ilp1, ilp2, not8, done
 	PROCFLP	lab
 	int_prolog 0,0,0
-
-no zero	mov	eax, ADDIN_ROW		;; Is this the time to do our addin?
-no zero	cmp	eax, THIS_BLOCK
-no zero	jne	short noadd		;; Jump if addin does not occur now
-no zero	mov	eax, ADDIN_OFFSET	;; Get address to add value into
-no zero	vmovsd	xmm0, ADDIN_VALUE	;; Get the requested add-in value
-no zero	vaddsd	xmm0, xmm0, Q [rsi][rax] ;; Add in the FFT value
-no zero	vmovsd	Q [rsi][rax], xmm0	;; Save the new value
-noadd:	
 
 echk	vbroadcastsd zmm31, MAXERR	;; Load maximum error
 	znorm_wpn_preload ttp, zero, echk, const

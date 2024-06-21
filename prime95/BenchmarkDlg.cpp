@@ -1,6 +1,6 @@
 // BenchmarkDlg.cpp : implementation file
 //
-// Copyright 2017-2021 Mersenne Research, Inc.  All rights reserved
+// Copyright 2017-2023 Mersenne Research, Inc.  All rights reserved
 //
 
 #include "stdafx.h"
@@ -25,7 +25,7 @@ CBenchmarkDlg::CBenchmarkDlg(CWnd* pParent /*=NULL*/)
 	m_minFFT = 0;
 	m_maxFFT = 0;
 	m_errchk = 0;
-	m_all_complex = 0;
+	m_negacyclic = 0;
 	m_limit_FFT_sizes = 0;
 	m_hyperthreading = 0;
 	m_all_FFT_impl = 0;
@@ -50,8 +50,8 @@ void CBenchmarkDlg::DoDataExchange(CDataExchange* pDX)
 	DDV_MinMaxUInt(pDX, m_maxFFT, 1, 65536);
 	DDX_Control(pDX, IDC_ERRCHK, c_errchk);
 	DDX_Check(pDX, IDC_ERRCHK, m_errchk);
-	DDX_Control(pDX, IDC_ALL_COMPLEX, c_all_complex);
-	DDX_Check(pDX, IDC_ALL_COMPLEX, m_all_complex);
+	DDX_Control(pDX, IDC_NEGACYCLIC, c_negacyclic);
+	DDX_Check(pDX, IDC_NEGACYCLIC, m_negacyclic);
 	DDX_Control(pDX, IDC_LIMIT_FFT_SIZES, c_limit_FFT_sizes);
 	DDX_Check(pDX, IDC_LIMIT_FFT_SIZES, m_limit_FFT_sizes);
 
@@ -76,7 +76,7 @@ void CBenchmarkDlg::DoDataExchange(CDataExchange* pDX)
 	c_maxFFT_text.EnableWindow (m_bench_type != 2);
 	c_maxFFT.EnableWindow (m_bench_type != 2);
 	c_errchk.EnableWindow (m_bench_type != 2);
-	c_all_complex.EnableWindow (m_bench_type != 2);
+	c_negacyclic.EnableWindow (m_bench_type != 2);
 	c_limit_FFT_sizes.EnableWindow (m_minFFT != m_maxFFT && ((m_bench_type == 0 && !m_all_FFT_impl) || m_bench_type == 1));
 	c_bench_cores_text.EnableWindow (HW_NUM_CORES > 1);
 	c_bench_cores.EnableWindow (HW_NUM_CORES > 1);

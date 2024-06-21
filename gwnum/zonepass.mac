@@ -1,4 +1,4 @@
-; Copyright 2017-2019 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2017-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -487,7 +487,7 @@ zs_onepass_real_unfft_wrapper MACRO srcreg,srcinc,d1,d2,d4,colreg,colinc,maskreg
 	ENDM
 
 
-;; Wrapper macro that takes two all-complex reals, swizzles data, and applies weights.  Output will be suitable for use by a pass 2 FFT macro.
+;; Wrapper macro that takes two negacyclic reals, swizzles data, and applies weights.  Output will be suitable for use by a pass 2 FFT macro.
 ;; NOTE: The r1/i1 col multiplier is 1.0 thus there are no fudges to apply to R1/I1.  Also the column multiplier has been
 ;; pre-applied to the complex-multiplier sine value.
 
@@ -756,7 +756,7 @@ zsf_onepass_complex_fft_wrapper MACRO srcreg,srcinc,d1,d2,d4,pmreg,pminc,maskreg
 	ENDM
 
 
-;; Wrapper macro that takes two all-complex reals, swizzles data, and applies weights.  Output will be suitable for use by a pass 2 FFT macro.
+;; Wrapper macro that takes two negacyclic reals, swizzles data, and applies weights.  Output will be suitable for use by a pass 2 FFT macro.
 ;; NOTE: The r1/i1 inverse column multiplier is 1.0 thus there are no fudges to apply to R1/I1
 
 zs_onepass_complex_unfft_wrapper_preload MACRO

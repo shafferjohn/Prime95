@@ -1,4 +1,4 @@
-; Copyright 2011-2020 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -584,6 +584,10 @@ build421 ,			,			,			yr4dwpn_pass1sc1024 192K, 192
 build421 ,			,			,			yr4dwpn_pass1sc1024 256K, 8
 build421 ,			,			,			yr4dwpn_pass1sc1024 320K, 320
 
+build421 ,			,			,			yr4dwpn_pass1sc1280 240K, 192
+build421 ,			,			,			yr4dwpn_pass1sc1280 320K, 8
+build421 ,			,			,			yr4dwpn_pass1sc1280 400K, 320
+
 	; The 10 levels variants (768, 1024, 1280)
 
 build421 ,			,			,			yr4dwpn_pass1sc128 96K, 768
@@ -707,7 +711,7 @@ build421 ,			,			,			yr4dwpn_pass1sc2048 4M, 11
 ;build421 ,			,			,			yr4dwpn_pass1sc4096 8M, 11
 ENDIF
 
-;; Generate shared pass 1 all-complex routines optimized for this architecture
+;; Generate shared pass 1 negacyclic routines optimized for this architecture
 
 IFDEF X86_64
 build421 CORE    + FMA3_64, CORE    + FMA3_64, CORE    + FMA3_64,	ypass1gen 128,1,
@@ -722,7 +726,7 @@ build421 CORE    + FMA3_64, CORE    + FMA3_64, CORE    + FMA3_64,	ypass1gen 1536
 build421 CORE    + FMA3_64, CORE    + FMA3_64, CORE    + FMA3_64,	ypass1gen 2048,1,
 ENDIF
 
-	; The all-complex 6 levels variants (48, 64, 80)
+	; The negacyclic 6 levels variants (48, 64, 80)
 
 IFNDEF X86_64
 build421 ,			CORE_64 + FMA3_64,	,			yr4dwpn_pass1sc128ac 6K, 48
@@ -750,7 +754,7 @@ build421 ,			,			,			yr4dwpn_pass1sc768ac 48K, 6
 build421 ,			FMA3_64,		,			yr4dwpn_pass1sc768ac 60K, 80
 ENDIF
 
-	; The all-complex 8 levels variants (192, 256, 320)
+	; The negacyclic 8 levels variants (192, 256, 320)
 
 IFNDEF X86_64
 build421 ,			CORE    + FMA3_64,	,			yr4dwpn_pass1sc128ac 24K, 192
@@ -786,7 +790,7 @@ build421 ,			,			,			yr4dwpn_pass1sc1280ac 320K, 8
 build421 ,			CORE    + FMA3_64,	,			yr4dwpn_pass1sc1280ac 400K, 320
 ENDIF
 
-	; The all-complex 10 levels variants (768, 1024, 1280)
+	; The negacyclic 10 levels variants (768, 1024, 1280)
 
 IFNDEF X86_64
 build421 ,			CORE_64 + FMA3_64,	,			yr4dwpn_pass1sc128ac 96K, 768
@@ -826,7 +830,7 @@ build421 ,			,			,			yr4dwpn_pass1sc1536ac 1536K, 10
 build421 ,			,			,			yr4dwpn_pass1sc2048ac 2M, 10
 ENDIF
 
-	; The all-complex 11 levels variants (1536, 2048, 2560)
+	; The negacyclic 11 levels variants (1536, 2048, 2560)
 
 IFNDEF X86_64
 build421 ,			FMA3_64,		,			yr4dwpn_pass1sc128ac 192K, 1536
@@ -862,8 +866,7 @@ build421 ,			,			,			yr4dwpn_pass1sc1280ac 2560K, 11
 build421 ,			,			,			yr4dwpn_pass1sc1280ac 3200K, 2560
 ENDIF
 
-;; Some small FFTs fit completely in a large L2 cache and thus do
-;; not need to be prefetched.
+;; Some small FFTs fit completely in a large L2 cache and thus do not need to be prefetched.
 
 IF TLB_PRIMING EQ 0
 

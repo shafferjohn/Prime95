@@ -4,7 +4,7 @@
 | This file contains the headers for the gwnum helper routines that use
 | extended-precision floats.
 | 
-|  Copyright 2005-2021 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2005-2023 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 #ifndef _GWDBLDBL_H
@@ -20,6 +20,9 @@ extern "C" {
 /* Include common definitions */
 
 #include "gwcommon.h"
+#ifdef USE_INTRINSICS
+#include <immintrin.h>
+#endif
 
 /* Extended precision helper routines */
 
@@ -134,6 +137,7 @@ void *gwdbldbl_data_alloc (void);
 void gwfft_weight_setup (void *, int, double, unsigned long, unsigned long, signed long, unsigned long);
 double gwfft_weight (void *, unsigned long);
 double gwfft_weight_sloppy (void *, unsigned long);
+double gwfft_weight_over_weight (void *, unsigned long, unsigned long);
 double gwfft_weight_inverse (void *, unsigned long);
 double gwfft_weight_inverse_squared (void *, unsigned long);
 double gwfft_weight_inverse_sloppy (void *, unsigned long);
@@ -149,6 +153,121 @@ double gwfft_partial_weight_sloppy (void *, unsigned long, unsigned long);
 double gwfft_partial_weight_inverse (void *, unsigned long, unsigned long);
 double gwfft_partial_weight_inverse_sloppy (void *, unsigned long, unsigned long);
 void gwfft_colweights (void *, void *, int);
+
+/* Structure for internal use only!  Part of the "global" data that gwfft_weight_setup initalizes and is passed to several gwdbldbl routines. */
+/* This partial definition must match the full definition within gwdbldbl.cpp. */
+/* Plus a macro used to type the cast untyped data pointer input argument of inlined routines. */
+
+// Defines to access the cached data
+
+#define base128			cached_data				/* 128-bit value representing j * n / FFTLEN */
+#define dwpncol_counter		((uint32_t *) &cached_data[2])[0]	/* Counter used in reducing internal dwpn_col calls */
+#define dwpncol_value		((uint32_t *) &cached_data[2])[1]	/* Last returned internal dwpn_col value */
+#define partial_transition	cached_data[3]				/* Fractional FFT base above which col_bpower >= j_bpower */
+#define partial_weight		((double *) &cached_data[4])		/* Two saved weights when using partial weights */
+#define partial_inv_weight	((double *) &cached_data[6])		/* Two saved inverse weights when using partial weights */
+#define last_weight_sloppy	(* (double *) &cached_data[8])		/* Last non-partial sloppy weight */
+#define last_weight_j		((uint32_t *) &cached_data[9])[0]	/* Last non-partial sloppy weight index */
+#define last_inv_weight_j	((uint32_t *) &cached_data[9])[1]	/* Last non-partial sloppy inv weight index */
+#define last_inv_weight_sloppy	(* (double *) &cached_data[10])		/* Last non-partial sloppy inv weight */
+#define inv_weight_sloppy_muls	((uint32_t *) &cached_data[11])[0]	/* Count of multiplies used in creating last_inv_weight_sloppy */
+
+// Extract middle 64 bits of base 128 (the fractional part).  Three methods provided below.  On my Windows laptop, the unaligned load was the slowest.
+//#define base128middle		(* (uint64_t *) ((char *) base128 + sizeof (uint32_t)))
+//#define base128middle		((base128[1] << 32) + (base128[0] >> 32))
+#define base128middle		((base128[1] << 32) + ((uint32_t *)base128)[1])
+
+#ifdef DBLDBL_INLINES
+
+struct gwdbldbl_constants_partial {
+	uint32_t frac_bpw3;		/* Third 32 bits of fractional b-per-FFT-word */
+	uint32_t frac_bpw2;		/* Second 32 bits of fractional b-per-FFT-word */
+	uint32_t frac_bpw1;		/* First 32 bits of fractional b-per-FFT-word */
+	uint32_t int_bpw;		/* Integer part of b-per-FFT-word */
+};
+
+// Faster routines for sequential access with an iterator
+
+// Init FFT base counter for element zero
+void inline gwcached_init_zero (uint64_t *cached_data) {
+	base128[0] = 0xFFFFFFFFFFFFFFFFULL;	// Faster is_big_word & weight calculations if counter starts at just under 1.0 rather than the more logical 0.0
+	base128[1] = 0xFFFFFFFFULL;
+	partial_weight[0] = 0.0;		// Flag that cached partial weights are not set
+	partial_inv_weight[0] = 0.0;
+	last_weight_j = 0xFFFFFFF0;		// Init weight_sloppy cache
+	last_inv_weight_j = 0xFFFFFFF0;		// Init inv_weight_sloppy cache
+}
+
+// Init FFT base counter to arbitary element
+void inline gwcached_init (void *dd_data_arg, uint64_t *cached_data, unsigned long n) {
+	struct gwdbldbl_constants_partial *dd_data = (struct gwdbldbl_constants_partial *) dd_data_arg;
+
+	base128[0] = 0xFFFFFFFFFFFFFFFFULL;	// Faster is_big_word & weight calculations if counter starts at just under 1.0 rather than the more logical 0.0
+	base128[1] = 0xFFFFFFFFULL;
+
+	uint64_t tmp = (uint64_t) n * (uint64_t) dd_data->frac_bpw3;
+	base128[0] += tmp;			// Add all 64-bits of tmp to low base word
+	base128[1] += (base128[0] < tmp);	// Propagate carry
+
+	tmp = (uint64_t) n * (uint64_t) dd_data->frac_bpw2;	// This product will need splitting and shifting
+	base128[1] += tmp >> 32;		// Add upper 32-bits of tmp to lower 32-bits of high base word
+	base128[0] += tmp << 32;		// Add lower 32-bits of tmp to upper 32-bits of low base word
+	base128[1] += (base128[0] < tmp);	// Propagate carry
+
+	tmp = (uint64_t) n * (* ((uint64_t *) &dd_data->frac_bpw1));
+	base128[1] += tmp;			// Add all 64-bits of tmp to high base word
+
+	last_weight_j = 0xFFFFFFF0;		// Init weight_sloppy cache
+	last_inv_weight_j = 0xFFFFFFF0;		// Init inv_weight_sloppy cache
+}
+
+// Update cached data for next FFT element
+void inline gwcached_next (void *dd_data_arg, uint64_t *cached_data, unsigned long n) {
+	struct gwdbldbl_constants_partial *dd_data = (struct gwdbldbl_constants_partial *) dd_data_arg;
+
+	// Maintain cached data for calculating FFT base (index * n / FFTLEN)
+#ifdef USE_INTRINSICS
+	unsigned char carry = _addcarry_u64 (0, base128[0], * ((uint64_t *) &dd_data->frac_bpw3), base128[0]);
+	_addcarry_u64 (carry, base128[1], * ((uint64_t *) &dd_data->frac_bpw1), base128[1]);
+#else
+	uint64_t frac_low = * ((uint64_t *) &dd_data->frac_bpw3);
+	base128[0] = base128[0] + frac_low;
+	uint64_t carry = (base128[0] < frac_low);
+	base128[1] = base128[1] + * ((uint64_t *) &dd_data->frac_bpw1) + carry;
+#endif
+
+}
+
+// Is this a big word?  Yes if adding fractional bpw to current base will cause a carry into integer part of base.
+int inline gwcached_is_big_word (void *dd_data_arg, uint64_t *cached_data) {
+	struct gwdbldbl_constants_partial *dd_data = (struct gwdbldbl_constants_partial *) dd_data_arg;
+	uint64_t next_base128[2];
+#ifdef USE_INTRINSICS
+	unsigned char carry = _addcarry_u64 (0, base128[0], * ((uint64_t *) &dd_data->frac_bpw3), next_base128[0]);
+	_addcarry_u64 (carry, (uint64_t) ((uint32_t) base128[1]), (uint64_t) dd_data->frac_bpw1, next_base128[1]);
+#else
+	uint64_t frac_low = * ((uint64_t *) &dd_data->frac_bpw3);
+	next_base128[0] = base128[0] + frac_low;
+	uint64_t carry = (next_base128[0] < frac_low);
+	next_base128[1] = (uint64_t) ((uint32_t) base128[1]) + (uint64_t) dd_data->frac_bpw1 + carry;
+#endif
+	return (next_base128[1] >> 32);
+}
+
+inline uint32_t get_cached_dwpncol_counter (uint64_t *cached_data) { return (dwpncol_counter); }
+inline void inc_cached_dwpncol_counter (uint64_t *cached_data) { dwpncol_counter++; }
+inline void set_cached_dwpncol_counter (uint64_t *cached_data, uint32_t val) { dwpncol_counter = val; }
+inline uint32_t get_cached_dwpncol_value (uint64_t *cached_data) { return (dwpncol_value); }
+inline void inc_cached_dwpncol_value (uint64_t *cached_data) { dwpncol_value++; }
+inline void set_cached_dwpncol_value (uint64_t *cached_data, uint32_t val) { dwpncol_value = val; }
+inline void clear_cached_partial_weights (uint64_t *cached_data) { partial_weight[0] = partial_inv_weight[0] = 0.0; }
+
+double gwcached_weight_sloppy (void *, uint64_t *, unsigned long, int32_t);
+double gwcached_weight_inverse_sloppy (void *, uint64_t *, unsigned long);
+double gwcached_partial_weight_sloppy (void *, uint64_t *, unsigned long);
+double gwcached_partial_weight_inverse_sloppy (void *, uint64_t *, unsigned long);
+
+#endif
 
 #ifdef __cplusplus
 }

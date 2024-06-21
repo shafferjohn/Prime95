@@ -116,7 +116,7 @@ double miu(double a, double b) { return rho(a) + integral(a - b, a - 1, a, &miu_
 // Returns the probability of PM1(B1,B2) success for a finding a smooth factor using B1, B2 and already TFed to factoredUpTo.
 // Caller must account for any smoothness bits one gets for free.  For example, Mersenne have special form 2*k*p+1 for M(p)
 // so set takeAwayBits to log2(exponent) + 1 to obtain the magnitude of the "k" part.
-double pm1prob(double takeAwayBits, unsigned factoredUpTo, uint64_t B1, uint64_t B2) {
+double pm1prob(double takeAwayBits, double factoredUpTo, uint64_t B1, uint64_t B2) {
 
   // We split the bit-range starting from "factoredUpTo" up in slices each SLICE_WIDTH bits wide.
   const double SLICE_WIDTH = 0.25;

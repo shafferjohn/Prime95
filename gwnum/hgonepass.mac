@@ -1,4 +1,4 @@
-; Copyright 2001-2016 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2001-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -90,7 +90,7 @@ x32_finish_unfft:
 	ENDM
 
 
-;; Perform a 32-element all-complex FFT.
+;; Perform a 32-element negacyclic FFT
 
 xfft32p MACRO type
 	LOCAL	not4, b1b
@@ -290,7 +290,7 @@ c1b:	x3cl_six_reals_last_unfft rsi, 64, 2*64
 	ENDM
 
 
-;; Perform a 48-element all-complex FFT.
+;; Perform a 48-element negacyclic FFT
 
 xfft48p MACRO type
 	LOCAL	not4, b1b, b3b, c1b, c3b
@@ -552,7 +552,7 @@ c1b:	x4cl_eight_reals_last_unfft rsi, 64, 2*64, 4*64
 	ENDM
 
 
-;; Perform a 64-element all-complex FFT.
+;; Perform a 64-element negacyclic FFT
 
 xfft64p MACRO type
 	LOCAL	not4, b1b, b3b, c1b, c3b
@@ -965,7 +965,7 @@ c1b:	x3cl_six_reals_last_unfft rsi, 64, 4*64
 	ENDM
 
 
-;; Perform a 96-element all-complex FFT.
+;; Perform a 96-element negacyclic FFT
 
 xfft96p MACRO type
 	LOCAL	not4, b1b, b2b, b3b, c1b, c3b
@@ -1400,7 +1400,7 @@ c1b:	x4cl_eight_reals_last_unfft rsi, 64, 4*64, 8*64
 	ENDM
 
 
-;; Perform a 128-element all-complex FFT.
+;; Perform a 128-element negacyclic FFT
 
 xfft128p MACRO type
 	LOCAL	not4, b1b, b3b, c1b, c3b
@@ -1762,7 +1762,7 @@ c1b:	x3cl_six_reals_last_unfft rsi, 64, 8*64
 	ENDM
 
 
-;; Perform a 192-element all-complex FFT.
+;; Perform a 192-element negacyclic FFT
 
 xfft192p MACRO type
 	LOCAL	not4, b1b, b2b, b3b, c1b
@@ -2260,7 +2260,7 @@ c3b:	x4cl_four_complex_unfft rsi, 64, 2*64, 4*64, rdi
 	ENDM
 
 
-;; Perform a 256-element all-complex FFT.
+;; Perform a 256-element negacyclic FFT
 
 xfft256p MACRO type
 	LOCAL	not4, b1b, b3b, c1b, c5b, c8b
@@ -2673,7 +2673,7 @@ c1b:	x3cl_six_reals_last_unfft rsi, 64, 16*64
 	ENDM
 
 
-;; Perform a 384-element all-complex FFT.
+;; Perform a 384-element negacyclic FFT
 
 xfft384p MACRO type
 	LOCAL	not4, b1b, b2b, b3b, c1b
@@ -3131,7 +3131,7 @@ c5b:	x4cl_four_complex_unfft rsi, 64, 4*64, 8*64, rdi
 	ENDM
 
 
-;; Perform a 512-element all-complex FFT.
+;; Perform a 512-element negacyclic FFT
 
 xfft512p MACRO type
 	LOCAL	not4, b1b, c1b, c5b, c7b
@@ -3229,7 +3229,7 @@ c1b:	x4cl_four_complex_last_unfft rsi, 64, 16*64, 32*64, 16*128
 
 	xfft_3_ret
 
-;; Common inverse FFT code for all-complex lengths 384 and 512
+;; Common inverse FFT code for negacyclic lengths 384 and 512
 
 ;; Do inverse FFT levels 6,7
 ;; On input the 64-byte cache lines hold these data values:
@@ -3536,7 +3536,7 @@ c1b:	x3cl_six_reals_last_unfft rsi, 64, 32*64
 	ENDM
 
 
-;; Perform a 768-element all-complex FFT.
+;; Perform a 768-element negacyclic FFT
 
 xfft768p MACRO type
 	LOCAL	not4, b1b, b2b, b3b, c1b
@@ -4081,7 +4081,7 @@ c3b:	x4cl_four_complex_unfft rsi, 64, 8*64, 16*64, rdi
 	ENDM
 
 
-;; Perform a 1024-element all-complex FFT.
+;; Perform a 1024-element negacyclic FFT
 
 xfft1024p MACRO type
 	LOCAL	not4, b1b, b3b, c1b, c5b, c7b, c8b
@@ -4190,7 +4190,7 @@ c1b:	x4cl_four_complex_last_unfft rsi, 64, 32*64, 64*64, 32*128
 
 	xfft_3_ret
 
-;; Common FFT code for all-complex length 768 and 1024
+;; Common FFT code for negacyclic length 768 and 1024
 
 ;; Do inverse FFT levels 7,8
 ;; On input the 64-byte cache lines hold these data values:
@@ -4529,7 +4529,7 @@ c1b:	x3cl_six_reals_last_unfft rsi, 64, 64*64
 	ENDM
 
 
-;; Perform a 1536-element all-complex FFT.
+;; Perform a 1536-element negacyclic FFT
 
 xfft1536p MACRO type
 	LOCAL	not4, b1b, b2b, b3b, c1b
@@ -5032,7 +5032,7 @@ c3b:	x4cl_four_complex_unfft rsi, 64, 16*64, 32*64, rdi
 	ENDM
 
 
-;; Perform a 2048-element all-complex FFT.
+;; Perform a 2048-element negacyclic FFT
 
 xfft2048p MACRO type
 	LOCAL	not4, b1b, c1b, c3b, c5b, c8b
@@ -5133,7 +5133,7 @@ c1b:	x4cl_four_complex_last_unfft rsi, 64, 64*64, 128*64, 64*128
 
 	xfft_3_ret
 
-;; Common inverse FFT for all-complex lengths 1536, 2048
+;; Common inverse FFT for negacyclic lengths 1536, 2048
 
 ;; Do inverse FFT levels 8,9
 ;; On input the 64-byte cache lines hold these data values:
@@ -5474,7 +5474,7 @@ c1b:	x3cl_six_reals_last_unfft rsi, 64, 128*64
 	ENDM
 
 
-;; Perform a 3072-element all-complex FFT.
+;; Perform a 3072-element negacyclic FFT
 
 xfft3072p MACRO type
 	LOCAL	not4, b1b, b2b, b3b, c1b
@@ -6065,7 +6065,7 @@ c3b:	x4cl_four_complex_unfft rsi, 64, 32*64, 64*64, rdi
 	ENDM
 
 
-;; Perform a 4096-element all-complex FFT.
+;; Perform a 4096-element negacyclic FFT
 
 xfft4096p MACRO type
 	LOCAL	not4, b1b, b3b, c1b, c3b, c5b, c7b, c8b
@@ -6551,7 +6551,7 @@ c1b:	x3cl_six_reals_last_unfft rsi, 64, 256*64
 	ENDM
 
 
-;; Perform a 6144-element all-complex FFT.
+;; Perform a 6144-element negacyclic FFT
 
 xfft6144p MACRO type
 	LOCAL	not4, b1b, b2b, b3b, c1b
@@ -7303,7 +7303,7 @@ c3b:	x4cl_four_complex_unfft rsi, 64, 64*64, 128*64, rdi
 	ENDM
 
 
-;; Perform a 8192-element all-complex FFT.
+;; Perform a 8192-element negacyclic FFT
 
 xfft8192p MACRO type
 	LOCAL	not4, b1b, b3b, b5b, b7b, b9b, bab1, bab2, bab3, bab4
@@ -7425,7 +7425,7 @@ c1b:	x4cl_four_complex_last_unfft rsi, 64, 256*64, 512*64, 256*128
 
 	xfft_3_ret
 
-;; Common all-complex FFT code
+;; Common negacyclic FFT code
 
 ;; Do 1024 four_complex_fft macros
 ;;	distance between fft data elements is 64
@@ -7704,13 +7704,13 @@ xcopy_7_words MACRO
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	short nozpad		;; No, skip 7 word copy
 	movsd	xmm0, Q [rsi+rbx+32]	;; Copy 1st word above half-way point
-	movsd	Q [rsi-40], xmm0
+	movsd	Q [rsi-64], xmm0
 	movsd	xmm1, Q [rsi+rbx+48]	;; Copy 2nd word
-	movsd	Q [rsi-48], xmm1
+	movsd	Q [rsi-56], xmm1
 	movsd	xmm2, Q [rsi+rbx+96]	;; Copy 3rd word
-	movsd	Q [rsi-56], xmm2
+	movsd	Q [rsi-48], xmm2
 	movsd	xmm3, Q [rsi+rbx+112]	;; Copy 4th word
-	movsd	Q [rsi-64], xmm3
+	movsd	Q [rsi-40], xmm3
 	mov	eax, HIGH_WORD1_OFFSET	;; Copy 1st word below half-way
 	add	rax, rsi
 	movsd	xmm0, Q [rax+rbx]

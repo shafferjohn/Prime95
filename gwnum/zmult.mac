@@ -1,4 +1,4 @@
-; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -47,7 +47,7 @@ ZMM_CD12SCD6 = (12*64+6*128)	;; Sizeof a twelve_complex first/last djbfft table 
 ;	r4dwpn = r4delay with partial normalization.
 ;	sr = split-radix
 ; options are:
-;	_ac for all_complex
+;	_ac for negacyclic
 ;	_ip for two-pass in-place (no scratch area)
 ;	_np for no_prefetch
 ;
@@ -59,7 +59,7 @@ ZMM_CD12SCD6 = (12*64+6*128)	;; Sizeof a twelve_complex first/last djbfft table 
 ;	zfft_r4_320_4_FMA3
 ;	zfft_r4dwpn_2048_ac_4_CORE
 
-zpass1gen MACRO p1_size, all_complex, in_place, clmarg
+zpass1gen MACRO p1_size, negacyclic, in_place, clmarg
 	LOCAL	zmacroname
 
 ;; Copy some of the args 
@@ -80,7 +80,7 @@ zpass1gen MACRO p1_size, all_complex, in_place, clmarg
 ;; Generate the procedure name
 
 	zprocname CATSTR <zfft_>,zfft_type,<_>,%p1_size
-	IF all_complex EQ 1
+	IF negacyclic EQ 1
 	zprocname CATSTR zprocname,<_ac>
 	ENDIF
 	IFNB <in_place>
@@ -115,7 +115,7 @@ zpass1gen MACRO p1_size, all_complex, in_place, clmarg
 ;; Generate the pass 1 macro name
 
 	zmacroname CATSTR <z>,zfft_type,<_pass1sc>,%p1_size
-	IF all_complex EQ 1
+	IF negacyclic EQ 1
 	zmacroname CATSTR zmacroname,<ac>
 	ENDIF
 
@@ -161,7 +161,7 @@ zfft_footer MACRO
 pass1_forward_fft_setup MACRO loopaddr
 	mov	NEXT_BLOCK, 0		;; Flag indicating forward fft setup
 	IFNB <loopaddr>
-	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	lea	rax, loopaddr		;; Auxiliary thread entry point
 	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
 	ENDIF
 	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
@@ -172,7 +172,7 @@ pass1_forward_fft_setup MACRO loopaddr
 pass1_inverse_fft_setup MACRO loopaddr
 	start_timer 1
 	mov	NEXT_BLOCK, 1		;; Flag indicating inverse fft setup
-	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	lea	rax, loopaddr		;; Auxiliary thread entry point
 	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
 	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
 	ENDM
@@ -884,14 +884,13 @@ zpass2gen MACRO p2_size
 	PROCF	procname
 	int_prolog 0,0,1
 
-;; Entry point for real FFTs: do one real and many complex blocks, also
-;; entry point for all-complex FFTs: do all complex blocks
+;; Entry point for real FFTs: do one real and many complex blocks, also entry point for negacyclic FFTs: do all complex blocks
 
-	mov	rax, OFFSET complex_loop ;; Auxiliary thread entry point
+	lea	rax, complex_loop	 ;; Auxiliary thread entry point
 	mov	THREAD_WORK_ROUTINE, rax ;; Save addr for C code to call
 	c_call	PASS2_WAKE_UP_THREADS	;; C callback routine
-	cmp	ALL_COMPLEX_FFT, 1	;; Test if there is a real-data block
-	je	complex_loop		;; Jump to process all-complex blocks
+	cmp	NEGACYCLIC_FFT, 1	;; Test if there is a real-data block
+	je	complex_loop		;; Jump to process complex blocks
 
 	realmacro			; Do the real data block
 	jmp	get_next		; Go process complex blocks

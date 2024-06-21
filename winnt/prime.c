@@ -1,5 +1,6 @@
-
-#define bool int
+/* Copyright 1995-2023 Mersenne Research, Inc. */
+/* Author:  George Woltman */
+/* Email: woltman@alum.mit.edu */
 
 #include "windows.h"
 #include <winnls.h>

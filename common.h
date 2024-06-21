@@ -3,7 +3,7 @@
 |
 | This file contains handy #defines that I use in all my projects
 | 
-|  Copyright 2005-2021 Mersenne Research, Inc.
+|  Copyright 2005-2023 Mersenne Research, Inc.
 |  All Rights Reserved.
 +---------------------------------------------------------------------*/
 
@@ -19,7 +19,9 @@
 #include <string.h>
 #include <time.h>
 #include "gwnum.h"		// GWnum FFT library
+#ifndef NO_GMP
 #include "gmp.h"		// GMP library
+#endif
 #ifndef NO_HWLOC
 #include "hwloc.h"		// hwloc library
 #endif
@@ -80,6 +82,7 @@
 #define isMersenne(k,b,n,c)		((k) == 1.0 && (b) == 2 && (c) == -1)
 #define isGeneralizedFermat(k,b,n,c)	((k) == 1.0 && isPowerOf2 (n) && (c) == 1)
 #define isPowerOf2(n)			(((n) & ((n)-1)) == 0)
+#define round_up_to_power_of_2(n)	(1ULL << (int) ceil(log2((double)(n))))
 
 /* Define a "safe" strcpy.  The official C runtime library says that overlapping */
 /* buffers produce undefined results.  This safe strcpy allows overlapping */
@@ -95,11 +98,16 @@ __inline char *debug_strcpy(char *d, const char *s) {assert((d) >= ((s)+strlen(s
 
 /* Routines missing from GMP */
 
+#define mpz_set_u64(d,s)	{ uint64_t = s; mpz_import (m, 1, -1, sizeof (uint64_t), 0, 0, &t); }
 #define mpz_add_si(d,s,addin)	if (addin >= 0) mpz_add_ui(d,s,(unsigned int)addin); else mpz_sub_ui(d,s,(unsigned int)-addin);
 #define mpz_sub_si(d,s,addin)	if (addin >= 0) mpz_sub_ui(d,s,(unsigned int)addin); else mpz_add_ui(d,s,(unsigned int)-addin);
 #define mpz_mul_d(d,s,flt)	{ mpz_t t; mpz_init_set_d(t,flt); mpz_mul(d,s,t); mpz_clear(t); }
 #define mpz_eq(a,b)		(mpz_cmp(a,b) == 0)
 #define mpz_eq_ui(a,b)		(mpz_cmp_ui(a,b) == 0)
+// Work around bug in mpz_tstbit accessing bits above 2^32.  Presumably, mpz_setbit and mpz_clrbit has the same problem.
+#define mpz_tstbit64(a,b)	(mpz_getlimbn ((a), (mp_size_t) ((b) / GMP_LIMB_BITS)) & (1ULL << ((b) % GMP_LIMB_BITS)))
+#define mpz_setbit64(a,b)	mpz_limbs_modify(a,1)[(b) / GMP_LIMB_BITS] |= (1ULL << ((b) % GMP_LIMB_BITS))
+#define mpz_clrbit64(a,b)	mpz_limbs_modify(a,1)[(b) / GMP_LIMB_BITS] &= ~(1ULL << ((b) % GMP_LIMB_BITS))
 
 /* Windows/Linux differences */
 

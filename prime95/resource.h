@@ -2,10 +2,10 @@
 // Microsoft Visual C++ generated include file.
 // Used by Prime95.rc
 //
-// Copyright 1995-2021 Mersenne Research, Inc.  All rights reserved
+// Copyright 1995-2023 Mersenne Research, Inc.  All rights reserved
 //
 #define IDH_PRIMENET                    11
-#define IDH_WORKER_THREADS              12
+#define IDH_WORKERS                     12
 #define IDH_VACATION                    13
 #define IDH_RANGE_STATUS                14
 #define IDH_CONTINUE                    15
@@ -62,7 +62,7 @@
 #define IDR_TRAYMENU                    156
 #define ID_OPEN_EXIT                    157
 #define ID_TRAY_RESTORE                 158
-#define IDD_WORKER_THREADS              160
+#define IDD_WORKERS                     160
 #define IDD_PRIMENET_CONNECTION         161
 #define IDD_WORKER_START                163
 #define IDD_WORKER_STOP                 164
@@ -111,7 +111,7 @@
 #define IDC_P6                          1017
 #define IDC_ERRCHK                      1017
 #define IDC_USERNAME                    1018
-#define IDC_ALL_COMPLEX                 1018
+#define IDC_NEGACYCLIC                  1018
 #define IDC_CORES                       1019
 #define IDC_HYPERTHREADING              1021
 #define IDC_WORKERS_TEXT                1022
@@ -188,7 +188,7 @@
 #define IDM_TRAY                        32788
 #define IDM_HIDE                        32789
 #define IDM_TORTURE                     32790
-#define IDM_WORKER_THREADS              32791
+#define IDM_WORKERS                     32791
 #define IDM_PRIMENET                    32792
 #define IDM_SERVER                      32794
 #define IDM_QUIT                        32795

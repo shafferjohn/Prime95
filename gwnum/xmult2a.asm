@@ -1,4 +1,4 @@
-; Copyright 2001-2012 Mersenne Research, Inc.  All rights reserved
+; Copyright 2001-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -43,20 +43,12 @@ loopcount2	EQU	DPTR [rsp+first_local+SZPTR+4]
 loopcount3	EQU	DPTR [rsp+first_local+SZPTR+8]
 
 inorm	MACRO	lab, ttp, zero, echk, const, base2, sse4
-	LOCAL	noadd, setlp, ilp0, ilp1, ilexit, done
+	LOCAL	setlp, ilp0, ilp1, ilexit, done
 	PROCFLP	lab
 	int_prolog SZPTR+12,0,0
 	movapd	xmm7, XMM_SUMOUT	;; Load SUMOUT
 	movapd	xmm6, XMM_MAXERR	;; Load maximum error
-no zero	mov	edx, ADDIN_ROW		;; Is this the time to do our addin?
-no zero	cmp	edx, THIS_BLOCK
-no zero	jne	short noadd		;; Jump if addin does not occur now
-no zero	mov	edi, ADDIN_OFFSET	;; Get address to add value into
-no zero	movsd	xmm0, Q [rsi][rdi]	;; Get the value
-no zero	addsd	xmm0, ADDIN_VALUE	;; Add in the requested value
-no zero	movsd	Q [rsi][rdi], xmm0	;; Save the new value
-no zero	subsd	xmm7, ADDIN_VALUE	;; Do not include addin in sumout
-noadd:	mov	saved_rsi, rsi		;; Save for xtop_carry_adjust
+	mov	saved_rsi, rsi		;; Save for xtop_carry_adjust
 	mov	rbx, norm_ptr2		;; Load column multipliers ptr
 ttp	mov	eax, cache_line_multiplier ;; Load inner loop counter
 	lea	rdi, XMM_COL_MULTS[128]	;; Load col mult scratch area

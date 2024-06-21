@@ -1,4 +1,4 @@
-; Copyright 2011-2018 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -45,7 +45,7 @@
 ;; ALSO NOTE:  Numbers above are for clm = 4.  Clm affects the FFT data size,
 ;; scratch size, variable sin/cos size, big/lit flags, and data prefetched early.
 
-;; Estimated memory requirements for each all-complex pass 1 macro:
+;; Estimated memory requirements for each negacyclic pass 1 macro:
 ;;
 ;; Pass 1 size:			128	256	384	512	640	768	1024	1280	1536	2048
 ;;
@@ -354,7 +354,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 128 doubles.
+;; Perform a pass 1 negacyclic FFT of length 128 doubles.
 ;; Memory examples are for a 128K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*clm*16 + 4*clm*YMM_SCND2 + 4*clm*YMM_SCD4 = 29*clm 64-byte cache lines
 
@@ -1133,7 +1133,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 256 doubles.
+;; Perform a pass 1 negacyclic FFT of length 256 doubles.
 ;; Memory examples are for a 256K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 2*4*clm*16 + 2*4*clm*YMM_SCND2 + 4*clm*YMM_SCD8 = 58*clm 64-byte cache lines
 
@@ -2693,7 +2693,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 384 doubles.
+;; Perform a pass 1 negacyclic FFT of length 384 doubles.
 ;; Memory examples are for a 384K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*YMM_SCD1 + 4*clm*16 + 4*clm*YMM_SCND2 + 4*clm*YMM_SCD4 = 45*clm 64-byte cache lines
 
@@ -4068,7 +4068,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 512 doubles.
+;; Perform a pass 1 negacyclic FFT of length 512 doubles.
 ;; Memory examples are for a 512K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*YMM_SCD2 + 4*clm*16 + 4*clm*YMM_SCND2 + 4*clm*YMM_SCD4 = 61*clm 64-byte cache lines
 
@@ -6033,7 +6033,7 @@ done:	yfft_footer
 ENDIF
 
 
-;; Perform a pass 1 all-complex FFT of length 640 doubles.
+;; Perform a pass 1 negacyclic FFT of length 640 doubles.
 ;; Memory examples are for a 640K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*YMM_SCD2 + 4*clm*16 + 4*clm*YMM_SCND2 + 4*clm*YMM_SCD4 = 61*clm 64-byte cache lines
 
@@ -7969,7 +7969,7 @@ done:	yfft_footer
 ENDIF
 
 
-;; Perform a pass 1 all-complex FFT of length 768 doubles.
+;; Perform a pass 1 negacyclic FFT of length 768 doubles.
 ;; Memory examples are for a 768K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 8*4*clm*YMM_SCD1 + 2*4*clm*16 + 2*4*clm*YMM_SCND2 + 4*clm*YMM_SCD8 = 90*clm 64-byte cache lines
 
@@ -9920,7 +9920,7 @@ done:	yfft_footer
 ENDIF
 
 
-;; Perform a pass 1 all-complex FFT of length 1024 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1024 doubles.
 ;; Memory examples are for a 1024K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 8*4*clm*YMM_SCD2 + 2*4*clm*16 + 2*4*clm*YMM_SCND2 + 4*clm*YMM_SCD8 = 122*clm 64-byte cache lines
 
@@ -10931,7 +10931,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1280 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1280 doubles.
 ;; Memory examples are for a 1280K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 8*4*clm*YMM_SCD2 + 2*4*clm*16 + 2*4*clm*YMM_SCND2 + 4*clm*YMM_SCD8 = 122*clm 64-byte cache lines
 
@@ -12623,7 +12623,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1536 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1536 doubles.
 ;; Memory examples are for a 1536K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*YMM_SCD1 + 4*clm*16 + 4*clm*YMM_SCND2 + 16*clm*YMM_SCD4 = 93*clm 64-byte cache lines
 
@@ -14409,7 +14409,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 2048 doubles.
+;; Perform a pass 1 negacyclic FFT of length 2048 doubles.
 ;; Memory examples are for a 2048K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*16 + 4*4*clm*YMM_SCND2 + 4*clm*YMM_SCD2 + 16*clm*YMM_SCD4 = 124*clm 64-byte cache lines
 
@@ -15235,7 +15235,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 128 doubles.
+;; Perform a pass 1 negacyclic FFT of length 128 doubles.
 ;; Memory examples are for a 128K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*clm*64 + 4*clm*YMM_SCD2 + 4*clm*YMM_SCD4 = 28*clm 64-byte cache lines
 
@@ -15741,7 +15741,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 256 doubles.
+;; Perform a pass 1 negacyclic FFT of length 256 doubles.
 ;; Memory examples are for a 256K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 2*4*clm*64 + 2*4*clm*YMM_SCD2 + 4*clm*YMM_SCD8 = 56*clm 64-byte cache lines
 
@@ -16761,7 +16761,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 384 doubles.
+;; Perform a pass 1 negacyclic FFT of length 384 doubles.
 ;; Memory examples are for a 384K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*YMM_SCD1 + 4*clm*64 + 4*clm*YMM_SCD2 + 4*clm*YMM_SCD4 = 44*clm 64-byte cache lines
 
@@ -18136,7 +18136,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 512 doubles.
+;; Perform a pass 1 negacyclic FFT of length 512 doubles.
 ;; Memory examples are for a 512K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*YMM_SCD2 + 4*clm*64 + 4*clm*YMM_SCD2 + 4*clm*YMM_SCD4 = 60*clm 64-byte cache lines
 
@@ -18982,7 +18982,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 640 doubles.
+;; Perform a pass 1 negacyclic FFT of length 640 doubles.
 ;; Memory examples are for a 640K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*YMM_SCD2 + 4*clm*64 + 4*clm*YMM_SCD2 + 4*clm*YMM_SCD4 = 60*clm 64-byte cache lines
 
@@ -19812,7 +19812,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 768 doubles.
+;; Perform a pass 1 negacyclic FFT of length 768 doubles.
 ;; Memory examples are for a 768K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 8*4*clm*YMM_SCD1 + 2*4*clm*64 + 2*4*clm*YMM_SCD2 + 4*clm*YMM_SCD8 = 88*clm 64-byte cache lines
 
@@ -21200,7 +21200,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1024 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1024 doubles.
 ;; Memory examples are for a 1024K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 8*4*clm*YMM_SCD2 + 2*4*clm*64 + 2*4*clm*YMM_SCD2 + 4*clm*YMM_SCD8 = 120*clm 64-byte cache lines
 
@@ -22211,7 +22211,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1280 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1280 doubles.
 ;; Memory examples are for a 1280K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 8*4*clm*YMM_SCD2 + 2*4*clm*64 + 2*4*clm*YMM_SCD2 + 4*clm*YMM_SCD8 = 120*clm 64-byte cache lines
 
@@ -23226,7 +23226,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1536 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1536 doubles.
 ;; Memory examples are for a 1536K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*YMM_SCD1 + 4*clm*64 + 4*clm*YMM_SCD2 + 16*clm*YMM_SCD4 = 92*clm 64-byte cache lines
 
@@ -25012,7 +25012,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 2048 doubles.
+;; Perform a pass 1 negacyclic FFT of length 2048 doubles.
 ;; Memory examples are for a 2048K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*64 + 4*4*clm*YMM_SCD2 + 4*clm*YMM_SCD2 + 16*clm*YMM_SCD4 = 120*clm 64-byte cache lines
 
@@ -25850,7 +25850,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 128 doubles.
+;; Perform a pass 1 negacyclic FFT of length 128 doubles.
 ;; Memory examples are for a 128K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*clm*64 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 4*clm*YMM_SCD1 = 18*clm 64-byte cache lines
 
@@ -26374,7 +26374,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 256 doubles.
+;; Perform a pass 1 negacyclic FFT of length 256 doubles.
 ;; Memory examples are for a 256K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 2*4*clm*64 + 2*4*clm*YMM_SCD2 + clm*YMM_SCD4 + 4*clm*YMM_SCD1 = 32*clm 64-byte cache lines
 
@@ -27458,7 +27458,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 384 doubles.
+;; Perform a pass 1 negacyclic FFT of length 384 doubles.
 ;; Memory examples are for a 384K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*clm*64 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 12*clm*YMM_SCD1 = 26*clm 64-byte cache lines
 
@@ -29328,7 +29328,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 512 doubles.
+;; Perform a pass 1 negacyclic FFT of length 512 doubles.
 ;; Memory examples are for a 512K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*clm*64 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 16*clm*YMM_SCD1 = 30*clm 64-byte cache lines
 
@@ -30219,7 +30219,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 640 doubles.
+;; Perform a pass 1 negacyclic FFT of length 640 doubles.
 ;; Memory examples are for a 640K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*clm*64 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 20*clm*YMM_SCD1 = 34*clm 64-byte cache lines
 
@@ -31096,7 +31096,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 768 doubles.
+;; Perform a pass 1 negacyclic FFT of length 768 doubles.
 ;; Memory examples are for a 768K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 2*4*clm*64 + 2*4*clm*YMM_SCD2 + clm*YMM_SCD4 + 12*clm*YMM_SCD1 = 40*clm 64-byte cache lines
 
@@ -32563,7 +32563,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1024 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1024 doubles.
 ;; Memory examples are for a 1024K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 2*4*clm*64 + 2*4*clm*YMM_SCD2 + clm*YMM_SCD4 + 16*clm*YMM_SCD1 = 44*clm 64-byte cache lines
 
@@ -33618,7 +33618,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1280 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1280 doubles.
 ;; Memory examples are for a 1280K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 2*4*clm*64 + 2*4*clm*YMM_SCD2 + clm*YMM_SCD4 + 20*clm*YMM_SCD1 = 48*clm 64-byte cache lines
 
@@ -34678,7 +34678,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1536 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1536 doubles.
 ;; Memory examples are for a 1536K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*YMM_SCD1 + 4*clm*64 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 16*clm*YMM_SCD1 = 46*clm 64-byte cache lines
 
@@ -37138,7 +37138,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 2048 doubles.
+;; Perform a pass 1 negacyclic FFT of length 2048 doubles.
 ;; Memory examples are for a 2048K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*64 + 4*4*clm*YMM_SCD2 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 16*clm*YMM_SCD1 = 74*clm 64-byte cache lines
 
@@ -38013,7 +38013,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 128 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 128 doubles.
 ;; Memory examples are for a 128K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*clm*64 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 4*clm*YMM_SCD1 = 18*clm 64-byte cache lines
 
@@ -38553,7 +38553,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 256 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 256 doubles.
 ;; Memory examples are for a 256K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 2*4*clm*64 + 2*4*clm*YMM_SCD2 + clm*YMM_SCD4 + 4*clm*YMM_SCD1 = 32*clm 64-byte cache lines
 
@@ -39661,7 +39661,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 384 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 384 doubles.
 ;; Memory examples are for a 384K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*clm*64 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 12*clm*YMM_SCD1 = 26*clm 64-byte cache lines
 
@@ -41566,7 +41566,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 512 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 512 doubles.
 ;; Memory examples are for a 512K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*clm*64 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 16*clm*YMM_SCD1 = 30*clm 64-byte cache lines
 
@@ -42478,7 +42478,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 640 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 640 doubles.
 ;; Memory examples are for a 640K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*clm*64 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 20*clm*YMM_SCD1 = 34*clm 64-byte cache lines
 
@@ -43380,7 +43380,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 768 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 768 doubles.
 ;; Memory examples are for a 768K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 2*4*clm*64 + 2*4*clm*YMM_SCD2 + clm*YMM_SCD4 + 12*clm*YMM_SCD1 = 40*clm 64-byte cache lines
 
@@ -44894,7 +44894,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 1024 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 1024 doubles.
 ;; Memory examples are for a 1024K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 2*4*clm*64 + 2*4*clm*YMM_SCD2 + clm*YMM_SCD4 + 16*clm*YMM_SCD1 = 44*clm 64-byte cache lines
 
@@ -45970,7 +45970,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 1280 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 1280 doubles.
 ;; Memory examples are for a 1280K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 2*4*clm*64 + 2*4*clm*YMM_SCD2 + clm*YMM_SCD4 + 20*clm*YMM_SCD1 = 48*clm 64-byte cache lines
 
@@ -47051,7 +47051,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 1536 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 1536 doubles.
 ;; Memory examples are for a 1536K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*YMM_SCD1 + 4*clm*64 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 16*clm*YMM_SCD1 = 46*clm 64-byte cache lines
 
@@ -49528,7 +49528,7 @@ done:	yfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 2048 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 2048 doubles.
 ;; Memory examples are for a 2048K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*4*clm*64 + 4*4*clm*YMM_SCD2 + 4*clm*YMM_SCD2 + clm*YMM_SCD2 + 16*clm*YMM_SCD1 = 74*clm 64-byte cache lines
 

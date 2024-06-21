@@ -1,4 +1,4 @@
-; Copyright 2001-2010 Mersenne Research, Inc.  All rights reserved
+; Copyright 2001-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 
@@ -434,26 +434,6 @@ asskip3:sub	loopcount1, 1		; Decrement outer loop counter
 
 	ad_epilog 3*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 gwxaddsub3 ENDP
-
-;;
-;; Add in a small number with carry propagation
-;;
-
-PROCFL	gwxadds3
-	ad_prolog 0,0,rbx,rbp,rsi,rdi,xmm6,xmm7
-	mov	rsi, DESTARG		; Address of destination
-	movsd	xmm7, DBLARG		; Small addin value
-
-	mov	rbp, norm_grp_mults	; Addr of the group multipliers
-	mov	rdi, norm_biglit_array	; Addr of the big/little flags array
-	cmp	B_IS_2, 0		; Is this base 2?
-	jne	b2addsm			; yes, do simpler rounding
-	xnorm_smalladd_wpn noexec	; Similar to add last carry code
-	jmp	addsmdn
-b2addsm:xnorm_smalladd_wpn exec		; Similar to add last carry code
-addsmdn:
-	ad_epilog 0,0,rbx,rbp,rsi,rdi,xmm6,xmm7
-gwxadds3 ENDP
 
 ;;
 ;; Multiply a number by a small value with carry propagation

@@ -1,29 +1,55 @@
-# Makefile for Haiku gwnum library
+# Makefile for  Haiku 32-bit gwnum library
 #
+# updated by Karl L. Brennan, aka Generic Username 3485
+#
+# last updated 2023-10-02
+
+# REMEMBER: setarch x86
+
+# Only tested with v30.18b2b, later versions may require changes.
+
+# dirty workaround for bug in /boot/system/develop/headers/config/HaikuConfig.h:132 (I think) [as of Haiku R1/beta4]:
+# copy /boot/system/develop/headers/posix/arch/x86/* to ./arch, and add -I. to compiler flags.
 
 CC = gcc
-CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -O2 -march=i586 -malign-double
+CFLAGS = -I. -I.. -I../sqlite-amalgamation-3420000 -O2 -march=i586 -malign-double -std=gnu99 -Wno-unused-result
 
 CPP = g++
-CPPFLAGS = -I.. -I../qd -O2 -march=i586 -malign-double
+CPPFLAGS = -I. -I.. -I../qd -O2 -march=i586 -malign-double -std=c++11
 
 AR = ar
 
 HAIKUOBJS = cpuid.o gwnum.o gwtables.o gwthread.o gwini.o gwbench.o gwutil.o gwdbldbl.o giants.o radix.o ecmstag1.o
+POLYOBJS = polymult.o polymult_sse2.o polymult_avx.o polymult_fma.o
 
 LIB = gwnum.a
+POLYLIB = polymult.a
 
 #########################################################################
+
+all:	$(LIB) $(POLYLIB)
 
 $(LIB): $(HAIKUOBJS)
 	cp linux/gwnum.a .
 	$(AR) -rs $(LIB) $(HAIKUOBJS)
 
+$(POLYLIB): $(POLYOBJS)
+	$(AR) -rs $(POLYLIB) $(POLYOBJS)
+
 clean:
-	rm -f $(HAIKUOBJS)
+	rm -f $(HAIKUOBJS) $(POLYOBJS)
 
 distclean: clean
-	rm -f $(LIB)
+	rm -f $(LIB) $(POLYOBJS)
+
+polymult_sse2.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DSSE2 -msse2 -c -o polymult_sse2.o polymult.c
+
+polymult_avx.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DAVX -mavx -c -o polymult_avx.o polymult.c
+
+polymult_fma.o: polymult.c polymult.h
+	$(CC) $(CFLAGS) -DFMA -mfma -c -o polymult_fma.o polymult.c
 
 .c.o:
 	$(CC) $(CFLAGS) -c $<

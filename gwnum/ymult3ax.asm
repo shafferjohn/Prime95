@@ -1,4 +1,4 @@
-; Copyright 2011-2019 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 
@@ -67,42 +67,26 @@ gwyaddq3 ENDP
 ;; Add two numbers with carry propagation (eight different versions)
 ;;
 
-saved_src1	EQU	PPTR [rsp+first_local+0*SZPTR]
-saved_src2	EQU	PPTR [rsp+first_local+1*SZPTR]
-saved_biglit	EQU	PPTR [rsp+first_local+2*SZPTR]
-dist_to_dest	EQU	PPTR [rsp+first_local+3*SZPTR]
-loopcount1	EQU	DPTR [rsp+first_local+4*SZPTR]
-loopcount2	EQU	DPTR [rsp+first_local+4*SZPTR+4]
-loopcount3	EQU	DPTR [rsp+first_local+4*SZPTR+8]
-loopcount4	EQU	DPTR [rsp+first_local+4*SZPTR+12]
-loopcount5	EQU	DPTR [rsp+first_local+4*SZPTR+16]
+dist_to_dest	EQU	PPTR [rsp+first_local+0*SZPTR]
+loopcount3	EQU	DPTR [rsp+first_local+1*SZPTR]
+loopcount4	EQU	DPTR [rsp+first_local+1*SZPTR+4]
+loopcount5	EQU	DPTR [rsp+first_local+1*SZPTR+8]
 
 	; Base 2, irrational, not zero-padded
 PROCFL	gwyadd3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rax, DESTARG			; Address of destination
 	sub	rax, rsi			; Calculate distance from first number to destination
 	mov	dist_to_dest, rax		; Save distance to dest
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-ablk0:	mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-ablk1:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 add0:	mov	eax, normval1			; Load count of clms in 4KB
@@ -129,38 +113,17 @@ add2:	ynorm_op_wpn vaddpd, exec, exec, dist_to_dest	; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	add0
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, dist_to_dest
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_blk exec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	ablk1
-	bump	rbp, 2*YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	ablk0				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_final exec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwyadd3 ENDP
 
 
 	; Base 2, rational, not zero-padded
 PROCFL	gwyaddr3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rdi, DESTARG			; Address of destination
@@ -168,16 +131,8 @@ PROCFL	gwyaddr3
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-ablk0r:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 add0r:	mov	eax, normval1			; Load count of clms in 4KB
@@ -202,53 +157,29 @@ add2r:	ynorm_op_wpn vaddpd, noexec, exec, rdi	; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	add0r
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, rdi
-	ynorm_op_wpn_blk noexec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	ablk0r				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_final noexec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwyaddr3 ENDP
 
 
 	; Not base 2, irrational, not zero-padded
 PROCFL	gwyaddn3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rax, DESTARG			; Address of destination
 	sub	rax, rsi			; Calculate distance from first number to destination
 	mov	dist_to_dest, rax		; Save distance to dest
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-ablk0n:	mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-ablk1n:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 add0n:	mov	eax, normval1			; Load count of clms in 4KB
@@ -275,38 +206,17 @@ add2n:	ynorm_op_wpn vaddpd, exec, noexec, dist_to_dest	; Add and normalize 8 val
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	add0n
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, dist_to_dest
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_blk exec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	ablk1n
-	bump	rbp, 2*YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	ablk0n				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_final exec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwyaddn3 ENDP
 
 
 	; Not base 2, rational, not zero-padded
 PROCFL	gwyaddnr3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rdi, DESTARG			; Address of destination
@@ -314,16 +224,8 @@ PROCFL	gwyaddnr3
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-ablk0nr:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 add0nr:	mov	eax, normval1			; Load count of clms in 4KB
@@ -348,52 +250,28 @@ add2nr:	ynorm_op_wpn vaddpd, noexec, noexec, rdi ; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	add0nr
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, rdi
-	ynorm_op_wpn_blk noexec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	ablk0nr				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_final noexec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwyaddnr3 ENDP
 
 
 	; Base 2, irrational, zero-padded
 PROCFL	gwyaddzp3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
 	sub	rbx, rsi			; Calculate distance from first number to destination
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-ablk0zp: mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-ablk1zp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 add0zp:	mov	eax, normval1			; Load count of clms in 4KB
@@ -420,38 +298,17 @@ add2zp:	ynorm_op_wpn_zpad vaddpd, exec, exec	; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	add0zp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert source ptr to dest ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_zpad_blk exec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	ablk1zp
-	bump	rbp, YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	ablk0zp				; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_zpad_final exec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwyaddzp3 ENDP
 
 
 	; Base 2, rational, zero-padded
 PROCFL	gwyaddrzp3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
@@ -459,16 +316,8 @@ PROCFL	gwyaddrzp3
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-ablk0rzp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 add0rzp: mov	eax, normval1			; Load count of clms in 4KB
@@ -493,52 +342,28 @@ add2rzp: ynorm_op_wpn_zpad vaddpd, noexec, exec	; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	add0rzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert source ptr to dest ptr
-	ynorm_op_wpn_zpad_blk noexec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	ablk0rzp			; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_zpad_final noexec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwyaddrzp3 ENDP
 
 
 	; Not base 2, irrational, zero-padded
 PROCFL	gwyaddnzp3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
 	sub	rbx, rsi			; Calculate distance from first number to destination
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-ablk0nzp: mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-ablk1nzp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 add0nzp: mov	eax, normval1			; Load count of clms in 4KB
@@ -565,38 +390,17 @@ add2nzp: ynorm_op_wpn_zpad vaddpd, exec, noexec	; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	add0nzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert source ptr to dest ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_zpad_blk exec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	ablk1nzp
-	bump	rbp, YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	ablk0nzp			; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_zpad_final exec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwyaddnzp3 ENDP
 
 
 	; Not base 2, rational, zero-padded
 PROCFL	gwyaddnrzp3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
@@ -604,16 +408,8 @@ PROCFL	gwyaddnrzp3
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-ablk0nrzp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 add0nrzp: mov	eax, normval1			; Load count of clms in 4KB
@@ -638,24 +434,11 @@ add2nrzp: ynorm_op_wpn_zpad vaddpd, noexec, noexec ; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	add0nrzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert source ptr to dest ptr
-	ynorm_op_wpn_zpad_blk noexec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	ablk0nrzp			; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_zpad_final noexec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwyaddnrzp3 ENDP
 
 
@@ -703,42 +486,26 @@ gwysubq3 ENDP
 ;; Subtract two numbers with carry propagation (eight different versions)
 ;;
 
-saved_src1	EQU	PPTR [rsp+first_local+0*SZPTR]
-saved_src2	EQU	PPTR [rsp+first_local+1*SZPTR]
-saved_biglit	EQU	PPTR [rsp+first_local+2*SZPTR]
-dist_to_dest	EQU	PPTR [rsp+first_local+3*SZPTR]
-loopcount1	EQU	DPTR [rsp+first_local+4*SZPTR]
-loopcount2	EQU	DPTR [rsp+first_local+4*SZPTR+4]
-loopcount3	EQU	DPTR [rsp+first_local+4*SZPTR+8]
-loopcount4	EQU	DPTR [rsp+first_local+4*SZPTR+12]
-loopcount5	EQU	DPTR [rsp+first_local+4*SZPTR+16]
+dist_to_dest	EQU	PPTR [rsp+first_local+0*SZPTR]
+loopcount3	EQU	DPTR [rsp+first_local+1*SZPTR]
+loopcount4	EQU	DPTR [rsp+first_local+1*SZPTR+4]
+loopcount5	EQU	DPTR [rsp+first_local+1*SZPTR+8]
 
 	; Base 2, irrational, not zero-padded
 PROCFL	gwysub3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rax, DESTARG			; Address of destination
 	sub	rax, rsi			; Calculate distance from first number to destination
 	mov	dist_to_dest, rax		; Save distance to dest
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-sblk0:	mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-sblk1:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 sub0:	mov	eax, normval1			; Load count of clms in 4KB
@@ -765,38 +532,17 @@ sub2:	ynorm_op_wpn vsubpd, exec, exec, dist_to_dest	; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	sub0
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, dist_to_dest
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_blk exec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	sblk1
-	bump	rbp, 2*YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	sblk0				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_final exec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwysub3 ENDP
 
 
 	; Base 2, rational, not zero-padded
 PROCFL	gwysubr3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rdi, DESTARG			; Address of destination
@@ -804,16 +550,8 @@ PROCFL	gwysubr3
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-sblk0r:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 sub0r:	mov	eax, normval1			; Load count of clms in 4KB
@@ -838,53 +576,29 @@ sub2r:	ynorm_op_wpn vsubpd, noexec, exec, rdi	; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	sub0r
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, rdi
-	ynorm_op_wpn_blk noexec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	sblk0r				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_final noexec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwysubr3 ENDP
 
 
 	; Not base 2, irrational, not zero-padded
 PROCFL	gwysubn3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rax, DESTARG			; Address of destination
 	sub	rax, rsi			; Calculate distance from first number to destination
 	mov	dist_to_dest, rax		; Save distance to dest
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-sblk0n:	mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-sblk1n:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 sub0n:	mov	eax, normval1			; Load count of clms in 4KB
@@ -911,38 +625,17 @@ sub2n:	ynorm_op_wpn vsubpd, exec, noexec, dist_to_dest	; Add and normalize 8 val
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	sub0n
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, dist_to_dest
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_blk exec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	sblk1n
-	bump	rbp, 2*YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	sblk0n				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_final exec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwysubn3 ENDP
 
 
 	; Not base 2, rational, not zero-padded
 PROCFL	gwysubnr3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rdi, DESTARG			; Address of destination
@@ -950,16 +643,8 @@ PROCFL	gwysubnr3
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-sblk0nr:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 sub0nr:	mov	eax, normval1			; Load count of clms in 4KB
@@ -984,52 +669,28 @@ sub2nr:	ynorm_op_wpn vsubpd, noexec, noexec, rdi ; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	sub0nr
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, rdi
-	ynorm_op_wpn_blk noexec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	sblk0nr				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_final noexec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwysubnr3 ENDP
 
 
 	; Base 2, irrational, zero-padded
 PROCFL	gwysubzp3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
 	sub	rbx, rsi			; Calculate distance from first number to destination
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-sblk0zp: mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-sblk1zp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 sub0zp:	mov	eax, normval1			; Load count of clms in 4KB
@@ -1056,38 +717,17 @@ sub2zp:	ynorm_op_wpn_zpad vsubpd, exec, exec	; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	sub0zp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert to a dest ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_zpad_blk exec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	sblk1zp
-	bump	rbp, YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	sblk0zp				; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_zpad_final exec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwysubzp3 ENDP
 
 
 	; Base 2, rational, zero-padded
 PROCFL	gwysubrzp3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
@@ -1095,16 +735,8 @@ PROCFL	gwysubrzp3
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-sblk0rzp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 sub0rzp: mov	eax, normval1			; Load count of clms in 4KB
@@ -1129,52 +761,28 @@ sub2rzp: ynorm_op_wpn_zpad vsubpd, noexec, exec	; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	sub0rzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert to a dest ptr
-	ynorm_op_wpn_zpad_blk noexec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	sblk0rzp			; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_zpad_final noexec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwysubrzp3 ENDP
 
 
 	; Not base 2, irrational, zero-padded
 PROCFL	gwysubnzp3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
 	sub	rbx, rsi			; Calculate distance from first number to destination
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-sblk0nzp: mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-sblk1nzp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 sub0nzp: mov	eax, normval1			; Load count of clms in 4KB
@@ -1201,38 +809,17 @@ sub2nzp: ynorm_op_wpn_zpad vsubpd, exec, noexec	; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	sub0nzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert to a dest ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_zpad_blk exec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	sblk1nzp
-	bump	rbp, YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	sblk0nzp				; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_zpad_final exec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwysubnzp3 ENDP
 
 
 	; Not base 2, rational, zero-padded
 PROCFL	gwysubnrzp3
-	ad_prolog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_prolog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
@@ -1240,16 +827,8 @@ PROCFL	gwysubnrzp3
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-sblk0nrzp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 sub0nrzp: mov	eax, normval1			; Load count of clms in 4KB
@@ -1274,24 +853,11 @@ sub2nrzp: ynorm_op_wpn_zpad vsubpd, noexec, noexec ; Add and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	sub0nrzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert to a dest ptr
-	ynorm_op_wpn_zpad_blk noexec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	sblk0nrzp			; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_zpad_final noexec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-
-	ad_epilog 4*SZPTR+20,0,rbx,rbp,rsi,rdi
+	ad_epilog 1*SZPTR+12,0,rbx,rbp,rsi,rdi
 gwysubnrzp3 ENDP
 
 
@@ -1346,20 +912,15 @@ gwyaddsubq3 ENDP
 ;; Add and subtract two numbers with carry propagation (eight different versions)
 ;;
 
-saved_src1	EQU	PPTR [rsp+first_local+0*SZPTR]
-saved_src2	EQU	PPTR [rsp+first_local+1*SZPTR]
-saved_biglit	EQU	PPTR [rsp+first_local+2*SZPTR]
-dist_to_dest1	EQU	PPTR [rsp+first_local+3*SZPTR]
-dist_to_dest2	EQU	PPTR [rsp+first_local+4*SZPTR]
-loopcount1	EQU	DPTR [rsp+first_local+5*SZPTR]
-loopcount2	EQU	DPTR [rsp+first_local+5*SZPTR+4]
-loopcount3	EQU	DPTR [rsp+first_local+5*SZPTR+8]
-loopcount4	EQU	DPTR [rsp+first_local+5*SZPTR+12]
-loopcount5	EQU	DPTR [rsp+first_local+5*SZPTR+16]
+dist_to_dest1	EQU	PPTR [rsp+first_local+0*SZPTR]
+dist_to_dest2	EQU	PPTR [rsp+first_local+1*SZPTR]
+loopcount3	EQU	DPTR [rsp+first_local+2*SZPTR]
+loopcount4	EQU	DPTR [rsp+first_local+2*SZPTR+4]
+loopcount5	EQU	DPTR [rsp+first_local+2*SZPTR+8]
 
 	; Base 2, irrational, not zero-padded
 PROCFL	gwyaddsub3
-	ad_prolog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_prolog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rax, DESTARG			; Address of destination
@@ -1368,26 +929,15 @@ PROCFL	gwyaddsub3
 	mov	rax, DEST2ARG		  	; Address of destination #2
 	sub	rax, rsi			; Calculate distance from first number to destination
 	mov	dist_to_dest2, rax		; Save distance to dest
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vmovapd	ymm2, YMM_BIGVAL		; Init 4 carry registers
 	vmovapd	ymm3, ymm2
 	vmovapd	ymm6, ymm2
 	vmovapd	ymm7, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-asblk0:	mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-asblk1:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 as0:	mov	eax, normval1			; Load count of clms in 4KB
@@ -1414,46 +964,17 @@ as2:	ynorm_addsub_wpn exec, exec, dist_to_dest1, dist_to_dest2 ; Add & subtract 
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	as0
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, dist_to_dest1
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_blk exec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, dist_to_dest2
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_blk exec, exec, ymm6, ymm7 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	asblk1
-	bump	rbp, 2*YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	asblk0				; Loop til done
+	ynorm_op_wpn_save_carries2		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_final exec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-	mov	rsi, DEST2ARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_final exec, exec, xmm6, xmm7 ; Add last 2 carries to start of destination
-
-	ad_epilog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_epilog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 gwyaddsub3 ENDP
 
 
 	; Base 2, rational, not zero-padded
 PROCFL	gwyaddsubr3
-	ad_prolog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_prolog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rdi, DESTARG			; Address of destination
@@ -1465,16 +986,8 @@ PROCFL	gwyaddsubr3
 	vmovapd	ymm6, ymm2
 	vmovapd	ymm7, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-asblk0r:	
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 as0r:	mov	eax, normval1			; Load count of clms in 4KB
@@ -1499,35 +1012,17 @@ as2r:	ynorm_addsub_wpn noexec, exec, rdi, rbp	; Add & subtract and normalize 8 v
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	as0r
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, rdi
-	ynorm_op_wpn_blk noexec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, rbp
-	ynorm_op_wpn_blk noexec, exec, ymm6, ymm7 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	asblk0r				; Loop til done
+	ynorm_op_wpn_save_carries2		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_final noexec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-	mov	rsi, DEST2ARG			; Address of destination
-	ynorm_op_wpn_final noexec, exec, xmm6, xmm7 ; Add last 2 carries to start of destination
-
-	ad_epilog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_epilog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 gwyaddsubr3 ENDP
 
 
 	; Not base 2, irrational, not zero-padded
 PROCFL	gwyaddsubn3
-	ad_prolog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_prolog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rax, DESTARG			; Address of destination
@@ -1536,26 +1031,15 @@ PROCFL	gwyaddsubn3
 	mov	rax, DEST2ARG		  	; Address of destination #2
 	sub	rax, rsi			; Calculate distance from first number to destination
 	mov	dist_to_dest2, rax		; Save distance to dest
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vxorpd	ymm2, ymm2, ymm2		; Init 4 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 	vxorpd	ymm6, ymm6, ymm6
 	vxorpd	ymm7, ymm7, ymm7
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-asblk0n: mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-asblk1n:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 as0n:	mov	eax, normval1			; Load count of clms in 4KB
@@ -1582,46 +1066,17 @@ as2n:	ynorm_addsub_wpn exec, noexec, dist_to_dest1, dist_to_dest2 ; Add & subtra
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	as0n
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, dist_to_dest1
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_blk exec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, dist_to_dest2
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_blk exec, noexec, ymm6, ymm7 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	asblk1n
-	bump	rbp, 2*YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	asblk0n				; Loop til done
+	ynorm_op_wpn_save_carries2		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_final exec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-	mov	rsi, DEST2ARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_final exec, noexec, xmm6, xmm7 ; Add last 2 carries to start of destination
-
-	ad_epilog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_epilog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 gwyaddsubn3 ENDP
 
 
 	; Not base 2, rational, not zero-padded
 PROCFL	gwyaddsubnr3
-	ad_prolog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_prolog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rdi, DESTARG			; Address of destination
@@ -1633,16 +1088,8 @@ PROCFL	gwyaddsubnr3
 	vxorpd	ymm6, ymm6, ymm6
 	vxorpd	ymm7, ymm7, ymm7
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-asblk0nr:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 as0nr:	mov	eax, normval1			; Load count of clms in 4KB
@@ -1667,35 +1114,17 @@ as2nr:	ynorm_addsub_wpn noexec, noexec, rdi, rbp ; Add & subtract and normalize 
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	as0nr
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, rdi
-	ynorm_op_wpn_blk noexec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	add	rsi, rbp
-	ynorm_op_wpn_blk noexec, noexec, ymm6, ymm7 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	asblk0nr			; Loop til done
+	ynorm_op_wpn_save_carries2		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_final noexec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-	mov	rsi, DEST2ARG			; Address of destination
-	ynorm_op_wpn_final noexec, noexec, xmm6, xmm7 ; Add last 2 carries to start of destination
-
-	ad_epilog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_epilog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 gwyaddsubnr3 ENDP
 
 
 	; Base 2, irrational, zero-padded
 PROCFL	gwyaddsubzp3
-	ad_prolog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_prolog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
@@ -1703,26 +1132,15 @@ PROCFL	gwyaddsubzp3
 	mov	rax, DEST2ARG		  	; Address of destination #2
 	sub	rax, rsi			; Calculate distance from first number to destination
 	mov	dist_to_dest2, rax		; Save distance to dest
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vmovapd	ymm2, YMM_BIGVAL		; Init 4 carry registers
 	vmovapd	ymm3, ymm2
 	vmovapd	ymm6, ymm2
 	vmovapd	ymm7, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-asblk0zp: mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-asblk1zp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 as0zp:	mov	eax, normval1			; Load count of clms in 4KB
@@ -1749,46 +1167,17 @@ as2zp:	ynorm_addsub_wpn_zpad exec, exec, dist_to_dest2 ; Add & subtract and norm
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	as0zp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert to destination1 ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_zpad_blk exec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, dist_to_dest2		; Convert to destination2 ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_zpad_blk exec, exec, ymm6, ymm7 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	asblk1zp
-	bump	rbp, YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	asblk0zp			; Loop til done
+	ynorm_op_wpn_save_carries2_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_zpad_final exec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-	mov	rsi, DEST2ARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_zpad_final exec, exec, xmm6, xmm7 ; Add last 2 carries to start of destination
-
-	ad_epilog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_epilog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 gwyaddsubzp3 ENDP
 
 
 	; Base 2, rational, zero-padded
 PROCFL	gwyaddsubrzp3
-	ad_prolog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_prolog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
@@ -1800,16 +1189,8 @@ PROCFL	gwyaddsubrzp3
 	vmovapd	ymm6, ymm2
 	vmovapd	ymm7, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-asblk0rzp:	
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 as0rzp:	mov	eax, normval1			; Load count of clms in 4KB
@@ -1834,35 +1215,17 @@ as2rzp:	ynorm_addsub_wpn_zpad noexec, exec, rdi ; Add & subtract and normalize 8
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	as0rzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert to destination1 ptr
-	ynorm_op_wpn_zpad_blk noexec, exec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rdi			; Convert to destination2 ptr
-	ynorm_op_wpn_zpad_blk noexec, exec, ymm6, ymm7 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	asblk0rzp			; Loop til done
+	ynorm_op_wpn_save_carries2_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_zpad_final noexec, exec, xmm2, xmm3 ; Add last 2 carries to start of destination
-	mov	rsi, DEST2ARG			; Address of destination
-	ynorm_op_wpn_zpad_final noexec, exec, xmm6, xmm7 ; Add last 2 carries to start of destination
-
-	ad_epilog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_epilog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 gwyaddsubrzp3 ENDP
 
 
 	; Not base 2, irrational, zero-padded
 PROCFL	gwyaddsubnzp3
-	ad_prolog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_prolog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
@@ -1870,26 +1233,15 @@ PROCFL	gwyaddsubnzp3
 	mov	rax, DEST2ARG		  	; Address of destination #2
 	sub	rax, rsi			; Calculate distance from first number to destination
 	mov	dist_to_dest2, rax		; Save distance to dest
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vxorpd	ymm2, ymm2, ymm2		; Init 4 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 	vxorpd	ymm6, ymm6, ymm6
 	vxorpd	ymm7, ymm7, ymm7
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-asblk0nzp: mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-asblk1nzp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 as0nzp:	mov	eax, normval1			; Load count of clms in 4KB
@@ -1916,46 +1268,17 @@ as2nzp:	ynorm_addsub_wpn_zpad exec, noexec, dist_to_dest2 ; Add & subtract and n
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	as0nzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert to destination1 ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_zpad_blk exec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, dist_to_dest2		; Convert to destination2 ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_op_wpn_zpad_blk exec, noexec, ymm6, ymm7 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	asblk1nzp
-	bump	rbp, YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	asblk0nzp			; Loop til done
+	ynorm_op_wpn_save_carries2_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_zpad_final exec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-	mov	rsi, DEST2ARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_op_wpn_zpad_final exec, noexec, xmm6, xmm7 ; Add last 2 carries to start of destination
-
-	ad_epilog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_epilog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 gwyaddsubnzp3 ENDP
 
 
 	; Not base 2, rational, zero-padded
 PROCFL	gwyaddsubnrzp3
-	ad_prolog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_prolog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 	mov	rsi, SRCARG			; Address of first number
 	mov	rdx, SRC2ARG			; Address of second number
 	mov	rbx, DESTARG			; Address of destination
@@ -1967,16 +1290,8 @@ PROCFL	gwyaddsubnrzp3
 	vxorpd	ymm6, ymm6, ymm6
 	vxorpd	ymm7, ymm7, ymm7
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-asblk0nrzp:	
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_src2, rdx
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 as0nrzp: mov	eax, normval1			; Load count of clms in 4KB
@@ -2001,29 +1316,11 @@ as2nrzp: ynorm_addsub_wpn_zpad noexec, noexec, rdi ; Add & subtract and normaliz
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	as0nrzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rbx			; Convert to destination1 ptr
-	ynorm_op_wpn_zpad_blk noexec, noexec, ymm2, ymm3 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore source start of block ptr
-	add	rsi, rdi			; Convert to destination2 ptr
-	ynorm_op_wpn_zpad_blk noexec, noexec, ymm6, ymm7 ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdx, saved_src2			; Restore src2 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdx, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	asblk0nrzp			; Loop til done
+	ynorm_op_wpn_save_carries2_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_op_wpn_zpad_final noexec, noexec, xmm2, xmm3 ; Add last 2 carries to start of destination
-	mov	rsi, DEST2ARG			; Address of destination
-	ynorm_op_wpn_zpad_final noexec, noexec, xmm6, xmm7 ; Add last 2 carries to start of destination
-
-	ad_epilog 5*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	ad_epilog 2*SZPTR+12,0,rbx,rbp,rsi,rdi,xmm6,xmm7
 gwyaddsubnrzp3 ENDP
 
 
@@ -2096,71 +1393,25 @@ cz4:	ycopyzero
 gwycopyzero3 ENDP
 
 ;;
-;; Add in a small number with carry propagation (four different versions)
-;;
-
-	; Base 2, irrational version
-PROCFL	gwyadds3
-	ad_prolog 0,0,rbx,rbp,rsi,rdi
-	ynorm_smalladd_wpn exec, exec
-	ad_epilog 0,0,rbx,rbp,rsi,rdi
-gwyadds3 ENDP
-
-	; Base 2, rational version
-PROCFL	gwyaddsr3
-	ad_prolog 0,0,rbx,rbp,rsi,rdi
-	ynorm_smalladd_wpn noexec, exec
-	ad_epilog 0,0,rbx,rbp,rsi,rdi
-gwyaddsr3 ENDP
-
-	; Non base 2, irrational version
-PROCFL	gwyaddsn3
-	ad_prolog 0,0,rbx,rbp,rsi,rdi
-	ynorm_smalladd_wpn exec, noexec
-	ad_epilog 0,0,rbx,rbp,rsi,rdi
-gwyaddsn3 ENDP
-
-	; Non base 2, rational version
-PROCFL	gwyaddsnr3
-	ad_prolog 0,0,rbx,rbp,rsi,rdi
-	ynorm_smalladd_wpn noexec, noexec
-	ad_epilog 0,0,rbx,rbp,rsi,rdi
-gwyaddsnr3 ENDP
-
-;;
 ;; Multiply a number by a small value with carry propagation (eight different versions)
 ;;
 
-saved_src1	EQU	PPTR [rsp+first_local+0*SZPTR]
-saved_biglit	EQU	PPTR [rsp+first_local+1*SZPTR]
-loopcount1	EQU	DPTR [rsp+first_local+2*SZPTR]
-loopcount2	EQU	DPTR [rsp+first_local+2*SZPTR+4]
-loopcount3	EQU	DPTR [rsp+first_local+2*SZPTR+8]
-loopcount4	EQU	DPTR [rsp+first_local+2*SZPTR+12]
-loopcount5	EQU	DPTR [rsp+first_local+2*SZPTR+16]
+loopcount3	EQU	DPTR [rsp+first_local+0*SZPTR]
+loopcount4	EQU	DPTR [rsp+first_local+0*SZPTR+4]
+loopcount5	EQU	DPTR [rsp+first_local+0*SZPTR+8]
 
 	; Base 2, irrational version, not zero-padded
 PROCFL	gwymuls3
-	ad_prolog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_prolog 12,0,rbx,rbp,rsi,rdi,xmm6
 	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vbroadcastsd ymm6, DBLARG		; Load small multiplier value
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-mblk0:	mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-mblk1:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 mul0:	mov	eax, normval1			; Load count of clms in 4KB
@@ -2183,49 +1434,24 @@ mul2:	ynorm_smallmul_wpn exec, exec		; Multiply and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	mul0
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_smallmul_wpn_blk exec, exec	; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	mblk1
-	bump	rbp, 2*YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	mblk0				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_smallmul_wpn_final exec, exec	; Add last 2 carries to start of destination
-
-	ad_epilog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_epilog 12,0,rbx,rbp,rsi,rdi,xmm6
 gwymuls3 ENDP
 
 
 	; Base 2, rational version, not zero-padded
 PROCFL	gwymulsr3
-	ad_prolog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_prolog 12,0,rbx,rbp,rsi,rdi,xmm6
 	mov	rsi, DESTARG			; Address of destination
 	vbroadcastsd ymm6, DBLARG		; Load small multiplier value
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-mblk0r:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 mul0r:	mov	eax, normval1			; Load count of clms in 4KB
@@ -2246,46 +1472,26 @@ mul2r:	ynorm_smallmul_wpn noexec, exec		; Multiply and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	mul0r
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	ynorm_smallmul_wpn_blk noexec, exec	; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	mblk0r				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_smallmul_wpn_final noexec, exec	; Add last 2 carries to start of destination
-
-	ad_epilog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_epilog 12,0,rbx,rbp,rsi,rdi,xmm6
 gwymulsr3 ENDP
 
 
 	; Not base 2, irrational version, not zero-padded
 PROCFL	gwymulsn3
-	ad_prolog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_prolog 12,0,rbx,rbp,rsi,rdi,xmm6
 	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vbroadcastsd ymm6, DBLARG		; Load small multiplier value
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-mblk0n:	mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-mblk1n:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 mul0n:	mov	eax, normval1			; Load count of clms in 4KB
@@ -2308,49 +1514,24 @@ mul2n:	ynorm_smallmul_wpn exec, noexec		; Multiply and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	mul0n
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_smallmul_wpn_blk exec, noexec	; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	mblk1n
-	bump	rbp, 2*YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	mblk0n				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Group ttp ptr
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
-	ynorm_smallmul_wpn_final exec, noexec	; Add last 2 carries to start of destination
-
-	ad_epilog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_epilog 12,0,rbx,rbp,rsi,rdi,xmm6
 gwymulsn3 ENDP
 
 
 	; Not base 2, rational version, not zero-padded
 PROCFL	gwymulsnr3
-	ad_prolog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_prolog 12,0,rbx,rbp,rsi,rdi,xmm6
 	mov	rsi, DESTARG			; Address of destination
 	vbroadcastsd ymm6, DBLARG		; Load small multiplier value
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-mblk0nr:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 mul0nr:	mov	eax, normval1			; Load count of clms in 4KB
@@ -2371,46 +1552,26 @@ mul2nr:	ynorm_smallmul_wpn noexec, noexec	; Multiply and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	mul0nr
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	ynorm_smallmul_wpn_blk noexec, noexec	; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	mblk0nr				; Loop til done
+	ynorm_op_wpn_save_carries		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	mov	rsi, DESTARG			; Address of destination
-	ynorm_smallmul_wpn_final noexec, noexec	; Add last 2 carries to start of destination
-
-	ad_epilog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_epilog 12,0,rbx,rbp,rsi,rdi,xmm6
 gwymulsnr3 ENDP
 
 
 	; Base 2, irrational version, zero-padded
 PROCFL	gwymulszp3
-	ad_prolog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_prolog 12,0,rbx,rbp,rsi,rdi,xmm6
 	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vbroadcastsd ymm6, DBLARG		; Load small multiplier value
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-mblk0zp: mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-mblk1zp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 mul0zp:	mov	eax, normval1			; Load count of clms in 4KB
@@ -2433,46 +1594,24 @@ mul2zp:	ynorm_smallmul_wpn_zpad exec, exec	; Multiply and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	mul0zp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_smallmul_wpn_zpad_blk exec, exec	; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	mblk1zp
-	bump	rbp, YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	mblk0zp				; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	ynorm_smallmul_wpn_zpad_final exec, exec, DESTARG ; Add last 2 carries to start of destination
-
-	ad_epilog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_epilog 12,0,rbx,rbp,rsi,rdi,xmm6
 gwymulszp3 ENDP
 
 
 	; Base 2, rational version, zero-padded
 PROCFL	gwymulsrzp3
-	ad_prolog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_prolog 12,0,rbx,rbp,rsi,rdi,xmm6
 	mov	rsi, DESTARG			; Address of destination
 	vbroadcastsd ymm6, DBLARG		; Load small multiplier value
 	vmovapd	ymm2, YMM_BIGVAL		; Init 2 carry registers
 	vmovapd	ymm3, ymm2
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-mblk0rzp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 mul0rzp: mov	eax, normval1			; Load count of clms in 4KB
@@ -2493,45 +1632,26 @@ mul2rzp: ynorm_smallmul_wpn_zpad noexec, exec	; Multiply and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	mul0rzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	ynorm_smallmul_wpn_zpad_blk noexec, exec ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	mblk0rzp			; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	ynorm_smallmul_wpn_zpad_final noexec, exec, DESTARG ; Add last 2 carries to start of destination
-
-	ad_epilog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_epilog 12,0,rbx,rbp,rsi,rdi,xmm6
 gwymulsrzp3 ENDP
 
 
 	; Non base 2, irrational version, zero-padded
 PROCFL	gwymulsnzp3
-	ad_prolog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_prolog 12,0,rbx,rbp,rsi,rdi,xmm6
 	mov	rsi, DESTARG			; Address of destination
-	mov	rbp, norm_grp_mults		; Addr of the group multipliers
-	mov	rdi, norm_biglit_array		; Addr of the big/little flags array
+	mov	rbp, PREMULT_PREFETCH		; Addr of the group multipliers
+	mov	rdi, norm_ptr1			; Addr of the big/little flags array
 	vbroadcastsd ymm6, DBLARG		; Load small multiplier value
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, count3			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-mblk0nzp: mov	eax, count2			; Load wpn count
-	mov	loopcount2, eax			; Save count
-mblk1nzp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
-	mov	saved_biglit, rdi
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 mul0nzp: mov	eax, normval1			; Load count of clms in 4KB
@@ -2554,46 +1674,24 @@ mul2nzp: ynorm_smallmul_wpn_zpad exec, noexec	; Multiply and normalize 8 values
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	mul0nzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	mov	rdi, saved_biglit		; Restore  biglit start of block ptr
-	ynorm_smallmul_wpn_zpad_blk exec, noexec ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	mov	rdi, saved_biglit		; Restore biglit start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	add	rdi, normval3			; Next little/big flags ptr
-	dec	loopcount2			; Test wpn_count
-	jnz	mblk1nzp
-	bump	rbp, YMM_GMD			; Next set of group multipliers
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	mblk0nzp			; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	ynorm_smallmul_wpn_zpad_final exec, noexec, DESTARG ; Add last 2 carries to start of destination
-
-	ad_epilog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_epilog 12,0,rbx,rbp,rsi,rdi,xmm6
 gwymulsnzp3 ENDP
 
 
 	; Non base 2, rational version, zero-padded
 PROCFL	gwymulsnrzp3
-	ad_prolog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_prolog 12,0,rbx,rbp,rsi,rdi,xmm6
 	mov	rsi, DESTARG			; Address of destination
 	vbroadcastsd ymm6, DBLARG		; Load small multiplier value
 	vxorpd	ymm2, ymm2, ymm2		; Init 2 carry registers
 	vxorpd	ymm3, ymm3, ymm3
 
-	;; Loop over all pass 1 blocks
-
-	mov	eax, addcount1			; Load count of grp multipliers
-	mov	loopcount1, eax			; Save count
-mblk0nrzp:
-
 	;; Do a pass 1 block
 
-	mov	saved_src1, rsi			; Remember pointers at the start of the pass 1 block
 	mov	eax, normval4			; Load count of 4KB chunks in a pass 2 block
 	mov	loopcount3, eax
 mul0nrzp: mov	eax, normval1			; Load count of clms in 4KB
@@ -2614,22 +1712,23 @@ mul2nrzp: ynorm_smallmul_wpn_zpad noexec, noexec ; Multiply and normalize 8 valu
 	dec	loopcount3			; Loop until pass 1 block completed
 	jnz	mul0nrzp
 
-	;; Pass 1 block done, propagate carries
+	;; Pass 1 block done, save carries
 
-	mov	rsi, saved_src1			; Restore dest start of block ptr
-	ynorm_smallmul_wpn_zpad_blk noexec, noexec ; Add 2 carries to start of block
-	mov	rsi, saved_src1			; Restore src1 start of block ptr
-	add	rsi, pass1blkdst		; Next source pointer
-	dec	loopcount1			; Decrement outer loop counter
-	jnz	mblk0nrzp			; Loop til done
+	ynorm_op_wpn_save_carries_zpad		; Save carries in the carries array
 
-	;; All blocks done, propagate wraparound carries
-
-	ynorm_smallmul_wpn_zpad_final noexec, noexec, DESTARG ; Add last 2 carries to start of destination
-
-	ad_epilog 2*SZPTR+20,0,rbx,rbp,rsi,rdi,xmm6
+	ad_epilog 12,0,rbx,rbp,rsi,rdi,xmm6
 gwymulsnrzp3 ENDP
 
+;;
+;; Do final carry propagation for add/sub/addsub/smallmul operations
+;;
+
+PROCFL	gwy3_apply_carries
+	ad_prolog 0,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+	mov	rax, YMM_CARRIES_ROUTINE
+	call	rax
+	ad_epilog 0,0,rbx,rbp,rsi,rdi,xmm6,xmm7
+gwy3_apply_carries ENDP
 
 _TEXT	ENDS
 END

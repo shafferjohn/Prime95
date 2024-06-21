@@ -1,4 +1,4 @@
-; Copyright 2011-2022 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -624,7 +624,7 @@ zs_complex_mult MACRO real1, imag1, real2, imag2, tmp1, tmp2
 ;; This is done for zero-padded FFTs only.
 
 zsquare7 MACRO	src1
-	LOCAL	nozpad, muladd, mulsub, hard, done
+	LOCAL	nozpad, muladd, mulsub, hard, addin, done
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	nozpad			;; No, skip 7 word multiply
 	vmovsd	xmm1, Q [src1-88]	;; Load copy of input FFT word at halfway - 3
@@ -676,8 +676,11 @@ zsquare7 MACRO	src1
 
 	mov	r9, SRC2ARG		;; Distance to s3 arg from gwmuladd4 and gwmulsub4
 	mov	r10, SRC3ARG		;; Distance to FFT(1)
-	cmp	r10, 1			;; Do we have an FFT(1)
-	jne	short hard		;; Yes, do it the hard way
+	cmp	r10, 1			;; Is FFT(1) equal to 1?
+	je	done			;; r10 = 1 means FFT(1) is 1.  Thus, no modification of ZPAD needed for the addin.
+	cmp	r10, 2			;; Do we have an FFTed_FOR_FMA addin
+	jne	short hard		;; No, go compute the addin adjustments for ZPAD values
+					;; Yes, fall through to load the pre-computed addin adjustments for ZPAD values
 
 	vmovsd	xmm7, Q [rsi+r9-88]	;; Load addin0
 	vmovsd	xmm8, Q [rsi+r9-80]	;; Load addin1
@@ -686,9 +689,7 @@ zsquare7 MACRO	src1
 	vmovsd	xmm11, Q [rsi+r9-56]	;; Load addin4
 	vmovsd	xmm12, Q [rsi+r9-48]	;; Load addin5
 	vmovsd	xmm13, Q [rsi+r9-40]	;; Load addin6
-	cmp	al, 3			;; Are we doing an muladd or mulsub
-	jg	mulsub			;; 4 = mulsub
-	je	muladd			;; 3 = muladd, fall through
+	jmp	addin			;; Go add or subtract the adjustments
 
 hard:	vmovsd	xmm8, Q [rsi+r9-88]	;; Load copy of add-in FFT word at halfway - 3
 	vmovsd	xmm9, Q [rsi+r9-80]	;; Load copy of add-in FFT word at halfway - 2
@@ -740,7 +741,7 @@ hard:	vmovsd	xmm8, Q [rsi+r9-88]	;; Load copy of add-in FFT word at halfway - 3
 
 	vmulsd	xmm13, xmm14, xmm21		;; Addin6 = word3 * word3
 
-	cmp	al, 3				;; Are we doing muladd or mulsub
+addin:	cmp	al, 3				;; Are we doing muladd or mulsub
 	jg	mulsub				;; 4 = mulsub
 	;je	muladd				;; 3 = muladd, fall through
 
@@ -773,7 +774,9 @@ nozpad:
 	ENDM
 
 zmult7	MACRO	src1, src2
-	LOCAL	nozpad, orig, addmul, submul, muladd, mulsub, hard, unfft, done
+	LOCAL	nozpad, orig, addmul, submul, muladd, mulsub, hard, addin, unfft, unfft_for_fma, done
+	LOCAL	disptab, addmul312, addmul313, addmul132, addmul133, submul312, submul313, submul132, submul133, load2
+
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	nozpad			;; No, skip 7 word multiply
 
@@ -797,13 +800,26 @@ zmult7	MACRO	src1, src2
 	vmovsd	xmm13, Q [src2-48]	;; Load copy of input FFT word at halfway + 2
 	vmovsd	xmm14, Q [src2-40]	;; Load copy of input FFT word at halfway + 3
 
-	and	al, 7fh			;; Mask out the save FFT results flag
-	jz	orig			;; Jump if not doing addmul or submul of fma
-	mov	r9, SRC2ARG		;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg from gwmuladd4 and gwmulsub4
-	cmp	al, 2			;; Are we doing an addmul or submul or fma
-	ja	orig			;; fma, we'll handle this later
-	je	short submul		;; 2 = submul
-	;jb	short addmul		;; 1 = addmul, fall through
+	and	rax, 7fh			;; Strip the fft save bit from mul4_opcode
+	mov	r9, OFFSET disptab		;; Jump table address
+	mov	r10, [r9+rax*8]			;; Jump table offset
+	mov	r9, SRC2ARG			;; Distance to s2 arg from gwaddmul4 or gwsubmul4 or s3 arg in gwmuladd4 or gwmulsub4
+	jmp	r10
+disptab:
+	DQ	OFFSET orig			;; 0 = nothing fancy
+	DQ	OFFSET addmul			;; 1 = addmul
+	DQ	OFFSET submul			;; 2 = submul
+	DQ	OFFSET orig			;; 3 = muladd
+	DQ	OFFSET orig			;; 4 = mulsub
+	DQ	OFFSET unfft			;; 5 = unfft
+	DQ	OFFSET addmul312		;; 6 = addmul FFTval mem1 mem2
+	DQ	OFFSET addmul313		;; 7 = addmul FFTval mem1 FFTval
+	DQ	OFFSET addmul132		;; 8 = addmul mem1 FFTval mem2
+	DQ	OFFSET addmul133		;; 9 = addmul mem1 FFTval FFTval
+	DQ	OFFSET submul312		;; 10 = submul FFTval mem1 mem2
+	DQ	OFFSET submul313		;; 11 = submul FFTval mem1 FFTval
+	DQ	OFFSET submul132		;; 12 = submul mem1 FFTval mem2
+	DQ	OFFSET submul133		;; 13 = submul mem1 FFTval FFTval
 
 addmul:	vaddsd	xmm8, xmm8, Q [rsi+r9-88]	;; Add copy of input FFT word at halfway - 3
 	vaddsd	xmm9, xmm9, Q [rsi+r9-80]	;; Add copy of input FFT word at halfway - 2
@@ -812,7 +828,29 @@ addmul:	vaddsd	xmm8, xmm8, Q [rsi+r9-88]	;; Add copy of input FFT word at halfwa
 	vaddsd	xmm12, xmm12, Q [rsi+r9-56]	;; Add copy of input FFT word at halfway + 1
 	vaddsd	xmm13, xmm13, Q [rsi+r9-48]	;; Add copy of input FFT word at halfway + 2
 	vaddsd	xmm14, xmm14, Q [rsi+r9-40]	;; Add copy of input FFT word at halfway + 3
-	jmp	short orig
+	jmp	orig
+
+addmul132:
+addmul312:
+	vaddsd	xmm8, xmm8, xmm1		;; Add copy of input FFT word at halfway - 3
+	vaddsd	xmm9, xmm9, xmm2		;; Add copy of input FFT word at halfway - 2
+	vaddsd	xmm10, xmm10, xmm3		;; Add copy of input FFT word at halfway - 1
+	vaddsd	xmm11, xmm11, xmm4		;; Add copy of input FFT word at halfway + 0
+	vaddsd	xmm12, xmm12, xmm5		;; Add copy of input FFT word at halfway + 1
+	vaddsd	xmm13, xmm13, xmm6		;; Add copy of input FFT word at halfway + 2
+	vaddsd	xmm14, xmm14, xmm7		;; Add copy of input FFT word at halfway + 3
+	jmp	load2
+
+addmul133:
+addmul313:
+	vaddsd	xmm8, xmm8, xmm1		;; Add copy of input FFT word at halfway - 3
+	vaddsd	xmm9, xmm9, xmm2		;; Add copy of input FFT word at halfway - 2
+	vaddsd	xmm10, xmm10, xmm3		;; Add copy of input FFT word at halfway - 1
+	vaddsd	xmm11, xmm11, xmm4		;; Add copy of input FFT word at halfway + 0
+	vaddsd	xmm12, xmm12, xmm5		;; Add copy of input FFT word at halfway + 1
+	vaddsd	xmm13, xmm13, xmm6		;; Add copy of input FFT word at halfway + 2
+	vaddsd	xmm14, xmm14, xmm7		;; Add copy of input FFT word at halfway + 3
+	jmp	orig
 
 submul:	vsubsd	xmm8, xmm8, Q [rsi+r9-88]	;; Sub copy of input FFT word at halfway - 3
 	vsubsd	xmm9, xmm9, Q [rsi+r9-80]	;; Sub copy of input FFT word at halfway - 2
@@ -821,6 +859,54 @@ submul:	vsubsd	xmm8, xmm8, Q [rsi+r9-88]	;; Sub copy of input FFT word at halfwa
 	vsubsd	xmm12, xmm12, Q [rsi+r9-56]	;; Sub copy of input FFT word at halfway + 1
 	vsubsd	xmm13, xmm13, Q [rsi+r9-48]	;; Sub copy of input FFT word at halfway + 2
 	vsubsd	xmm14, xmm14, Q [rsi+r9-40]	;; Sub copy of input FFT word at halfway + 3
+	jmp	orig
+
+submul132:
+	vsubsd	xmm8, xmm8, xmm1		;; Sub copy of input FFT word at halfway - 3
+	vsubsd	xmm9, xmm9, xmm2		;; Sub copy of input FFT word at halfway - 2
+	vsubsd	xmm10, xmm10, xmm3		;; Sub copy of input FFT word at halfway - 1
+	vsubsd	xmm11, xmm11, xmm4		;; Sub copy of input FFT word at halfway + 0
+	vsubsd	xmm12, xmm12, xmm5		;; Sub copy of input FFT word at halfway + 1
+	vsubsd	xmm13, xmm13, xmm6		;; Sub copy of input FFT word at halfway + 2
+	vsubsd	xmm14, xmm14, xmm7		;; Sub copy of input FFT word at halfway + 3
+	jmp	short load2
+
+submul312:
+	vsubsd	xmm8, xmm1, xmm8		;; Sub copy of input FFT word at halfway - 3
+	vsubsd	xmm9, xmm2, xmm9		;; Sub copy of input FFT word at halfway - 2
+	vsubsd	xmm10, xmm3, xmm10		;; Sub copy of input FFT word at halfway - 1
+	vsubsd	xmm11, xmm4, xmm11		;; Sub copy of input FFT word at halfway + 0
+	vsubsd	xmm12, xmm5, xmm12		;; Sub copy of input FFT word at halfway + 1
+	vsubsd	xmm13, xmm6, xmm13		;; Sub copy of input FFT word at halfway + 2
+	vsubsd	xmm14, xmm7, xmm14		;; Sub copy of input FFT word at halfway + 3
+load2:	vmovsd	xmm1, Q [rsi+r9-88]		;; Load input FFT word at halfway - 3
+	vmovsd	xmm2, Q [rsi+r9-80]		;; Load input FFT word at halfway - 2
+	vmovsd	xmm3, Q [rsi+r9-72]		;; Load input FFT word at halfway - 1
+	vmovsd	xmm4, Q [rsi+r9-64]		;; Load input FFT word at halfway + 0
+	vmovsd	xmm5, Q [rsi+r9-56]		;; Load input FFT word at halfway + 1
+	vmovsd	xmm6, Q [rsi+r9-48]		;; Load input FFT word at halfway + 2
+	vmovsd	xmm7, Q [rsi+r9-40]		;; Load input FFT word at halfway + 3
+	jmp	orig
+
+submul133:
+	vsubsd	xmm8, xmm8, xmm1		;; Sub copy of input FFT word at halfway - 3
+	vsubsd	xmm9, xmm9, xmm2		;; Sub copy of input FFT word at halfway - 2
+	vsubsd	xmm10, xmm10, xmm3		;; Sub copy of input FFT word at halfway - 1
+	vsubsd	xmm11, xmm11, xmm4		;; Sub copy of input FFT word at halfway + 0
+	vsubsd	xmm12, xmm12, xmm5		;; Sub copy of input FFT word at halfway + 1
+	vsubsd	xmm13, xmm13, xmm6		;; Sub copy of input FFT word at halfway + 2
+	vsubsd	xmm14, xmm14, xmm7		;; Sub copy of input FFT word at halfway + 3
+	jmp	short orig
+
+submul313:
+	vsubsd	xmm8, xmm1, xmm8		;; Sub copy of input FFT word at halfway - 3
+	vsubsd	xmm9, xmm2, xmm9		;; Sub copy of input FFT word at halfway - 2
+	vsubsd	xmm10, xmm3, xmm10		;; Sub copy of input FFT word at halfway - 1
+	vsubsd	xmm11, xmm4, xmm11		;; Sub copy of input FFT word at halfway + 0
+	vsubsd	xmm12, xmm5, xmm12		;; Sub copy of input FFT word at halfway + 1
+	vsubsd	xmm13, xmm6, xmm13		;; Sub copy of input FFT word at halfway + 2
+	vsubsd	xmm14, xmm7, xmm14		;; Sub copy of input FFT word at halfway + 3
+	;;jmp	short orig
 
 orig:	vmulsd	xmm0, xmm1, xmm14	;; Result0 = word-3 * word3
 	zfmaddsd xmm0, xmm2, xmm13, xmm0 ;;	   + word-2 * word2
@@ -859,10 +945,15 @@ orig:	vmulsd	xmm0, xmm1, xmm14	;; Result0 = word-3 * word3
 
 	cmp	al, 3			;; Are we doing an muladd or mulsub
 	jl	done			;; No, we're done
+	cmp	al, 4			;; Are we doing an muladd or mulsub
+	jg	done			;; No, we're done
 
 	mov	r10, SRC3ARG		;; Distance to FFT(1)
-	cmp	r10, 1			;; Do we have an FFT(1)
-	jne	short hard		;; Yes, do it the hard way
+	cmp	r10, 1			;; Is FFT(1) equal to 1?
+	je	done			;; r10 = 1 means FFT(1) is 1.  Thus, no modification of ZPAD needed for the addin.
+	cmp	r10, 2			;; Do we have an FFTed_FOR_FMA addin
+	jne	short hard		;; No, go compute the addin adjustments for ZPAD values
+					;; Yes, fall through to load the pre-computed addin adjustments for ZPAD values
 
 	vmovsd	xmm7, Q [rsi+r9-88]	;; Load addin0
 	vmovsd	xmm8, Q [rsi+r9-80]	;; Load addin1
@@ -871,9 +962,7 @@ orig:	vmulsd	xmm0, xmm1, xmm14	;; Result0 = word-3 * word3
 	vmovsd	xmm11, Q [rsi+r9-56]	;; Load addin4
 	vmovsd	xmm12, Q [rsi+r9-48]	;; Load addin5
 	vmovsd	xmm13, Q [rsi+r9-40]	;; Load addin6
-	cmp	al, 3			;; Are we doing an muladd or mulsub
-	jg	mulsub			;; 4 = mulsub
-	je	muladd			;; 3 = muladd, fall through
+	jmp	addin
 
 hard:	vmovsd	xmm8, Q [rsi+r9-88]	;; Load copy of add-in FFT word at halfway - 3
 	vmovsd	xmm9, Q [rsi+r9-80]	;; Load copy of add-in FFT word at halfway - 2
@@ -925,7 +1014,7 @@ hard:	vmovsd	xmm8, Q [rsi+r9-88]	;; Load copy of add-in FFT word at halfway - 3
 
 	vmulsd	xmm13, xmm14, xmm21		;; Addin6 = word3 * word3
 
-	cmp	al, 3				;; Are we doing an muladd or mulsub
+addin:	cmp	al, 3				;; Are we doing an muladd or mulsub
 	jg	mulsub				;; 4 = mulsub
 	;je	muladd				;; 3 = muladd, fall through
 
@@ -945,9 +1034,21 @@ mulsub:	vsubpd	xmm0, xmm0, xmm7		;; Subtract the addins
 	vsubpd	xmm4, xmm4, xmm11
 	vsubpd	xmm5, xmm5, xmm12
 	vsubpd	xmm6, xmm6, xmm13
+	jmp	done
+
+unfft:	cmp	SRC3ARG, 2			;; Test for unfft of an ffted_for_fma value
+	je	short unfft_for_fma
+	vsubsd	xmm0, xmm0, xmm0		;; Simple unfft - no result words just above or below the last FFT word
+	vsubsd	xmm1, xmm1, xmm1
+	vsubsd	xmm2, xmm2, xmm2
+	vsubsd	xmm3, xmm3, xmm3
+	vsubsd	xmm4, xmm4, xmm4
+	vsubsd	xmm5, xmm5, xmm5
+	vsubsd	xmm6, xmm6, xmm6
 	jmp	short done
 
-unfft:	vmovsd	xmm0, xmm1, xmm1		;; Copy the ZPADs (mul by 1)
+unfft_for_fma:
+	vmovsd	xmm0, xmm1, xmm1		;; Unffted value was gwffted_for_fma (already multiplied by FFT(1)).  Copy 7 values from header to ZPAD0-6.
 	vmovsd	xmm1, xmm2, xmm2
 	vmovsd	xmm2, xmm3, xmm3
 	vmovsd	xmm3, xmm4, xmm4

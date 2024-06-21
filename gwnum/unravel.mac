@@ -1,4 +1,4 @@
-; Copyright 1995-2020 - Mersenne Research, Inc.  All rights reserved
+; Copyright 1995-2024 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -713,9 +713,19 @@ ad_epilog MACRO space_needed, calls_C_code, regs:vararg
 	ret
 	ENDIF
 
+;; If returning from AVX code, zero upper register to avoid nasty Intel CPU penalty.
+;; See https://www.intel.com/content/dam/develop/external/us/en/documents/11mc12-avoiding-2bavx-sse-2btransition-2bpenalties-2brh-2bfinal-809104.pdf
+
+	IFDEF yarch
+		vzeroupper
+	ELSE
+	IFDEF zarch
+		vzeroupper
+	ENDIF
+	ENDIF
+
 ;; In Windows 64-bit mode, switch the stack pointer and restore registers
-;; Use only the instructions required by the exception handling stack unwind
-;; procedure.
+;; Use only the instructions required by the exception handling stack unwind procedure.
 
 	IFDEF WINDOWS64
 
@@ -724,8 +734,7 @@ ad_epilog MACRO space_needed, calls_C_code, regs:vararg
 
 	ENDIF
 
-;; In Linux 64-bit mode, unreserve stack space, restore saved registers
-;; and return
+;; In Linux 64-bit mode, unreserve stack space, restore saved registers and return
 
 	IFDEF LINUX64
 
@@ -1488,6 +1497,17 @@ c_call MACRO routine
 	IFDEF LINUX64
 	mov	rdi, r11		;; Pass asm_data pointer argument in rdi
 	mov	rbx, r11		;; And save a copy for later restore
+	ENDIF
+
+	;; If calling from AVX code, zero upper register to avoid nasty Intel CPU penalty.
+	;; See https://www.intel.com/content/dam/develop/external/us/en/documents/11mc12-avoiding-2bavx-sse-2btransition-2bpenalties-2brh-2bfinal-809104.pdf
+
+	IFDEF yarch
+		vzeroupper
+	ELSE
+	IFDEF zarch
+		vzeroupper
+	ENDIF
 	ENDIF
 
 	;; Call the C routine

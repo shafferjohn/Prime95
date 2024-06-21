@@ -193,13 +193,19 @@ void exponentiate_array (gwhandle *gwdata, gwnum x, uint64_t *power, int arrayle
 {
 	// Handle simple cases.  In theory, window size 3 breaks even with simple exponentiation at around 9 bits.
 	while (arraylen >= 1 && power[arraylen-1] == 0) arraylen--;
-	// For extra safety, use legacy code for small exponentiations
+
+	// Use legacy code for small exponentiations
 	if (arraylen <= 1) {
 		if (arraylen == 0) simple_exponentiate (gwdata, x, 0);
-		else if (power[0] <= 256) simple_exponentiate (gwdata, x, power[0]);
+		else if (power[0] <= 256 || num_temps < 4) simple_exponentiate (gwdata, x, power[0]);
 		else exponentiate_window3 (gwdata, x, power, arraylen);
 	}
-	// This formula is the expected number of squarings/multiplies for a window size of 3 (8 gwnum temps):  9 + (len-5) + (len-4)/5
+	// Handle case where caller suggests 4 temps or less.  The minimum window size of 3 uses 4 temps.
+	else if (num_temps <= 4) {
+		//GW:  in num_temps < 4, we should write a simple_exponentiate that takes an array of uint64_t as input.
+		exponentiate_window3 (gwdata, x, power, arraylen);
+	}
+	// This formula is the expected number of squarings/multiplies for a window size of 3 (4 gwnum temps):  5 + (len-5) + (len-4)/4
 	// Generalize this formula to "temps+1 + (len-(log2(temps)+2)) + (len-(log2(temps)+1))/(log2(temps)+2)" and use a binary
 	// search to find the best number of temps.
 	else {

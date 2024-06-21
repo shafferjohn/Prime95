@@ -1,4 +1,4 @@
-/* Copyright 1995-2022 Mersenne Research, Inc.  All rights reserved */
+/* Copyright 1995-2024 Mersenne Research, Inc.  All rights reserved */
 
 #ifndef _COMMONC_H
 #define _COMMONC_H
@@ -11,8 +11,8 @@ extern "C" {
 
 /* Constants */
 
-#define VERSION		"30.8"
-#define BUILD_NUM	"15"
+#define VERSION		"30.19"
+#define BUILD_NUM	"20"
 /* The list of assigned OS ports follows: */
 /* Win9x (prime95) #1 */
 /* Linux (mprime)  #2 */
@@ -28,7 +28,8 @@ extern "C" {
 /* FreeBSD 64-bit  #12 */
 
 #define MIN_PRIME	5L		/* Smallest testable prime */
-#define MAX_FACTOR	2000000000	/* Largest factorable Mersenne number */
+#define MAX_FACTOR	1500000000	/* Largest factorable Mersenne number */
+#define MAX_FACTOR_BITS	87		/* Largest factor to bits allowed */
 #define ERROR_RATE	0.018		/* Estimated LL error rate on clean run */
 #define PRP_ERROR_RATE	0.0001		/* Estimated PRP error rate (assumes Gerbicz error-checking) */
 
@@ -36,7 +37,7 @@ extern "C" {
 /* limitations in our own old affinity code, we used to limit */
 /* Windows 32-bit to 32 workers, Windows 64-bit to 64 workers. */
 
-#define MAX_NUM_WORKER_THREADS 1024	/* Number of launchable work threads */
+#define MAX_NUM_WORKERS 1024		/* Number of launchable workers */
 
 /* Factoring limits based on complex formulas given the speed of the */
 /* factoring code vs. the speed of the Lucas-Lehmer code */
@@ -138,7 +139,6 @@ extern char V4_USERPWD[9];
 extern char V4_USERNAME[80];
 
 extern char INI_FILE[260];		/* Name of the prime INI file */
-extern char LOCALINI_FILE[260];		/* Name of the local INI file */
 extern char WORKTODO_FILE[260];		/* Name of the work-to-do INI file */
 extern char RESFILE[260];		/* Name of the results file */
 extern char RESFILEBENCH[260];		/* Name of the results.bench file */
@@ -152,19 +152,17 @@ extern char COMPUTER_GUID[33];		/* Global unique computer ID */
 extern int USE_PRIMENET;		/* TRUE if we're using PrimeNet */
 extern int DIAL_UP;			/* TRUE if we're dialing into */
 					/* PrimeNet server */
-extern unsigned int NUM_WORKER_THREADS; /* Number of work threads to launch */
-extern unsigned int WORK_PREFERENCE[MAX_NUM_WORKER_THREADS];
-					/* Type of work (factoring, testing, */
-					/* etc.) to get from the server. */
-extern unsigned int CORES_PER_TEST[MAX_NUM_WORKER_THREADS];
-					/* Number of threads gwnum can use in computations. */
+extern unsigned int NUM_WORKERS;	/* Number of workers to launch */
+extern unsigned int WORK_PREFERENCE[MAX_NUM_WORKERS];
+					/* Type of work (factoring, testing, etc.) to get from the server. */
+extern unsigned int CORES_PER_TEST[MAX_NUM_WORKERS];
+					/* Number of cores gwnum can use in computations */
 extern int HYPERTHREAD_TF;		/* TRUE if trial factoring should use hyperthreads */
 extern int HYPERTHREAD_LL;		/* TRUE if FFTs (LL, P-1, ECM, PRP) should use hyperthreads */
 extern unsigned int DAYS_OF_WORK;	/* How much work to retrieve from */
 					/* the primenet server */
 extern int STRESS_TESTER;		/* 1 if stress testing */
 extern int volatile ERRCHK;		/* 1 to turn on roundoff error checking */
-extern int volatile SUM_INPUTS_ERRCHK;	/* 1 to turn on sum(inputs) != sum(outputs) error checking */
 extern unsigned int PRIORITY;		/* Desired priority level */
 extern int MANUAL_COMM;			/* Set on if user explicitly starts */
 					/* all communication with the server */
@@ -173,8 +171,7 @@ extern unsigned int volatile CPU_HOURS;	/* Hours per day program will run */
 extern int CLASSIC_OUTPUT;		/* LL and PRP output to worker windows should use the pre-v28.5 classic style */
 extern int OUTPUT_ROUNDOFF;		/* LL and PRP output to worker windows shound include the roundoff error */
 extern unsigned long volatile ITER_OUTPUT;/* Iterations between outputs */
-extern unsigned long volatile ITER_OUTPUT_RES;/* Iterations between results */
-					/* file outputs */
+extern unsigned long volatile ITER_OUTPUT_RES;/* Iterations between results file outputs */
 extern unsigned long volatile DISK_WRITE_TIME;
 					/* Number of minutes between writing */
 					/* intermediate results to disk */
@@ -227,9 +224,9 @@ extern int THROTTLE_PCT;		/* Percent CPU time prog should run */
 
 extern int STARTUP_IN_PROGRESS;		/* TRUE if startup dialogs are up */
 
-extern int LAUNCH_TYPE;			/* Type of worker threads launched */
-extern unsigned int WORKER_THREADS_ACTIVE;/* Num worker threads running */
-extern int WORKER_THREADS_STOPPING;	/* TRUE iff worker threads stopping */
+extern int LAUNCH_TYPE;			/* Type of workers launched */
+extern unsigned int WORKERS_ACTIVE;/* Num workers running */
+extern int WORKERS_STOPPING;	/* TRUE iff workers stopping */
 
 extern unsigned int WORKTODO_COUNT;	/* Count of valid work lines */
 
@@ -239,6 +236,7 @@ extern gwthread COMMUNICATION_THREAD;	/* Handle for comm thread.  Set when comm 
 extern gwthread UPLOAD_THREAD;		/* Handle for proof file upload thread */
 
 extern gwevent AUTOBENCH_EVENT;		/* Event to wake up workers after an auto-benchmark */
+extern gwevent PROOF_UPLOAD_EVENT;	/* Event to wake up proof uploader */
 
 /* Topology variables and routines */
 
@@ -272,6 +270,67 @@ struct hw_core_info {
 };
 extern struct hw_core_info *HW_CORES;	/* Information on every core */
 
+/* INI section and keyword strings */
+
+extern const char KEY_NumWorkers[];
+extern const char KEY_QuitGIMPS[];
+
+extern const char SEC_Internals[];
+extern const char KEY_V30OptionsConverted[];
+extern const char KEY_OldCpuSpeed[];
+extern const char KEY_NewCpuSpeed[];
+extern const char KEY_NewCpuSpeedCount[];
+extern const char KEY_RollingAverage[];
+extern const char KEY_RollingHash[];
+extern const char KEY_RollingStartTime[];
+extern const char KEY_RollingCompleteTime[];
+extern const char KEY_CertDailyMBRemaining[];
+extern const char KEY_CertDailyCPURemaining[];
+extern const char KEY_CertDailyRemainingLastUpdate[];
+extern const char KEY_Pid[];
+extern const char KEY_SrvrUID[];
+extern const char KEY_SrvrComputerName[];
+extern const char KEY_SrvrP00[];
+extern const char KEY_SrvrPO1[];
+extern const char KEY_SrvrPO2[];
+extern const char KEY_SrvrPO3[];
+extern const char KEY_SrvrPO4[];
+extern const char KEY_SrvrPO5[];
+extern const char KEY_SrvrPO6[];
+extern const char KEY_SrvrPO7[];
+extern const char KEY_SrvrPO8[];
+extern const char KEY_SrvrPO9[];
+extern const char KEY_LastEndDatesSent[];
+extern const char KEY_WGUID_version[];
+extern const char KEY_CertErrorCount[];
+
+extern const char SEC_PrimeNet[];
+extern const char KEY_DialUp[];
+extern const char KEY_ProxyHost[];
+extern const char KEY_ProxyUser[];
+extern const char KEY_ProxyPass[];
+extern const char KEY_ProxyMask[];
+extern const char KEY_Debug[];
+extern const char KEY_UploadRateLimit[];
+extern const char KEY_UploadStartTime[];
+extern const char KEY_UploadEndTime[];
+extern const char KEY_DownloadDailyLimit[];
+extern const char KEY_DownloadRateLimit[];
+extern const char KEY_ProofUploads[];
+extern const char KEY_ProofHashLength[];
+extern const char KEY_ProofPower[];
+extern const char KEY_ProofPowerMult[];
+extern const char KEY_UploadChunkSize[];
+
+extern const char SEC_Windows[];
+extern const char KEY_MergeWindows[];
+extern const char KEY_TrayIcon[];
+extern const char KEY_HideIcon[];
+extern const char KEY_Left[];
+extern const char KEY_Right[];
+extern const char KEY_Top[];
+extern const char KEY_Bottom[];
+extern const char KEY_ExitOnX[];
 
 /* Common routines */
 
@@ -304,7 +363,6 @@ int readIniFiles (void);
 
 void processTimedIniFile (const char *);
 
-int addFileExists (void);
 void incorporateIniAddFiles (void);
 int incorporateWorkToDoAddFile (void);
 
@@ -370,13 +428,15 @@ struct work_unit {		/* One line from the worktodo file */
 	uint64_t B2;		/* ECM, P-1, P+1 - Stage 2 bound */
 	uint64_t B2_start;	/* P-1 - Stage 2 start */
 	int	nth_run;	/* P+1 - 1 for start 2/7, 2 for start 6/5, 3+ for random start */
+	unsigned int skip_curves; /* ECM - number of curves from gmp_ecm_file to skip over */
 	unsigned int curves_to_do; /* ECM - curves to try */
-	double	curve;		/* ECM - Specific curve to test (debug tool) */
+	uint64_t curve;		/* ECM - Specific curve to test (debug tool) */
 	double	tests_saved;	/* Pfactor - primality tests saved if a factor is found */
 	unsigned int prp_base;	/* PRP base to use */	
 	int	prp_residue_type; /* PRP residue to output -- see primenet.h */
 	int	prp_dblchk;	/* True if this is a doublecheck of a previous PRP */
 	int	cert_squarings; /* Number of squarings required for PRP proof certification */
+	char	*gmp_ecm_file;	/* Save file from GMP-ECM to run stage 2 on */
 	char	*known_factors;	/* ECM, P-1, P+1, PRP - list of known factors */
 	char	*comment;	/* Comment line in worktodo.txt */
 		/* Runtime variables */
@@ -390,7 +450,7 @@ struct work_unit {		/* One line from the worktodo file */
 	unsigned long fftlen;	/* FFT length in use */
 	int	ra_failed;	/* Set when register assignment fails, tells us not to try registering it again. */
 };
-struct work_unit_array {	/* All the lines for one worker thread */
+struct work_unit_array {	/* All the lines for one worker */
 	struct work_unit *first; /* First work unit */
 	struct work_unit *last;	/* Last work unit */
 };
@@ -401,7 +461,12 @@ int writeWorkToDoFile (int);
 #define LONG_TERM_USE		1
 struct work_unit *getNextWorkToDoLine (int, struct work_unit *, int);
 void decrementWorkUnitUseCount (struct work_unit *, int);
-int addWorkToDoLine (int, struct work_unit *);
+#define ADD_TO_FRONT		1
+#define ADD_TO_LOGICAL_END	2		// Add after last non-blank line
+#define ADD_TO_END		3
+#define ADD_BEFORE_SPECIFIC	4		// Add before w->next
+#define ADD_AFTER_SPECIFIC	5		// Add after w->next
+int addWorkToDoLine (int, struct work_unit *, int);
 int updateWorkToDoLine (int, struct work_unit *);
 int deleteWorkToDoLine (int, struct work_unit *, int);
 int isWorkUnitActive (struct work_unit *);
@@ -422,36 +487,41 @@ void tempFileName (struct work_unit *, char *);
 int fileExists (const char *);
 void DirPlusFilename (char *, const char *);
 
-int read_array (int fd, char *buf, size_t len, unsigned long *sum);
-int write_array (int fd, const char *buf, size_t len, unsigned long *sum);
-int read_giant (int fd, giant g, unsigned long *sum);
-int write_giant (int fd, giant g, unsigned long *sum);
-int read_gwnum (int fd, gwhandle *gwdata, gwnum g, unsigned long *sum);
-int write_gwnum (int fd, gwhandle *gwdata, gwnum g, unsigned long *sum);
-int read_short (int fd, short *val);
-int read_long (int fd, unsigned long *val, unsigned long *sum);
-int write_long (int fd, unsigned long val, unsigned long *sum);
-int read_slong (int fd, long *val, unsigned long *sum);
-int write_slong (int fd, long val, unsigned long *sum);
-int read_int (int fd, int *val, unsigned long *sum);
-int write_int (int fd, int val, unsigned long *sum);
-int read_double (int fd, double *val, unsigned long *sum);
-int write_double (int fd, double dbl, unsigned long *sum);
-int read_uint32 (int fd, uint32_t *val, unsigned long *sum);
-int write_uint32 (int fd, uint32_t val, unsigned long *sum);
-int read_uint64 (int fd, uint64_t *val, unsigned long *sum);
-int write_uint64 (int fd, uint64_t val, unsigned long *sum);
-int read_magicnum (int fd, unsigned long magicnum);
-int read_header (int fd, unsigned long *version, struct work_unit *w, unsigned long *sum);
-int write_header (int fd, unsigned long magicnum, unsigned long version, struct work_unit *w);
-int read_checksum (int fd, unsigned long *sum);
-int write_checksum (int fd, unsigned long sum);
+int read_array (int fd, char *buf, size_t len, uint32_t *sum);
+int write_array (int fd, const char *buf, size_t len, uint32_t *sum);
+int read_giant (int fd, giant g, uint32_t *sum);
+int write_giant (int fd, giant g, uint32_t *sum);
+int read_gwnum (int fd, gwhandle *gwdata, gwnum g, uint32_t *sum);
+int write_gwnum (int fd, gwhandle *gwdata, gwnum g, uint32_t *sum);
+int read_double (int fd, double *val, uint32_t *sum);
+int write_double (int fd, double dbl, uint32_t *sum);
+int read_int32 (int fd, int32_t *val, uint32_t *sum);
+int write_int32 (int fd, int32_t val, uint32_t *sum);
+int read_uint32 (int fd, uint32_t *val, uint32_t *sum);
+int write_uint32 (int fd, uint32_t val, uint32_t *sum);
+int read_int64 (int fd, int64_t *val, uint32_t *sum);
+int write_int64 (int fd, int64_t val, uint32_t *sum);
+int read_uint64 (int fd, uint64_t *val, uint32_t *sum);
+int write_uint64 (int fd, uint64_t val, uint32_t *sum);
+int read_magicnum (int fd, uint32_t magicnum);
+int read_header (int fd, uint32_t *version, struct work_unit *w, uint32_t *sum);
+int write_header (int fd, uint32_t magicnum, uint32_t version, struct work_unit *w);
+int read_checksum (int fd, uint32_t *sum);
+int write_checksum (int fd, uint32_t sum);
+// Deprecated versions (int = int32, long = uint32, slong = int32)
+int read_long (int fd, unsigned long *val, uint32_t *sum);
+#define write_long(fd,val,sum)	write_uint32 (fd, (uint32_t) (val), sum)
+int read_int (int fd, int *val, uint32_t *sum);
+#define write_int(fd,val,sum)	write_int32 (fd, (int32_t) (val), sum)
+int read_slong (int fd, long *val, uint32_t *sum);
+#define write_slong(fd,val,sum)	write_int32 (fd, (int32_t) (val), sum)
 
 void formatMsgForResultsFile (char *, struct work_unit *);
 int writeResults (const char *);
 int writeResultsBench (const char *);
 int writeResultsJSON (const char *);
 void JSONaddExponent (char *JSONbuf, struct work_unit *w);
+void JSONaddExponentKnownFactors (char *JSONbuf, struct work_unit *w);
 void JSONaddProgramTimestamp (char *JSONbuf);
 void JSONaddUserComputerAID (char *JSONbuf, struct work_unit *w);
 

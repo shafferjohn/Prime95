@@ -1,4 +1,4 @@
-; Copyright 2001-2016 Mersenne Research, Inc.  All rights reserved
+; Copyright 2001-2024 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -377,27 +377,6 @@ cz1:	xcopyzero			; Copy/zero 8 values
 gwxcopyzero1 ENDP
 
 ;;
-;; Add in a small number with carry propagation
-;;
-
-PROCFL	gwxadds1
-	ad_prolog 0,0,rbx,rbp,rsi,rdi,xmm6,xmm7
-	mov	rsi, DESTARG		; Address of destination
-	movsd	xmm7, DBLARG		; Small addin value
-
-	mov	rbp, norm_col_mults	; Address of the multipliers
-	mov	rdi, norm_biglit_array	; Addr of the big/little flags array
-	sub	rax, rax		; Clear big/lit flag
-	cmp	B_IS_2, 0		; Is b = 2?
-	jne	b2adds			; yes, do simpler normalization
-	xnorm_smalladd_1d noexec
-	jmp	addsdn
-b2adds:	xnorm_smalladd_1d exec
-addsdn:
-	ad_epilog 0,0,rbx,rbp,rsi,rdi,xmm6,xmm7
-gwxadds1 ENDP
-
-;;
 ;; Multiply a number by a small value
 ;;
 
@@ -492,7 +471,7 @@ saved_reg2	EQU	PPTR [rsp+first_local+1*SZPTR]
 saved_reg3	EQU	PPTR [rsp+first_local+2*SZPTR]
 
 inorm	MACRO	lab, ttp, zero, echk, const, base2, sse4
-	LOCAL	ilp0, ilp1
+	LOCAL	ilp0, ilp1, off_ok
 	PROCFLP	lab
 	int_prolog 3*SZPTR,0,0
 	mov	rsi, DESTARG		;; Addr of multiplied number
@@ -533,6 +512,18 @@ ttp	mov	rbp, saved_reg1		;; Restore ttp pointer
 
 	shr	edx, 11			;; Get next loop amount
 	jnz	ilp0
+no zero	mov	rsi, DESTARG		;; Addr of multiplied number
+no zero	mov	edi, ADDIN_OFFSET	;; Get address to add value into
+no zero	mov	edx, 11000b		;; Unlike AVX, FMA, and AVX512 FFTs, one pass SSE2 FFT's ADDIN_OFFSET can be different than POST_ADDIN_OFFSET
+no zero and	edx, edi		;; Look at if this is the 1st, 2nd, 3rd, or 4th double in a group of 4 doubles
+no zero	jz	off_ok			;; First double, offset is OK
+no zero	cmp	edx, 11000b		;; Fourth double?
+no zero	je	off_ok			;; Yes, offset is OK
+no zero	xor	edi, 11000b		;; Swap address for second and third doubles
+off_ok:
+no zero	movsd	xmm0, Q [rsi][rdi]	;; Get the value
+no zero	addsd	xmm0, POSTADDIN_VALUE	;; Add in the requested value
+no zero	movsd	Q [rsi][rdi], xmm0	;; Save the new value
 no base2 jmp	non2dn			;; Go to non-base2 end code
 zero	jmp	zdn			;; Go to zero upper half end code
 base2 no zero jmp idn			;; Go to normal end code

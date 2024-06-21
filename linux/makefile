@@ -8,7 +8,8 @@
 #	ldd mprime
 #
 # Hwloc can be downloaded from https://www.open-mpi.org/projects/hwloc/
-# Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl --disable-opencl --disable-rsmi
+# Configure hwloc with --enable-static --disable-shared --disable-io
+#              or with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl --disable-opencl --disable-rsmi --disable-nvml
 #
 #  Ugh, different linux variants require different makefiles.
 #  The current makefile is for CentOS 7.  We prefer to link against older Linux versions because linking on the latest, greatest version
@@ -18,7 +19,7 @@
 #	"export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig"
 #	CFLAGS = -I.. -I../gwnum -O2 -march=i486 -malign-double -Wno-unused-result
 #	LFLAGS = -Wl,-M
-#	LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld -lm -lpthread -Wl,-Bstatic $(shell pkg-config --static --libs libhwloc) -Wl,-Bstatic $(shell pkg-config --static --libs libcurl) -lstdc++ -Wl,-Bdynamic -ldl
+#	LIBS = ../gwnum/gwnum.a -lm -lpthread -Wl,-Bstatic $(shell pkg-config --static --libs libhwloc) -Wl,-Bstatic $(shell pkg-config --static --libs libcurl) -lstdc++ -Wl,-Bdynamic -ldl
 
 CC = gcc
 CFLAGS = -I.. -I../gwnum -I/usr/local/include -std=gnu99 -Wno-unused-result -march=i486 -malign-double -O2 -DPORT=2
@@ -27,8 +28,8 @@ CPP = g++
 CPPFLAGS = -I.. -I../gwnum -I../../boost_1_76_0 -Wno-unused-result -march=i486 -malign-double -std=c++11 -O2 -DPORT=2
 
 LFLAGS = -Wl,-M -Wl,-L/usr/local/lib
-#LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld ../gwnum/polymult.a -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -lz -lxml2 -ldl -lgmp
-LIBS = ../gwnum/gwnum.a ../gwnum/gwnum.ld ../gwnum/polymult.a -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -ldl -lgmp
+#LIBS = ../gwnum/gwnum.a ../gwnum/polymult.a -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -lz -lxml2 -ldl -lgmp -latomic
+LIBS = ../gwnum/gwnum.a ../gwnum/polymult.a -lm -lpthread -Wl,-Bstatic -lhwloc -Wl,-Bstatic -lcurl -Wl,-Bdynamic -lrt -lstdc++ -ldl -lgmp -latomic
 
 FACTOROBJ = factor32.o
 LINUXOBJS = prime.o menu.o cJSON.o ecm.o exponentiate.o pair.o pm1prob.o
@@ -48,7 +49,7 @@ clean:
 	rm -f $(EXE) $(EXE2) $(LINUXOBJS)
 
 cJSON.o:
-	$(CC) $(CCFLAGS) -c ../cJSON.c
+	$(CC) $(CFLAGS) -c ../cJSON.c
 
 ecm.o:
 	$(CPP) $(CPPFLAGS) -c ../ecm.cpp
@@ -60,7 +61,7 @@ pair.o:
 	$(CPP) $(CPPFLAGS) -c ../pair.cpp
 
 pm1prob.o:
-	$(CC) $(CCFLAGS) -c ../pm1prob.c
+	$(CC) $(CFLAGS) -c ../pm1prob.c
 
 .c.o:
 	$(CC) $(CFLAGS) -c $<

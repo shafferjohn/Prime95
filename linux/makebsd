@@ -13,7 +13,7 @@ CXX ?= cc
 CXXFLAGS += -I.. -I../gwnum -I$(LOCALBASE)/include -I../../boost_1_76_0 -O2 -march=i486 -std=c++11 -DPORT=6
 
 LDFLAGS += -fpie -L$(LOCALBASE)/lib -Wl,-M
-LIBS += ../gwnum/gwnum.a ../gwnum/gwnum.ld -lm -lpthread -lhwloc -lcurl -lstdc++ -lcompat -lgmp
+LIBS += ../gwnum/gwnum.a -lm -lpthread -lhwloc -lcurl -lstdc++ -lcompat -lgmp
 
 FACTOROBJ = factor32.o
 OBJS = prime.o menu.o cJSON.o ecm.o pair.o pm1prob.o

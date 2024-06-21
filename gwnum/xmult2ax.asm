@@ -1,4 +1,4 @@
-; Copyright 2001-2010 Mersenne Research, Inc.  All rights reserved
+; Copyright 2001-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -626,27 +626,6 @@ cz2:	xcopyzero
 	jnz	cz1			; Loop if necessary
 	ad_epilog 0,0,rbx,rsi,rdi
 gwxcopyzero2 ENDP
-
-;;
-;; Add in a small number with carry propagation
-;;
-
-PROCFL	gwxadds2
-	ad_prolog 0,0,rbx,rbp,rsi,rdi,xmm6,xmm7
-	mov	rsi, DESTARG		; Address of destination
-	movsd	xmm7, DBLARG		; Small addin value
-
-	mov	rbp, norm_grp_mults	; Addr of the group multipliers
-	mov	rbx, norm_col_mults	; Addr of the column multipliers
-	mov	rdi, norm_biglit_array	; Addr of the big/little flags array
-	cmp	B_IS_2, 0		; Is this base 2?
-	jne	b2addsm			; yes, do simpler rounding
-	xnorm_smalladd_2d noexec	; Similar to add last carry code
-	jmp	addsmdn
-b2addsm:xnorm_smalladd_2d exec		; Similar to add last carry code
-addsmdn:
-	ad_epilog 0,0,rbx,rbp,rsi,rdi,xmm6,xmm7
-gwxadds2 ENDP
 
 ;;
 ;; Multiply a number by a small value with carry propagation

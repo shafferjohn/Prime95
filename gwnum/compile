@@ -15,8 +15,8 @@ masm=uasm64 /c -coff -safeseh
 # Use the MSVC 8 C compiler
 
 cl=cl /GF /W3 /MT /D_CRT_SECURE_NO_DEPRECATE /O2 /c
-cld=cl /GF /W3 /MT /D_CRT_SECURE_NO_DEPRECATE /DGDEBUG /Z7 /c
-cldo=cl /GF /W3 /MT /D_CRT_SECURE_NO_DEPRECATE /DGDEBUG /Z7 /O2 /c
+cld=cl /GF /W3 /MTd /D_CRT_SECURE_NO_DEPRECATE /DGDEBUG /Z7 /c
+cldo=cl /GF /W3 /MTd /D_CRT_SECURE_NO_DEPRECATE /DGDEBUG /Z7 /O2 /c
 objconv=c:\objconv\objconv
 
 # List of all buildables in this makefile
@@ -24,6 +24,10 @@ objconv=c:\objconv\objconv
 all:	gwnumd.lib gwnum.lib polymult.lib polymultd.lib linux\gwnum.a macosx\gwnum.a release\ecmstag1.obj debug\ecmstag1.obj
 
 # Make libraries out of the object files
+# Recently removed (empty) object files
+#	    r4delay_core.obj r4delay_p4.obj r4delay_k8.obj r4delay_k10.obj \
+#	    r4delay3_core.obj r4delay3_p4.obj r4delay3_p4tp.obj r4delay3_k8.obj r4delay3_k10.obj \
+#	    r4delay5_core.obj r4delay5_p4.obj r4delay5_k8.obj r4delay5_k10.obj \
 
 gwnumd.lib: debug\cpuid.obj debug\gwnum.obj debug\gwtables.obj debug\gwthread.obj debug\gwini.obj debug\gwbench.obj debug\gwutil.obj \
 	    debug\gwdbldbl.obj debug\giants.obj debug\radix.obj mult.obj mult1.obj mult1aux.obj mult2.obj mult2p.obj mult2a.obj mult2aux.obj \
@@ -31,9 +35,7 @@ gwnumd.lib: debug\cpuid.obj debug\gwnum.obj debug\gwtables.obj debug\gwthread.ob
 	    xmult1ax.obj xmult2.obj xmult2a_core.obj xmult2a_k8.obj xmult2ax.obj xmult3.obj xmult3a_core.obj xmult3a_k8.obj xmult3ax.obj \
 	    hg_blend.obj hg_core.obj hg_p4.obj hg_p4tp.obj hg_k8.obj hg_k10.obj \
 	    r4_core.obj r4_p4.obj r4_p4tp.obj r4_k8.obj r4_k10.obj \
-	    r4delay_core.obj r4delay_p4.obj r4delay_p4tp.obj r4delay_k8.obj r4delay_k10.obj \
-	    r4delay3_core.obj r4delay3_p4.obj r4delay3_p4tp.obj r4delay3_k8.obj r4delay3_k10.obj \
-	    r4delay5_core.obj r4delay5_p4.obj r4delay5_p4tp.obj r4delay5_k8.obj r4delay5_k10.obj \
+	    r4delay_p4tp.obj r4delay5_p4tp.obj \
 	    r4dwpn_core.obj r4dwpn_p4.obj r4dwpn_p4tp.obj r4dwpn_k8.obj r4dwpn_k10.obj \
 	    r4dwpn3_core.obj r4dwpn3_p4.obj r4dwpn3_p4tp.obj r4dwpn3_k8.obj r4dwpn3_k10.obj \
 	    r4dwpn5_core.obj r4dwpn5_p4.obj r4dwpn5_p4tp.obj r4dwpn5_k8.obj r4dwpn5_k10.obj \
@@ -50,9 +52,7 @@ gwnum.lib: release\cpuid.obj release\gwnum.obj release\gwtables.obj release\gwth
 	   xmult1ax.obj xmult2.obj xmult2a_core.obj xmult2a_k8.obj xmult2ax.obj xmult3.obj xmult3a_core.obj xmult3a_k8.obj xmult3ax.obj \
 	   hg_blend.obj hg_core.obj hg_p4.obj hg_p4tp.obj hg_k8.obj hg_k10.obj \
 	   r4_core.obj r4_p4.obj r4_p4tp.obj r4_k8.obj r4_k10.obj \
-	   r4delay_core.obj r4delay_p4.obj r4delay_p4tp.obj r4delay_k8.obj r4delay_k10.obj \
-	   r4delay3_core.obj r4delay3_p4.obj r4delay3_p4tp.obj r4delay3_k8.obj r4delay3_k10.obj \
-	   r4delay5_core.obj r4delay5_p4.obj r4delay5_p4tp.obj r4delay5_k8.obj r4delay5_k10.obj \
+	   r4delay_p4tp.obj r4delay5_p4tp.obj \
 	   r4dwpn_core.obj r4dwpn_p4.obj r4dwpn_p4tp.obj r4dwpn_k8.obj r4dwpn_k10.obj \
 	   r4dwpn3_core.obj r4dwpn3_p4.obj r4dwpn3_p4tp.obj r4dwpn3_k8.obj r4dwpn3_k10.obj \
 	   r4dwpn5_core.obj r4dwpn5_p4.obj r4dwpn5_p4tp.obj r4dwpn5_k8.obj r4dwpn5_k10.obj \
@@ -76,9 +76,7 @@ linux\gwnum.a: mult.obj mult1.obj mult1aux.obj mult2.obj mult2p.obj mult2a.obj m
 	       xmult1ax.obj xmult2.obj xmult2a_core.obj xmult2a_k8.obj xmult2ax.obj xmult3.obj xmult3a_core.obj xmult3a_k8.obj xmult3ax.obj \
 	       hg_blend.obj hg_core.obj hg_p4.obj hg_p4tp.obj hg_k8.obj hg_k10.obj \
 	       r4_core.obj r4_p4.obj r4_p4tp.obj r4_k8.obj r4_k10.obj \
-	       r4delay_core.obj r4delay_p4.obj r4delay_p4tp.obj r4delay_k8.obj r4delay_k10.obj \
-	       r4delay3_core.obj r4delay3_p4.obj r4delay3_p4tp.obj r4delay3_k8.obj r4delay3_k10.obj \
-	       r4delay5_core.obj r4delay5_p4.obj r4delay5_p4tp.obj r4delay5_k8.obj r4delay5_k10.obj \
+	       r4delay_p4tp.obj r4delay5_p4tp.obj \
 	       r4dwpn_core.obj r4dwpn_p4.obj r4dwpn_p4tp.obj r4dwpn_k8.obj r4dwpn_k10.obj \
 	       r4dwpn3_core.obj r4dwpn3_p4.obj r4dwpn3_p4tp.obj r4dwpn3_k8.obj r4dwpn3_k10.obj \
 	       r4dwpn5_core.obj r4dwpn5_p4.obj r4dwpn5_p4tp.obj r4dwpn5_k8.obj r4dwpn5_k10.obj \
@@ -99,12 +97,6 @@ macosx\gwnum.a: macosx\mult.obj mult1.obj mult1aux.obj mult2.obj mult2p.obj mult
 		xmult1ax.obj xmult2.obj xmult2a_core.obj xmult2ax.obj xmult3.obj xmult3a_core.obj xmult3ax.obj \
 		hg_blend.obj hg_core.obj hg_p4.obj \
 		r4_core.obj r4_p4.obj \
-		r4delay_core.obj r4delay_p4.obj \
-		r4delay3_core.obj r4delay3_p4.obj \
-		r4delay5_core.obj r4delay5_p4.obj \
-		r4dwpn_core.obj r4dwpn_p4.obj \
-		r4dwpn3_core.obj r4dwpn3_p4.obj \
-		r4dwpn5_core.obj r4dwpn5_p4.obj \
 		ymult1ax_core.obj yr4_core.obj \
 		ymult3.obj ymult3a_core.obj ymult3ax.obj \
 		yr4dwpn_core.obj yr4dwpn3_core.obj yr4dwpn4_core.obj yr4dwpn5_core.obj \
@@ -138,10 +130,10 @@ release\cpuid.obj: cpuid.c cpuid.h
 debug\cpuid.obj: cpuid.c cpuid.h
     $(cld) /Fodebug\cpuid.obj cpuid.c
 
-release\gwnum.obj: gwnum.c gwnum.h
+release\gwnum.obj: gwnum.c gwnum.h gwdbldbl.h
     $(cl) /Forelease\gwnum.obj gwnum.c
 
-debug\gwnum.obj: gwnum.c gwnum.h
+debug\gwnum.obj: gwnum.c gwnum.h gwdbldbl.h
     $(cld) /Fodebug\gwnum.obj gwnum.c
 
 release\gwtables.obj: gwtables.c gwnum.h
@@ -150,11 +142,11 @@ release\gwtables.obj: gwtables.c gwnum.h
 debug\gwtables.obj: gwtables.c gwnum.h
     $(cld) /Fodebug\gwtables.obj gwtables.c
 
-release\gwthread.obj: gwthread.c gwthread.h
-    $(cl) /Forelease\gwthread.obj gwthread.c
+release\gwthread.obj: gwthread.cpp gwthread.h
+    $(cl) /Forelease\gwthread.obj gwthread.cpp
 
-debug\gwthread.obj: gwthread.c gwthread.h
-    $(cld) /Fodebug\gwthread.obj gwthread.c
+debug\gwthread.obj: gwthread.cpp gwthread.h
+    $(cldo) /Fodebug\gwthread.obj gwthread.cpp
 
 release\gwini.obj: gwini.c gwini.h
     $(cl) /Forelease\gwini.obj gwini.c
@@ -163,10 +155,10 @@ debug\gwini.obj: gwini.c gwini.h
     $(cld) /Fodebug\gwini.obj gwini.c
 
 release\gwbench.obj: gwbench.c gwbench.h gwnum.h
-    $(cl) /I..\sqlite-amalgamation-3180000 /Forelease\gwbench.obj gwbench.c
+    $(cl) /I..\sqlite-amalgamation-3420000 /Forelease\gwbench.obj gwbench.c
 
 debug\gwbench.obj: gwbench.c gwbench.h gwnum.h
-    $(cld) /I..\sqlite-amalgamation-3180000 /Fodebug\gwbench.obj gwbench.c
+    $(cld) /I..\sqlite-amalgamation-3420000 /Fodebug\gwbench.obj gwbench.c
 
 release\gwutil.obj: gwutil.c gwutil.h
     $(cl) /Forelease\gwutil.obj gwutil.c
@@ -192,28 +184,28 @@ release\radix.obj: radix.c radix.h gwnum.h
 debug\radix.obj: radix.c radix.h gwnum.h
     $(cld) /Fodebug\radix.obj radix.c
 
-release\polymult\polymult.obj: polymult.c polymult.h
+release\polymult\polymult.obj: polymult.c polymult.h gwnum.h
     $(cl) /arch:IA32 /Forelease\polymult\polymult.obj polymult.c
 
-debug\polymult\polymult.obj: polymult.c polymult.h
+debug\polymult\polymult.obj: polymult.c polymult.h gwnum.h
     $(cld) /arch:IA32 /Fodebug\polymult\polymult.obj polymult.c
 
-release\polymult\polymult_sse2.obj: polymult.c polymult.h
+release\polymult\polymult_sse2.obj: polymult.c polymult.h gwnum.h
     $(cl) /arch:SSE2 /DSSE2 /Forelease\polymult\polymult_sse2.obj polymult.c
 
-debug\polymult\polymult_sse2.obj: polymult.c polymult.h
+debug\polymult\polymult_sse2.obj: polymult.c polymult.h gwnum.h
     $(cld) /arch:SSE2 /DSSE2 /Fodebug\polymult\polymult_sse2.obj polymult.c
 
-release\polymult\polymult_avx.obj: polymult.c polymult.h
+release\polymult\polymult_avx.obj: polymult.c polymult.h gwnum.h
     $(cl) /arch:AVX /DAVX /Forelease\polymult\polymult_avx.obj polymult.c
 
-debug\polymult\polymult_avx.obj: polymult.c polymult.h
+debug\polymult\polymult_avx.obj: polymult.c polymult.h gwnum.h
     $(cld) /arch:AVX /DAVX /Fodebug\polymult\polymult_avx.obj polymult.c
 
-release\polymult\polymult_fma.obj: polymult.c polymult.h
+release\polymult\polymult_fma.obj: polymult.c polymult.h gwnum.h
     $(cl) /arch:AVX2 /DFMA /Forelease\polymult\polymult_fma.obj polymult.c
 
-debug\polymult\polymult_fma.obj: polymult.c polymult.h
+debug\polymult\polymult_fma.obj: polymult.c polymult.h gwnum.h
     $(cld) /arch:AVX2 /DFMA /Fodebug\polymult\polymult_fma.obj polymult.c
 
 release\ecmstag1.obj: ecmstag1.c gwnum.h

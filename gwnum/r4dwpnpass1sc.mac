@@ -1,4 +1,4 @@
-; Copyright 2009-2012 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2009-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -43,7 +43,7 @@
 ;; ALSO NOTE:  Numbers above are for clm = 4.  Clm affects the FFT data size,
 ;; scratch size, variable sin/cos size, big/lit flags, and data prefetched early.
 
-;; Estimated memory requirements for each all-complex pass 1 macro:
+;; Estimated memory requirements for each negacyclic pass 1 macro:
 ;;
 ;; Pass 1 size:			128	256	384	512	640	768	1024	1280	1536	2048	2560	3072	4096	5120
 ;;
@@ -7638,7 +7638,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 128 doubles.
+;; Perform a pass 1 negacyclic FFT of length 128 doubles.
 ;; Memory examples are for a 128K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 4*2*clm*XMM_SCND2 + 4*2*clm*XMM_SCD4 = 16*2*clm 64-byte cache lines
 
@@ -7753,7 +7753,7 @@ c7b:	r4_x4cl_wpn_four_complex_djbunfft rsi, 64, 2*clmblkdst, 4*clmblkdst, rdi, 2
 ;;	do 8 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	loops_init 8*2*clm		;; 8 iterations of 2*clm
 c1a:	xtouch	[rcx+rbp+(clm-1)*128]	;; Preload TLB
@@ -7800,7 +7800,7 @@ b0b:	copy_fft_data_to_scratch 32
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 pfing	bump	rcx, 16*blkdst		;; We've already prefetched 16 blocks
@@ -7897,7 +7897,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 256 doubles.
+;; Perform a pass 1 negacyclic FFT of length 256 doubles.
 ;; Memory examples are for a 256K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 8*2*clm*XMM_SCND2 + 4*2*clm*XMM_SCD8 = 32*2*clm 64-byte cache lines
 
@@ -8019,7 +8019,7 @@ c7b:	r4_x4cl_wpn_four_complex_djbunfft rsi, 64, 4*clmblkdst, clmblkdst8, rdi, 4*
 ;;	do 16 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	loops_init 16*2*clm		;; 16 iterations of 2*clm
 c1a:	xtouch	[rcx+rbp+(clm-1)*128]	;; Preload TLB
@@ -8068,7 +8068,7 @@ b0b:	copy_fft_data_to_scratch 64
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 pfing	bump	rcx, 32*blkdst		;; We've already prefetched 32 blocks
@@ -8164,7 +8164,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 384 doubles.
+;; Perform a pass 1 negacyclic FFT of length 384 doubles.
 ;; Memory examples are for a 384K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 16*2*clm*XMM_SCD1 + 4*2*clm*XMM_SCND2 + 4*2*clm*XMM_SCD4 = 24*2*clm 64-byte cache lines
 
@@ -8314,7 +8314,7 @@ c5b:	r3_x3cl_three_complex_djbunfft rsi, 64, clmblkdst8, rdi, 8*2*clm*XMM_SCD1
 ;;	do 24 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 24*2*clm		;; 24 iterations of 2*clm
@@ -8364,7 +8364,7 @@ b0b:	copy_fft_data_to_scratch 96
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 pfing	bump	rcx, (24-8)*blkdst	;; We've already prefetched 24 blocks, but
@@ -8501,7 +8501,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 512 doubles.
+;; Perform a pass 1 negacyclic FFT of length 512 doubles.
 ;; Memory examples are for a 512K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 16*2*clm*XMM_SCD2 + 4*2*clm*XMM_SCND2 + 4*2*clm*XMM_SCD4 = 32*2*clm 64-byte cache lines
 
@@ -8651,7 +8651,7 @@ c5b:	r4_x4cl_four_complex_djbunfft rsi, 64, clmblkdst8, 2*clmblkdst8, rdi, 8*2*c
 ;;	do 32 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 32*2*clm		;; 32 iterations of 2*clm
@@ -8701,7 +8701,7 @@ b0b:	copy_fft_data_to_scratch 128
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 pfing	bump	rcx, 32*blkdst		;; We've already prefetched 32 blocks
@@ -8837,7 +8837,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 640 doubles.
+;; Perform a pass 1 negacyclic FFT of length 640 doubles.
 ;; Memory examples are for a 640K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 16*2*clm*XMM_SCD2 + 4*2*clm*XMM_SCND2 + 4*2*clm*XMM_SCD4 = 32*2*clm 64-byte cache lines
 
@@ -8987,7 +8987,7 @@ c5b:	r5_x5cl_five_complex_djbunfft rsi, 64, clmblkdst8, rdi, 8*2*clm*XMM_SCD2
 ;;	do 40 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 40*2*clm		;; 40 iterations of 2*clm
@@ -9037,7 +9037,7 @@ b0b:	copy_fft_data_to_scratch 160
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 pfing	bump	rcx, (20-4)*blkdst	;; We've already prefetched 20 blocks, but
@@ -9174,7 +9174,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 768 doubles.
+;; Perform a pass 1 negacyclic FFT of length 768 doubles.
 ;; Memory examples are for a 768K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 32*2*clm*XMM_SCD1 + 8*2*clm*XMM_SCND2 + 4*2*clm*XMM_SCD8 = 48*2*clm 64-byte cache lines
 
@@ -9332,7 +9332,7 @@ c5b:	r3_x3cl_three_complex_djbunfft rsi, 64, 2*clmblkdst8, rdi, 16*2*clm*XMM_SCD
 ;;	do 48 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 48*2*clm		;; 48 iterations of 2*clm
@@ -9382,7 +9382,7 @@ b0b:	copy_fft_data_to_scratch 192
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 pfing	bump	rcx, (48-16)*blkdst	;; We've already prefetched 48 blocks, but
@@ -9517,7 +9517,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1024 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1024 doubles.
 ;; Memory examples are for a 1M FFT with 10 levels done in pass 2.
 ;; Prefetch 32*2*clm*XMM_SCD2 + 8*2*clm*XMM_SCND2 + 4*2*clm*XMM_SCD8 = 64*2*clm 64-byte cache lines
 
@@ -9675,7 +9675,7 @@ c5b:	r4_x4cl_four_complex_djbunfft rsi, 64, 2*clmblkdst8, 4*clmblkdst8, rdi, 16*
 ;;	do 64 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 64*2*clm		;; 64 iterations of 2*clm
@@ -9725,7 +9725,7 @@ b0b:	copy_fft_data_to_scratch 256
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 pfing	bump	rcx, 64*blkdst		;; We've already prefetched 64 blocks
@@ -9859,7 +9859,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1280 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1280 doubles.
 ;; Memory examples are for a 1280K FFT with 10 levels done in pass 2.
 ;; Prefetch 32*2*clm*XMM_SCD2 + 8*2*clm*XMM_SCND2 + 4*2*clm*XMM_SCD8 = 64*2*clm 64-byte cache lines
 
@@ -10017,7 +10017,7 @@ c5b:	r5_x5cl_five_complex_djbunfft rsi, 64, 2*clmblkdst8, rdi, 16*2*clm*XMM_SCD2
 ;;	do 80 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 80*2*clm		;; 80 iterations of 2*clm
@@ -10067,7 +10067,7 @@ b0b:	copy_fft_data_to_scratch 320
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 pfing	bump	rcx, (40-8)*blkdst	;; We've already prefetched 40 blocks, but
@@ -10202,7 +10202,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 1536 doubles.
+;; Perform a pass 1 negacyclic FFT of length 1536 doubles.
 ;; Memory examples are for a 1536K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 16*2*clm*XMM_SCD1 + 4*2*clm*XMM_SCND2 + 16*2*clm*XMM_SCD4 = 48*2*clm 64-byte cache lines
 
@@ -10390,7 +10390,7 @@ c3b:	r4_x4cl_four_complex_djbunfft rsi, 64, 3*clmblkdst8, 6*clmblkdst8, rdi, 24*
 ;;	do 96 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	loops_init 96*2*clm		;; 96 iterations of 2*clm
 c1b:	r4_x4cl_four_complex_last_djbunfft rsi, 64, 12*clmblkdst8, 24*clmblkdst8, rdi, 96*XMM_SCD2, rdx, 96*XMM_SCD4
@@ -10438,7 +10438,7 @@ b0b:	copy_fft_data_to_scratch 384
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 192*2*clm		;; 24 iters of 4 iters of 2*2*clm
@@ -10611,7 +10611,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 2048 doubles.
+;; Perform a pass 1 negacyclic FFT of length 2048 doubles.
 ;; Memory examples are for a 2048K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 16*2*clm*XMM_SCND2 + 4*2*clm*XMM_SCD2 + 16*2*clm*XMM_SCD4 = 68*2*clm 64-byte cache lines
 
@@ -10799,7 +10799,7 @@ c3b:	r4_x4cl_four_complex_djbunfft rsi, 64, 4*clmblkdst8, 8*clmblkdst8, rdi, 32*
 ;;	do 128 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	loops_init 128*2*clm		;; 128 iterations of 2*clm
 c1b:	r4_x4cl_four_complex_last_djbunfft rsi, 64, 16*clmblkdst8, 32*clmblkdst8, rdi, 128*XMM_SCD2, rdx, 128*XMM_SCD4
@@ -10847,7 +10847,7 @@ b0b:	copy_fft_data_to_scratch 512
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 256*2*clm		;; 32 iters of 4 iters of 2*2*clm
@@ -11018,7 +11018,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 2560 doubles.
+;; Perform a pass 1 negacyclic FFT of length 2560 doubles.
 ;; Memory examples are for a 2560K FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 16*2*clm*XMM_SCD2 + 4*2*clm*XMM_SCND2 + 16*2*clm*XMM_SCD4 = 56*2*clm 64-byte cache lines
 
@@ -11206,7 +11206,7 @@ c3b:	r4_x4cl_four_complex_djbunfft rsi, 64, 5*clmblkdst8, 10*clmblkdst8, rdi, 40
 ;;	do 160 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	loops_init 160*2*clm		;; 160 iterations of 2*clm
 c1b:	r4_x4cl_four_complex_last_djbunfft rsi, 64, 20*clmblkdst8, 40*clmblkdst8, rdi, 160*XMM_SCD2, rdx, 160*XMM_SCD4
@@ -11254,7 +11254,7 @@ b0b:	copy_fft_data_to_scratch 640
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 320*2*clm		;; 40 iters of 2 iters of 4*2*clm
@@ -11427,7 +11427,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 3072 doubles.
+;; Perform a pass 1 negacyclic FFT of length 3072 doubles.
 ;; Memory examples are for a 3M FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 32*2*clm*XMM_SCD1 + 8*2*clm*XMM_SCND2 + 16*2*clm*XMM_SCD8 = 96*2*clm 64-byte cache lines
 
@@ -11623,7 +11623,7 @@ c3b:	r4_x4cl_four_complex_djbunfft rsi, 64, 6*clmblkdst8, 12*clmblkdst8, rdi, 48
 ;;	do 192 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	loops_init 192*2*clm		;; 192 iterations of 2*clm
 c1b:	r4_x4cl_four_complex_last_djbunfft rsi, 64, 24*clmblkdst8, 48*clmblkdst8, rdi, 192*XMM_SCD2, rdx, 192*XMM_SCD4
@@ -11671,7 +11671,7 @@ b0b:	copy_fft_data_to_scratch 768
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 384*2*clm		;; 48 iters of 4 iters of 2*2*clm
@@ -11842,7 +11842,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 4096 doubles.
+;; Perform a pass 1 negacyclic FFT of length 4096 doubles.
 ;; Memory examples are for a 4M FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 32*2*clm*XMM_SCD2 + 8*2*clm*XMM_SCND2 + 16*2*clm*XMM_SCD8 = 112*2*clm 64-byte cache lines
 
@@ -12038,7 +12038,7 @@ c3b:	r4_x4cl_four_complex_djbunfft rsi, 64, 8*clmblkdst8, 16*clmblkdst8, rdi, 64
 ;;	do 256 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	loops_init 256*2*clm		;; 256 iterations of 2*clm
 c1b:	r4_x4cl_four_complex_last_djbunfft rsi, 64, 32*clmblkdst8, 64*clmblkdst8, rdi, 256*XMM_SCD2, rdx, 256*XMM_SCD4
@@ -12086,7 +12086,7 @@ b0b:	copy_fft_data_to_scratch 1024
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 512*2*clm		;; 64 iters of 4 iters of 2*2*clm
@@ -12255,7 +12255,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b, _wpn ;; Get next block and jump
 	ENDM
 
 
-;; Perform a pass 1 all-complex FFT of length 5120 doubles.
+;; Perform a pass 1 negacyclic FFT of length 5120 doubles.
 ;; Memory examples are for a 5M FFT with 10 levels done in pass 2.
 ;; Sin/cos data needed: 32*2*clm*XMM_SCD2 + 8*2*clm*XMM_SCND2 + 16*2*clm*XMM_SCD8 = 112*2*clm 64-byte cache lines
 
@@ -12451,7 +12451,7 @@ c3b:	r4_x4cl_four_complex_djbunfft rsi, 64, 10*clmblkdst8, 20*clmblkdst8, rdi, 8
 ;;	do 320 macros each processing 32 data values
 
 	start_timer 20
-	mov	rdx, sincos1		;; Load fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Load fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	loops_init 320*2*clm		;; 320 iterations of 2*clm
 c1b:	r4_x4cl_four_complex_last_djbunfft rsi, 64, 40*clmblkdst8, 80*clmblkdst8, rdi, 320*XMM_SCD2, rdx, 320*XMM_SCD4
@@ -12499,7 +12499,7 @@ b0b:	copy_fft_data_to_scratch 1280
 
 yes_fft:start_timer 22
 	mov	rsi, scratch_area	;; Get address of scratch area
-	mov	rdx, sincos1		;; Address of fixed all-complex premultipliers
+	mov	rdx, sincos1		;; Address of fixed negacyclic premultipliers
 	mov	rdi, sincos2		;; Load fixed sin/cos postmultipliers
 	set_data_prefetch_ptrs		;; Init prefetching pointers
 	loops_init 640*2*clm		;; 80 iters of 2 iters of 4*2*clm

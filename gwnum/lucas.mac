@@ -1,4 +1,4 @@
-; Copyright 1995-2020 - Mersenne Research, Inc.  All rights reserved
+; Copyright 1995-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -2526,13 +2526,13 @@ copy_7_words MACRO
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	short nozpad		;; No, skip 7 word copy
 	fld	QWORD PTR [esi+ebx+8]	;; Copy 1st word above half-way point
-	fstp	QWORD PTR [esi-40]
-	fld	QWORD PTR [esi+ebx+24]	;; Copy 2nd word
-	fstp	QWORD PTR [esi-48]
-	fld	QWORD PTR [esi+ebx+40]	;; Copy 3rd word
-	fstp	QWORD PTR [esi-56]
-	fld	QWORD PTR [esi+ebx+56]	;; Copy 4th word
 	fstp	QWORD PTR [esi-64]
+	fld	QWORD PTR [esi+ebx+24]	;; Copy 2nd word
+	fstp	QWORD PTR [esi-56]
+	fld	QWORD PTR [esi+ebx+40]	;; Copy 3rd word
+	fstp	QWORD PTR [esi-48]
+	fld	QWORD PTR [esi+ebx+56]	;; Copy 4th word
+	fstp	QWORD PTR [esi-40]
 	mov	eax, esi		;; Copy 1st word below half-way point
 	add	eax, HIGH_WORD1_OFFSET
 	fld	QWORD PTR [eax+ebx]
@@ -2558,13 +2558,13 @@ copy_4_words MACRO
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	short nozpad		;; No, skip 4 word copy
 	fld	QWORD PTR [esi+8]	;; Copy 1st word above half-way point
-	fstp	QWORD PTR [esi-40]
-	fld	QWORD PTR [esi+24]	;; Copy 2nd word
-	fstp	QWORD PTR [esi-48]
-	fld	QWORD PTR [esi+40]	;; Copy 3rd word
-	fstp	QWORD PTR [esi-56]
-	fld	QWORD PTR [esi+56]	;; Copy 4th word
 	fstp	QWORD PTR [esi-64]
+	fld	QWORD PTR [esi+24]	;; Copy 2nd word
+	fstp	QWORD PTR [esi-56]
+	fld	QWORD PTR [esi+40]	;; Copy 3rd word
+	fstp	QWORD PTR [esi-48]
+	fld	QWORD PTR [esi+56]	;; Copy 4th word
+	fstp	QWORD PTR [esi-40]
 nozpad:
 	ENDM
 
@@ -2643,95 +2643,95 @@ mult7	MACRO	src1, src2
 
 	cmp	ZERO_PADDED_FFT, 0	;; Is this a zero-padded FFT?
 	je	nozpad			;; No, skip 7 word multiply
-	fld	QWORD PTR [src1-40]	;; Result0 = word0 * word0
-	fmul	QWORD PTR [src2-40]
-	fld	QWORD PTR [src1-48]	;;	   + word1 * word-1
+	fld	QWORD PTR [src1-64]	;; Result0 = word0 * word0
+	fmul	QWORD PTR [src2-64]
+	fld	QWORD PTR [src1-56]	;;	   + word1 * word-1
 	fmul	QWORD PTR [src2-72]
 	faddp	st(1), st
-	fld	QWORD PTR [src1-56]	;;	   + word2 * word-2
+	fld	QWORD PTR [src1-48]	;;	   + word2 * word-2
 	fmul	QWORD PTR [src2-80]
-	fld	QWORD PTR [src1-64]	;;	   + word3 * word-3
+	fld	QWORD PTR [src1-40]	;;	   + word3 * word-3
 	fmul	QWORD PTR [src2-88]
 	faddp	st(1), st
 	faddp	st(1), st
 	fld	QWORD PTR [src1-72]	;;	   + word-1 * word1
-	fmul	QWORD PTR [src2-48]
-	fld	QWORD PTR [src1-80]	;;	   + word-2 * word2
 	fmul	QWORD PTR [src2-56]
+	fld	QWORD PTR [src1-80]	;;	   + word-2 * word2
+	fmul	QWORD PTR [src2-48]
 	faddp	st(1), st
 	faddp	st(1), st
 	fld	QWORD PTR [src1-88]	;;	   + word-3 * word3
-	fmul	QWORD PTR [src2-64]
+	fmul	QWORD PTR [src2-40]
 	faddp	st(1), st
 	fstp	ZPAD0
 
-	fld	QWORD PTR [src1-40]	;; Result1 = word0 * word1
-	fmul	QWORD PTR [src2-48]
-	fld	QWORD PTR [src1-48]	;;	   + word1 * word0
-	fmul	QWORD PTR [src2-40]
+	fld	QWORD PTR [src1-64]	;; Result1 = word0 * word1
+	fmul	QWORD PTR [src2-56]
+	fld	QWORD PTR [src1-56]	;;	   + word1 * word0
+	fmul	QWORD PTR [src2-64]
 	faddp	st(1), st
-	fld	QWORD PTR [src1-56]	;;	   + word2 * word-1
+	fld	QWORD PTR [src1-48]	;;	   + word2 * word-1
 	fmul	QWORD PTR [src2-72]
-	fld	QWORD PTR [src1-64]	;;	   + word3 * word-2
+	fld	QWORD PTR [src1-40]	;;	   + word3 * word-2
 	fmul	QWORD PTR [src2-80]
 	faddp	st(1), st
 	faddp	st(1), st
 	fld	QWORD PTR [src1-72]	;;	   + word-1 * word2
-	fmul	QWORD PTR [src2-56]
+	fmul	QWORD PTR [src2-48]
 	fld	QWORD PTR [src1-80]	;;	   + word-2 * word3
-	fmul	QWORD PTR [src2-64]
+	fmul	QWORD PTR [src2-40]
 	faddp	st(1), st
 	faddp	st(1), st
 	fstp	ZPAD1
 
-	fld	QWORD PTR [src1-40]	;; Result2 = word0 * word2
-	fmul	QWORD PTR [src2-56]
-	fld	QWORD PTR [src1-48]	;;	   + word1 * word1
+	fld	QWORD PTR [src1-64]	;; Result2 = word0 * word2
 	fmul	QWORD PTR [src2-48]
+	fld	QWORD PTR [src1-56]	;;	   + word1 * word1
+	fmul	QWORD PTR [src2-56]
 	faddp	st(1), st
-	fld	QWORD PTR [src1-56]	;;	   + word2 * word0
-	fmul	QWORD PTR [src2-40]
-	fld	QWORD PTR [src1-64]	;;	   + word3 * word-1
+	fld	QWORD PTR [src1-48]	;;	   + word2 * word0
+	fmul	QWORD PTR [src2-64]
+	fld	QWORD PTR [src1-40]	;;	   + word3 * word-1
 	fmul	QWORD PTR [src2-72]
 	faddp	st(1), st
 	faddp	st(1), st
 	fld	QWORD PTR [src1-72]	;;	   + word-1 * word3
-	fmul	QWORD PTR [src2-64]
+	fmul	QWORD PTR [src2-40]
 	faddp	st(1), st
 	fstp	ZPAD2
 
-	fld	QWORD PTR [src1-40]	;; Result3 = word0 * word3
-	fmul	QWORD PTR [src2-64]
-	fld	QWORD PTR [src1-48]	;;	   + word1 * word2
-	fmul	QWORD PTR [src2-56]
-	faddp	st(1), st
-	fld	QWORD PTR [src1-56]	;;	   + word2 * word1
-	fmul	QWORD PTR [src2-48]
-	fld	QWORD PTR [src1-64]	;;	   + word3 * word0
+	fld	QWORD PTR [src1-64]	;; Result3 = word0 * word3
 	fmul	QWORD PTR [src2-40]
+	fld	QWORD PTR [src1-56]	;;	   + word1 * word2
+	fmul	QWORD PTR [src2-48]
+	faddp	st(1), st
+	fld	QWORD PTR [src1-48]	;;	   + word2 * word1
+	fmul	QWORD PTR [src2-56]
+	fld	QWORD PTR [src1-40]	;;	   + word3 * word0
+	fmul	QWORD PTR [src2-64]
 	faddp	st(1), st
 	faddp	st(1), st
 	fstp	ZPAD3
 
-	fld	QWORD PTR [src1-48]	;; Result4 = word1 * word3
-	fmul	QWORD PTR [src2-64]
-	fld	QWORD PTR [src1-56]	;;	   + word2 * word2
-	fmul	QWORD PTR [src2-56]
-	faddp	st(1), st
-	fld	QWORD PTR [src1-64]	;;	   + word3 * word1
+	fld	QWORD PTR [src1-56]	;; Result4 = word1 * word3
+	fmul	QWORD PTR [src2-40]
+	fld	QWORD PTR [src1-48]	;;	   + word2 * word2
 	fmul	QWORD PTR [src2-48]
+	faddp	st(1), st
+	fld	QWORD PTR [src1-40]	;;	   + word3 * word1
+	fmul	QWORD PTR [src2-56]
 	faddp	st(1), st
 	fstp	ZPAD4
 
-	fld	QWORD PTR [src1-56]	;; Result5 = word2 * word3
-	fmul	QWORD PTR [src2-64]
-	fld	QWORD PTR [src1-64]	;;	   + word3 * word2
-	fmul	QWORD PTR [src2-56]
+	fld	QWORD PTR [src1-48]	;; Result5 = word2 * word3
+	fmul	QWORD PTR [src2-40]
+	fld	QWORD PTR [src1-40]	;;	   + word3 * word2
+	fmul	QWORD PTR [src2-48]
 	faddp	st(1), st
 	fstp	ZPAD5
 
-	fld	QWORD PTR [src1-64]	;; Result6 = word3 * word3
-	fmul	QWORD PTR [src2-64]
+	fld	QWORD PTR [src1-40]	;; Result6 = word3 * word3
+	fmul	QWORD PTR [src2-40]
 	fstp	ZPAD6
 
 	pusher	eax

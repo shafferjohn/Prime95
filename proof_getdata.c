@@ -1,5 +1,5 @@
 /*---------------------------------------------------------------------------------
-| Copyright 2020 Mersenne Research, Inc.  All rights reserved
+| Copyright 2020-2023 Mersenne Research, Inc.  All rights reserved
 |
 | This file contains routines to get proof initial residue from the Primenet server
 +--------------------------------------------------------------------------------*/
@@ -66,14 +66,14 @@ int ProofGetData (char *aid, void *pbuf, int bufsize, char *md5)
 
 /* Get optional download bandwidth rate limit */
 
-	bandwidth_rate_limit_flt = IniSectionGetFloat (INI_FILE, "PrimeNet", "DownloadRateLimit", 0.0);	// Rate limit in Mbps
+	bandwidth_rate_limit_flt = IniSectionGetFloat (INI_FILE, SEC_PrimeNet, KEY_DownloadRateLimit, 0.0);	// Rate limit in Mbps
 	if (bandwidth_rate_limit_flt < 0.0) bandwidth_rate_limit_flt = 0.0;
 	if (bandwidth_rate_limit_flt > 10000.0) bandwidth_rate_limit_flt = 10000.0;	// Max out at 10Gbps
 	bandwidth_rate_limit = (uint64_t) (bandwidth_rate_limit_flt * 131072.0);	// Convert from Mbps to bytes-per-second
 
 /* Get debug logging flag */
 
-	debug = IniSectionGetInt (INI_FILE, iniSection, "Debug", 0);
+	debug = IniSectionGetInt (INI_FILE, SEC_PrimeNet, KEY_Debug, 0);
  
 /* Loop to try with proxy, then after a failure without proxy.  Ixfd64 requested this */
 /* feature here:  https://www.mersenneforum.org/showpost.php?p=505557&postcount=415 */
@@ -150,7 +150,7 @@ int ProofGetData (char *aid, void *pbuf, int bufsize, char *md5)
 			OutputStr (COMM_THREAD_NUM, buf);
 			curl_easy_cleanup (curl);
 			// By default, try again without using a proxy server
-			if (try_proxy && szProxyHost[0] && IniSectionGetInt (INI_FILE, iniSection, "TryNoProxyAfterProxyFailure", 1))
+			if (try_proxy && szProxyHost[0] && IniSectionGetInt (INI_FILE, SEC_PrimeNet, "TryNoProxyAfterProxyFailure", 1))
 				continue;
 			return (PRIMENET_ERROR_CURL_PERFORM);
 		}

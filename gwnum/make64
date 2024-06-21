@@ -3,8 +3,8 @@
 #	scl enable devtoolset-8 bash
 
 CC = gcc
-CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -I/usr/local/include -std=gnu99 -DX86_64 -Wno-unused-result -O2
-#CFLAGS = -g -I.. -I../sqlite-amalgamation-3180000 -I/usr/local/include -std=gnu99 -DX86_64 -DGDEBUG -Wno-unused-result -O2
+CFLAGS = -I.. -I../sqlite-amalgamation-3420000 -I/usr/local/include -std=gnu99 -DX86_64 -Wno-unused-result -O2
+#CFLAGS = -g -I.. -I../sqlite-amalgamation-3420000 -I/usr/local/include -std=gnu99 -DX86_64 -DGDEBUG -Wno-unused-result -O2
 
 CPP = g++
 CPPFLAGS = -I.. -I../qd -std=c++11 -DX86_64 -O2

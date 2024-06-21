@@ -1,4 +1,4 @@
-; Copyright 2001-2014 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2001-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -66,7 +66,7 @@ XMM_GMD = 160			;; Sizeof a grp two-to-phi/two-to-minus-phi multiplier block in 
 ;	sr = split-radix
 ; options are:
 ;	_op for one-pass FFTs
-;	_ac for all_complex
+;	_ac for negacyclic
 ;
 ; xarch indicates FFT is optimized for one of these architectures:
 ;	P4		Pentium 4
@@ -78,13 +78,13 @@ XMM_GMD = 160			;; Sizeof a grp two-to-phi/two-to-minus-phi multiplier block in 
 ;	xfft_hg_512_op_K8
 ;	xfft_r4_4096_op_ac_CORE
 
-xonepass MACRO fftname, all_complex
+xonepass MACRO fftname, negacyclic
 	LOCAL	xprocname, xmacroname
 
 ;; Generate the procedure name
 
 	xprocname CATSTR <xfft_>,xfft_type,<_>,<&fftname>,<_op>
-	IF all_complex EQ 1
+	IF negacyclic EQ 1
 	xprocname CATSTR xprocname,<_ac>
 	ENDIF
 	xprocname CATSTR xprocname,<_>,xarch
@@ -92,7 +92,7 @@ xonepass MACRO fftname, all_complex
 ;; Generate the pass 2 routine name
 
 	xmacroname CATSTR <xfft>,<&fftname>
-	IF all_complex EQ 1
+	IF negacyclic EQ 1
 	xmacroname CATSTR xmacroname,<p>
 	ENDIF
 
@@ -140,7 +140,7 @@ xonepass MACRO fftname, all_complex
 ;	exp = experimental
 ;	sr = split-radix
 ; options are:
-;	_ac for all_complex
+;	_ac for negacyclic
 ;	_ip for two-pass in-place (no scratch area)
 ;	_np for no_prefetch
 ; xpass2_levels is:
@@ -158,7 +158,7 @@ xonepass MACRO fftname, all_complex
 ;	xfft_hg_1024K_10_4_K8
 ;	xfft_r4_4096K_ac_10_4_CORE
 
-set_FFT_constants MACRO fftname, in_place, all_complex, p2_levels, clmarg
+set_FFT_constants MACRO fftname, in_place, negacyclic, p2_levels, clmarg
 
 ;; Copy some of the args 
 
@@ -168,7 +168,7 @@ set_FFT_constants MACRO fftname, in_place, all_complex, p2_levels, clmarg
 ;; Generate the procedure name
 
 	xprocname CATSTR <xfft_>,xfft_type,<_>,<&fftname>
-	IF all_complex EQ 1
+	IF negacyclic EQ 1
 	xprocname CATSTR xprocname,<_ac>
 	ENDIF
 	IF in_place EQ 1
@@ -258,7 +258,7 @@ xfft_footer MACRO
 
 pass1_forward_fft_setup MACRO loopaddr
 	mov	NEXT_BLOCK, 0		;; Flag indicating forward fft setup
-	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	lea	rax, loopaddr		;; Auxiliary thread entry point
 	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
 	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
 	ENDM
@@ -268,7 +268,7 @@ pass1_forward_fft_setup MACRO loopaddr
 pass1_inverse_fft_setup MACRO loopaddr
 	start_timer 1
 	mov	NEXT_BLOCK, 1		;; Flag indicating inverse fft setup
-	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	lea	rax, loopaddr		;; Auxiliary thread entry point
 	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
 	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
 	ENDM
@@ -794,14 +794,13 @@ xpass2gen MACRO levels
 	PROCF	procname
 	int_prolog 0,0,1
 
-;; Entry point for real FFTs: do one real and count1 complex blocks, also
-;; entry point for all-complex FFTs: do count1 complex blocks
+;; Entry point for real FFTs: do one real and count1 complex blocks, also entry point for negacyclic FFTs: do count1 complex blocks
 
-	mov	rax, OFFSET complex_loop ;; Auxiliary thread entry point
+	lea	rax, complex_loop	;; Auxiliary thread entry point
 	mov	THREAD_WORK_ROUTINE, rax ;; Save addr for C code to call
 	c_call	PASS2_WAKE_UP_THREADS	;; C callback routine
-	cmp	ALL_COMPLEX_FFT, 1	;; Test if there is a real-data block
-	je	complex_loop		;; Jump to process all-complex blocks
+	cmp	NEGACYCLIC_FFT, 1	;; Test if there is a real-data block
+	je	complex_loop		;; Jump to process complex blocks
 
 	realmacro			; Do the real data block
 	jmp	get_next		; Go process complex blocks

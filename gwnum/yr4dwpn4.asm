@@ -1,4 +1,4 @@
-; Copyright 2011-2020 Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -238,7 +238,7 @@ build421 ,			,			,			yr4dwpn_pass1sc2048 25M, 12800
 ;build421 ,			,			,			yr4dwpn_pass1sc4096 50M, 12800
 ENDIF
 
-	; The all-complex 13 levels variants (4608, 6144, 7680, 8192, 10240, 12800)
+	; The negacyclic 13 levels variants (4608, 6144, 7680, 8192, 10240, 12800)
 
 IFNDEF X86_64
 build421 ,			,			,			yr4dwpn_pass1sc128ac 576K, 4608

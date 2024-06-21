@@ -1,19 +1,25 @@
-# Makefile for FreeBSD 11.0 64-bit mprime
+# Makefile for FreeBSD 12.3 64-bit mprime
 #
 # Install the curl package.  This is installed to $(LOCALBASE) by default.
 #
 # Hwloc can be downloaded from https://www.open-mpi.org/projects/hwloc/
 # Configure hwloc with --enable-static --disable-shared --disable-pci --disable-cuda --disable-gl --disable-opencl --disable-rsmi
 #
+# We staticly link the C++ library because we are using gcc and FreeBSD now defaults to clang (with a clang C++ library installed).
+# A clang build of mprime crashes instantly.
 
-CC ?= cc
-CFLAGS += -I.. -I../gwnum -I$(LOCALBASE)/include -DX86_64 -O2 -DPORT=12
+#CC ?= cc
+CC = gcc
+#CFLAGS += -I.. -I../gwnum -I$(LOCALBASE)/include -DX86_64 -O2 -DPORT=12
+CFLAGS += -I.. -I../gwnum -I$(LOCALBASE)/include -std=gnu99 -DX86_64 -Wno-unused-result -O2 -DPORT=12
 
-CXX ?= cc
+#CXX ?= cc
+CXX = g++
 CXXFLAGS += -I.. -I../gwnum -I$(LOCALBASE)/include -I../../boost_1_76_0 -DX86_64 -O2 -std=c++11 -DPORT=12
 
 LDFLAGS += -fpie -L$(LOCALBASE)/lib -Wl,-M
-LIBS += ../gwnum/gwnum.a ../gwnum/gwnum.ld ../gwnum/polymult.a -lm -lpthread -lhwloc -lcurl -lstdc++ -lcompat -lgmp
+#LIBS += ../gwnum/gwnum.a ../gwnum/polymult.a -lm -lpthread -lhwloc -lcurl -lstdc++ -lcompat -lgmp
+LIBS += ../gwnum/gwnum.a ../gwnum/polymult.a -lm -lpthread -lhwloc -lcurl -Wl,-Bstatic -lstdc++ -Wl,-Bdynamic -lcompat -lgmp
 
 FACTOROBJ = factor64.o
 OBJS = prime.o menu.o cJSON.o ecm.o exponentiate.o pair.o pm1prob.o
@@ -33,13 +39,13 @@ clean:
 	rm -f $(EXE) $(EXE2) $(OBJS)
 
 cJSON.o:
-	$(CC) $(CCFLAGS) -c ../cJSON.c
+	$(CC) $(CFLAGS) -c ../cJSON.c
 
 ecm.o:
 	$(CXX) $(CXXFLAGS) -c ../ecm.cpp
 
 exponentiate.o:
-	$(CC) $(CCFLAGS) -c ../exponentiate.c
+	$(CC) $(CFLAGS) -c ../exponentiate.c
 
 pair.o:
 	$(CXX) $(CXXFLAGS) -c ../pair.cpp

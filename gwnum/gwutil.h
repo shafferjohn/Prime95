@@ -2,7 +2,7 @@
 | This file contains various utility routines that may be used by gwnum
 | routines, prime95, or other consumers of gwnum.
 | 
-|  Copyright 2004-2022 Mersenne Research, Inc.  All rights reserved.
+|  Copyright 2004-2023 Mersenne Research, Inc.  All rights reserved.
 +---------------------------------------------------------------------*/
 
 #ifndef _GWUTIL_H
@@ -31,6 +31,7 @@ extern "C" {
 #define intmin(a,b)			(((int)(a) < (int)(b)) ? (int)(a) : (int)(b))
 #define intmax(a,b)			(((int)(a) > (int)(b)) ? (int)(a) : (int)(b))
 #define fltmax(a,b)			(((double)(a) > (double)(b)) ? (double)(a) : (double)(b))
+#define round_double_to_int32(d,i)	{double t = ((d) + 6755399441055744.0); i = *((int32_t *)(&t));}
 
 /* MSVC6 has trouble with the pow function using integer arguments. */
 /* For example, "(unsigned long) pow (5.0, 7.0)" returns 78124 instead */

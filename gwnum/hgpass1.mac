@@ -1,4 +1,4 @@
-; Copyright 2001-2012 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2001-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -416,7 +416,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a 48K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 48K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 5 levels, pass 2 uses common code to perform the last 11 levels.
 
 hg_pass1levels5complex3 MACRO fftname, pass2_levels, clmarg
@@ -1026,7 +1026,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a 64K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 64K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 5 levels, pass 2 uses common code to perform the last 11 levels.
 
 hg_pass1levels5complex4 MACRO fftname, pass2_levels, clmarg
@@ -1825,7 +1825,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a 96K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 96K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 6 levels, pass 2 uses common code to perform the last 11 levels.
 
 hg_pass1levels6complex3 MACRO fftname, pass2_levels, clmarg
@@ -2752,7 +2752,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a 128K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 128K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 6 levels, pass 2 uses common code to perform the last 11 levels.
 
 hg_pass1levels6complex4 MACRO fftname, pass2_levels, clmarg
@@ -3687,7 +3687,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a 192K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 192K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 7 levels, pass 2 uses common code to perform the last 11 levels.
 
 hg_pass1levels7complex3 MACRO fftname, pass2_levels, clmarg
@@ -4681,7 +4681,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a 256K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 256K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 7 levels, pass 2 uses common code to perform the last 11 levels.
 
 hg_pass1levels7complex4 MACRO fftname, pass2_levels, clmarg
@@ -5854,7 +5854,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a 384K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 384K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 8 levels, pass 2 uses common code to perform the last 11 levels.
 
 hg_pass1levels8complex3 MACRO fftname, pass2_levels, clmarg
@@ -7151,7 +7151,7 @@ endlp:	xpass1_get_next_block pass2, c0b, b0b ;; Get next block and jump
 	ENDM
 
 
-;; Perform a 512K-element all-complex FFT.  This is done in two passes.  Pass 1
+;; Perform a 512K-element negacyclic FFT.  This is done in two passes.  Pass 1
 ;; does 8 levels, pass 2 uses common code to perform the last 11 levels.
 
 hg_pass1levels8complex4 MACRO fftname, pass2_levels, clmarg

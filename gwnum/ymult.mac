@@ -1,4 +1,4 @@
-; Copyright 2011-2020 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -61,7 +61,7 @@ YMM_GMD = 320			;; Sizeof a grp two-to-phi/two-to-minus-phi multiplier block in 
 ;	sr = split-radix
 ; options are:
 ;	_op for one-pass FFTs
-;	_ac for all_complex
+;	_ac for negacyclic
 ;
 ; yarch indicates FFT is optimized for one of these architectures:
 ;	CORE		Sandy Bridge and later Intel Core CPUs
@@ -72,13 +72,13 @@ YMM_GMD = 320			;; Sizeof a grp two-to-phi/two-to-minus-phi multiplier block in 
 ;	yfft_hg_512_op_K8
 ;	yfft_r4_4096_op_ac_CORE
 
-yonepass MACRO fftname, all_complex
+yonepass MACRO fftname, negacyclic
 	LOCAL	yprocname, ymacroname
 
 ;; Generate the procedure name
 
 	yprocname CATSTR <yfft_>,yfft_type,<_>,<&fftname>,<_op>
-	IF all_complex EQ 1
+	IF negacyclic EQ 1
 	yprocname CATSTR yprocname,<_ac>
 	ENDIF
 	yprocname CATSTR yprocname,<_>,yarch
@@ -86,7 +86,7 @@ yonepass MACRO fftname, all_complex
 ;; Generate the FFT macro name
 
 	ymacroname CATSTR <yfft>,<&fftname>
-	IF all_complex EQ 1
+	IF negacyclic EQ 1
 	ymacroname CATSTR ymacroname,<p>
 	ENDIF
 
@@ -139,7 +139,7 @@ yonepass MACRO fftname, all_complex
 ;	r4dwpn = r4delay with partial normalization.
 ;	sr = split-radix
 ; options are:
-;	_ac for all_complex
+;	_ac for negacyclic
 ;	_ip for two-pass in-place (no scratch area)
 ;	_np for no_prefetch
 ;
@@ -151,7 +151,7 @@ yonepass MACRO fftname, all_complex
 ;	yfft_r4_320_4_FMA3
 ;	yfft_r4dwpn_2048_ac_4_CORE
 
-ypass1gen MACRO p1_size, all_complex, in_place, clmarg
+ypass1gen MACRO p1_size, negacyclic, in_place, clmarg
 	LOCAL	ymacroname
 
 ;; Copy some of the args 
@@ -161,7 +161,7 @@ ypass1gen MACRO p1_size, all_complex, in_place, clmarg
 ;; Generate the procedure name
 
 	yprocname CATSTR <yfft_>,yfft_type,<_>,%p1_size
-	IF all_complex EQ 1
+	IF negacyclic EQ 1
 	yprocname CATSTR yprocname,<_ac>
 	ENDIF
 	IFNB <in_place>
@@ -182,7 +182,7 @@ ypass1gen MACRO p1_size, all_complex, in_place, clmarg
 ;;	next 4cl:	64, 2KB+64, 4KB+128, 6KB+128
 ;; A padding of 192 will solve the problem.
 
-	IF (p1_size EQ 384 AND all_complex) OR (p1_size EQ 640 AND all_complex) OR (p1_size EQ 1536 AND all_complex)
+	IF (p1_size EQ 384 AND negacyclic) OR (p1_size EQ 640 AND negacyclic) OR (p1_size EQ 1536 AND negacyclic)
 		clmblkdst = (4*clm*64+64)
 		clmblkdst8 = (clmblkdst*8)
 	ELSEIF clm EQ 1
@@ -199,7 +199,7 @@ ypass1gen MACRO p1_size, all_complex, in_place, clmarg
 ;; Generate the pass 1 macro name
 
 	ymacroname CATSTR <y>,yfft_type,<_pass1sc>,%p1_size
-	IF all_complex EQ 1
+	IF negacyclic EQ 1
 	ymacroname CATSTR ymacroname,<ac>
 	ENDIF
 
@@ -230,7 +230,7 @@ blkdst TEXTEQU <r8>
 ;	r4dwpn = r4delay with partial normalization.
 ;	sr = split-radix
 ; options are:
-;	_ac for all_complex
+;	_ac for negacyclic
 ;	_ip for two-pass in-place (no scratch area)
 ;	_np for no_prefetch
 ; ypass2_levels is:
@@ -246,7 +246,7 @@ blkdst TEXTEQU <r8>
 ;	yfft_r4_1536K_10_4_BULL
 ;	yfft_r4dwpn_4M_ac_12_4_CORE
 
-set_FFT_constants MACRO fftname, in_place, all_complex, p1_size, p2_levels, clmarg
+set_FFT_constants MACRO fftname, in_place, negacyclic, p1_size, p2_levels, clmarg
 
 ;; Copy some of the args 
 
@@ -255,7 +255,7 @@ set_FFT_constants MACRO fftname, in_place, all_complex, p1_size, p2_levels, clma
 ;; Generate the procedure name
 
 	yprocname CATSTR <yfft_>,yfft_type,<_>,<&fftname>
-	IF all_complex EQ 1
+	IF negacyclic EQ 1
 	yprocname CATSTR yprocname,<_ac>
 	ENDIF
 	IF in_place EQ 1
@@ -313,7 +313,7 @@ set_FFT_constants MACRO fftname, in_place, all_complex, p1_size, p2_levels, clma
 ;;	next 4cl:	64, 2KB+64, 4KB+128, 6KB+128
 ;; A padding of 192 will solve the problem.
 
-	IF (p1_size EQ 384 AND all_complex) OR (p1_size EQ 640 AND all_complex) OR (p1_size EQ 1536 AND all_complex)
+	IF (p1_size EQ 384 AND negacyclic) OR (p1_size EQ 640 AND negacyclic) OR (p1_size EQ 1536 AND negacyclic)
 		clmblkdst = (4*clm*64+64)
 		clmblkdst8 = (clmblkdst*8)
 	ELSEIF clm EQ 1
@@ -390,7 +390,7 @@ yfft_footer MACRO
 
 pass1_forward_fft_setup MACRO loopaddr
 	mov	NEXT_BLOCK, 0		;; Flag indicating forward fft setup
-	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	lea	rax, loopaddr		;; Auxiliary thread entry point
 	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
 	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
 	ENDM
@@ -400,7 +400,7 @@ pass1_forward_fft_setup MACRO loopaddr
 pass1_inverse_fft_setup MACRO loopaddr
 	start_timer 1
 	mov	NEXT_BLOCK, 1		;; Flag indicating inverse fft setup
-	mov	rax, OFFSET loopaddr	;; Auxiliary thread entry point
+	lea	rax, loopaddr		;; Auxiliary thread entry point
 	mov	THREAD_WORK_ROUTINE, rax ;; save addr for C code to call
 	c_call	PASS1_WAKE_UP_THREADS	;; C callback routine
 	ENDM
@@ -1061,14 +1061,13 @@ ypass2gen MACRO levels
 	PROCF	procname
 	int_prolog 0,0,1
 
-;; Entry point for real FFTs: do one real and many complex blocks, also
-;; entry point for all-complex FFTs: do all complex blocks
+;; Entry point for real FFTs: do one real and many complex blocks, also entry point for negacyclic FFTs: do all complex blocks
 
-	mov	rax, OFFSET complex_loop ;; Auxiliary thread entry point
+	lea	rax, complex_loop	 ;; Auxiliary thread entry point
 	mov	THREAD_WORK_ROUTINE, rax ;; Save addr for C code to call
 	c_call	PASS2_WAKE_UP_THREADS	;; C callback routine
-	cmp	ALL_COMPLEX_FFT, 1	;; Test if there is a real-data block
-	je	complex_loop		;; Jump to process all-complex blocks
+	cmp	NEGACYCLIC_FFT, 1	;; Test if there is a real-data block
+	je	complex_loop		;; Jump to process complex blocks
 
 	realmacro			; Do the real data block
 	jmp	get_next		; Go process complex blocks

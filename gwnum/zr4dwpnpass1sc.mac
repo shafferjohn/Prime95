@@ -1,4 +1,4 @@
-; Copyright 2011-2020 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2011-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -132,6 +132,7 @@ c1c:	dec	rcx				;; Decrement loop counter
 	mov	scratch_area, rsi		;; Set scratch area pointer in case we do a top_carry_adjust
 	mov	rax, NORMRTN			;; Addr of normalization routine
 	call	rax
+	c_call	PASS1_POST_CARRIES		;; Make post-normalization callback (to process POSTADDIN_VALUE)
 	end_timer 28
 
 ;; Propagate carries back into the FFT data.
@@ -145,7 +146,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform an all-complex pass 1 FFT of length 2 reals.  Basically, this is a wrapper that lets
+;; Perform a negacyclic pass 1 FFT of length 2 reals.  Basically, this is a wrapper that lets
 ;; us provide small FFT sizes -- one for each 2nd pass FFT size.   This wrapper applies
 ;; weights and does swizzling to compensate for the different memory layouts required by
 ;; the normalization code and the 2nd pass FFT code.
@@ -260,6 +261,7 @@ c1c:	dec	rcx				;; Decrement loop counter
 	mov	scratch_area, rsi		;; Set scratch area pointer in case we do a top_carry_adjust
 	mov	rax, NORMRTN			;; Addr of normalization routine
 	call	rax
+	c_call	PASS1_POST_CARRIES		;; Make post-normalization callback (to process POSTADDIN_VALUE)
 	end_timer 28
 
 ;; Propagate carries back into the FFT data.
@@ -503,7 +505,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 128 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 128 doubles.
 ;; Memory examples are for a 128K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*128 doubles					Total: 128*clm 64-byte cache lines
@@ -939,7 +941,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 192 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 192 doubles.
 ;; Memory examples are for a 192K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*192 doubles					Total: 192*clm 64-byte cache lines
@@ -1476,7 +1478,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 640 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 640 doubles.
 ;; Memory examples are for a 640K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*640 doubles					Total: 640*clm 64-byte cache lines
@@ -2094,7 +2096,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 768 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 768 doubles.
 ;; Memory examples are for a 768K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*768 doubles					Total: 768*clm 64-byte cache lines
@@ -2712,7 +2714,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 896 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 896 doubles.
 ;; Memory examples are for a 896K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*896 doubles					Total: 896*clm 64-byte cache lines
@@ -3332,7 +3334,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 960 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 960 doubles.
 ;; Memory examples are for a 640K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*960 doubles					Total: 960*clm 64-byte cache lines
@@ -3952,7 +3954,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 1024 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 1024 doubles.
 ;; Memory examples are for a 1M FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*1024 doubles					Total: 1024*clm 64-byte cache lines
@@ -4572,7 +4574,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 1152 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 1152 doubles.
 ;; Memory examples are for a 1152K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*1152 doubles					Total: 1152*clm 64-byte cache lines
@@ -5193,7 +5195,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 1280 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 1280 doubles.
 ;; Memory examples are for a 1280K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*1280 doubles					Total: 1280*clm 64-byte cache lines
@@ -5813,7 +5815,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 1344 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 1344 doubles.
 ;; Memory examples are for a 1344K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*1344 doubles					Total: 1344*clm 64-byte cache lines
@@ -6432,7 +6434,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 1536 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 1536 doubles.
 ;; Memory examples are for a 1536K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*1536 doubles					Total: 1536*clm 64-byte cache lines
@@ -7050,7 +7052,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 1536 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 1536 doubles.
 ;; Memory examples are for a 1536K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*1536 doubles					Total: 1536*clm 64-byte cache lines
@@ -7671,7 +7673,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 1920 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 1920 doubles.
 ;; Memory examples are for a 1920K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*1920 doubles					Total: 1920*clm 64-byte cache lines
@@ -8296,7 +8298,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 2048 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 2048 doubles.
 ;; Memory examples are for a 2M FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*2048 doubles					Total: 2048*clm 64-byte cache lines
@@ -8919,7 +8921,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 2304 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 2304 doubles.
 ;; Memory examples are for a 2304K FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*2304 doubles					Total: 2304*clm 64-byte cache lines
@@ -9543,7 +9545,7 @@ done:	zfft_footer
 	ENDM
 
 
-;; Perform a shared pass 1 all-complex FFT of length 3072 doubles.
+;; Perform a shared pass 1 negacyclic FFT of length 3072 doubles.
 ;; Memory examples are for a 3M FFT with 10 levels done in pass 2.
 ;; FFT data needed:
 ;;		8*clm*3072 doubles					Total: 3072*clm 64-byte cache lines

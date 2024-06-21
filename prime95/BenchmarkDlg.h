@@ -1,6 +1,6 @@
 // BenchmarkDlg.h : header file
 //
-// Copyright 2017 Mersenne Research, Inc.  All rights reserved
+// Copyright 2017-2023 Mersenne Research, Inc.  All rights reserved
 //
 
 /////////////////////////////////////////////////////////////////////////////
@@ -26,8 +26,8 @@ public:
 	UINT	m_maxFFT;
 	CButton	c_errchk;
 	BOOL	m_errchk;
-	CButton	c_all_complex;
-	BOOL	m_all_complex;
+	CButton	c_negacyclic;
+	BOOL	m_negacyclic;
 	CButton	c_limit_FFT_sizes;
 	BOOL	m_limit_FFT_sizes;
 

@@ -1,4 +1,4 @@
-; Copyright 2001-2012 Mersenne Research, Inc.  All rights reserved
+; Copyright 2001-2023 Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -26,8 +26,7 @@ _TEXT SEGMENT
 ;; Routines to do the normalization after a multiply
 ;;
 
-; Macro to loop through all the FFT values and apply the proper normalization
-; routine.
+; Macro to loop through all the FFT values and apply the proper normalization routine.
 
 saved_rsi	EQU	PPTR [rsp+first_local]
 IFDEF X86_64
@@ -40,19 +39,11 @@ loopcount3	EQU	DPTR [rsp+first_local+SZPTR+8]
 blk8_counter	EQU	BYTE PTR [rsp+first_local+SZPTR+12]
 
 inorm	MACRO	lab, ttp, zero, echk, const, base2, sse4
-	LOCAL	noadd, setlp, ilp0, ilp1, ilp2, not8, done
+	LOCAL	setlp, ilp0, ilp1, ilp2, not8, done
 	PROCFLP	lab
 	int_prolog SZPTR+16,0,0
 echk	xload	xmm6, XMM_MAXERR	;; Load maximum error
-no zero	mov	edx, ADDIN_ROW		;; Is this the time to do our addin?
-no zero	cmp	edx, THIS_BLOCK
-no zero	jne	short noadd		;; Jump if addin does not occur now
-no zero	mov	edi, ADDIN_OFFSET	;; Get address to add value into
-no zero	movsd	xmm0, Q [rsi][rdi]	;; Get the value
-no zero	addsd	xmm0, ADDIN_VALUE	;; Add in the requested value
-no zero	movsd	Q [rsi][rdi], xmm0	;; Save the new value
-no zero	subsd	xmm7, ADDIN_VALUE	;; Do not include addin in sumout
-noadd:	mov	saved_rsi, rsi		;; Save for xtop_carry_adjust
+	mov	saved_rsi, rsi		;; Save for xtop_carry_adjust
 
 	xnorm_wpn_preload ttp, zero, echk, const, base2, sse4
 

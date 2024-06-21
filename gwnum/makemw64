@@ -2,7 +2,7 @@
 #
 
 CC = gcc
-CFLAGS = -I.. -I../sqlite-amalgamation-3180000 -DX86_64 -DWINDOWS64 -O2
+CFLAGS = -I.. -I../sqlite-amalgamation-3420000 -DX86_64 -DWINDOWS64 -O2
 #CFLAGS = -I.. -DX86_64 -DWINDOWS64 -g -O2
 
 CPP = g++

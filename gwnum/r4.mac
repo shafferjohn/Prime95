@@ -1,4 +1,4 @@
-; Copyright 2009-2016 - Mersenne Research, Inc.  All rights reserved
+; Copyright 2009-2023 - Mersenne Research, Inc.  All rights reserved
 ; Author:  George Woltman
 ; Email: woltman@alum.mit.edu
 ;
@@ -2505,7 +2505,7 @@ ENDIF
 ;; ************************************* four-complex-first-fft variants ******************************************
 ;;
 
-;; This code applies the roots-of-minus-1 premultipliers in an all-complex FFT.
+;; This code applies the roots-of-minus-1 premultipliers in a negacyclic FFT.
 ;; It also applies the three sin/cos multipliers after a radix-4 butterfly.  We save memory
 ;; by splitting the roots-of-minus-1 premultipliers such that every macro uses the 
 ;; same premultiplier data and we have 4 sin/cos postmultipliers.  Every sin/cos postmultiplier,
@@ -2635,7 +2635,7 @@ r4_x2cl_four_complex_first_fft4_cmn MACRO srcreg,off,srcinc,d1,screg
 	ENDM
 
 
-;; This code applies the roots-of-minus-1 premultipliers in an all-complex FFT.
+;; This code applies the roots-of-minus-1 premultipliers in a negacyclic FFT.
 ;; It also applies the three sin/cos multipliers after the first radix-4 butterfly.
 ;; We save memory by splitting the roots-of-minus-1 premultipliers such that every
 ;; macro uses the same premultiplier data.  The rest of the premultiplier is applied
@@ -2922,7 +2922,7 @@ ENDIF
 ;;
 
 ;; This code applies the sin/cos multipliers before a radix-4 butterfly.
-;; Then it applies the premultipliers since the all-complex inverse FFT is complete.
+;; Then it applies the premultipliers since the negacyclic inverse FFT is complete.
 ;; We save memory by splitting the roots-of-minus-1 premultipliers such that every
 ;; macro uses the same premultiplier data.  Every sin/cos postmultiplier, a very big
 ;; table anyway, are then multiplied by the other part of the split roots-of-minus-1.
@@ -3062,7 +3062,7 @@ r4_x4c_unfft_postmult MACRO r1, r2, r3, r4, r5, r6, r7, r8, mem3, mem4, mem7, me
 	ENDM
 
 ;; This code applies the sin/cos multipliers before a radix-4 butterfly.
-;; After the butterfly, it applies the all-complex premultipliers since the inverse FFT is complete.
+;; After the butterfly, it applies the negacyclic premultipliers since the inverse FFT is complete.
 
 r4_x4cl_four_complex_last_djbunfft MACRO srcreg,srcinc,d1,d2,screg,off,pmreg,pmoff
 	d3 = d2+d1
