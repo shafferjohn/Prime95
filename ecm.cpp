@@ -7806,6 +7806,13 @@ replan:	unsigned long best_fftlen;
 	best_fails = 0;
 	best_poly_efficiency = 0.0;
 	msgbuf[0] = 0;
+
+	stop_reason = avail_mem_qualitative(thread_num);
+	if (stop_reason) {
+		if (ecmdata.state == ECM_STATE_MIDSTAGE) ecm_save (&ecmdata);
+		goto exit;
+	}
+
 	for (bool found_best = FALSE; ; ) {
 
 /* Initialize the polymult library (needed for calling polymult_mem_required).  Let user override polymult tuning parameters. */
@@ -12333,6 +12340,13 @@ replan:	unsigned long best_fftlen;
 	best_fails = 0;
 	best_poly_efficiency = 0.0;
 	msgbuf[0] = 0;
+
+	stop_reason = avail_mem_qualitative(thread_num);
+	if (stop_reason) {
+		if (pm1data.state == PM1_STATE_MIDSTAGE) pm1_save (&pm1data);
+		goto exit;
+	}
+
 //GW: Can we get here (old save files) with V set and one of x or invx not set?  If so, switching is an issue unless we convert V to binary.
 	for (bool found_best = FALSE; ; ) {
 
@@ -14918,7 +14932,7 @@ int pp1_stage2_impl (
 	min_memory = 1 + cvt_gwnums_to_mem (&pp1data->gwdata, 8);
 	if (pp1data->state < PP1_STATE_STAGE2) desired_memory = 3 + cvt_gwnums_to_mem (&pp1data->gwdata, 144);
 	else desired_memory = (unsigned int) (pp1data->pairmap_size >> 20) + cvt_gwnums_to_mem (&pp1data->gwdata, pp1data->stage2_numvals);
-	stop_reason = avail_mem (pp1data->thread_num, min_memory, desired_memory, &memory);
+	stop_reason = avail_mem_qualitative (pp1data->thread_num) || avail_mem (pp1data->thread_num, min_memory, desired_memory, &memory);
 	if (stop_reason) return (stop_reason);
 
 /* Factor in the multiplier that we set to less than 1.0 when we get unexpected memory allocation errors. */

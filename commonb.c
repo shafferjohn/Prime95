@@ -1495,20 +1495,13 @@ unsigned long max_mem (
 	return (MAX_MEM);
 }
 
-/* Return memory (in MB) now available for a variable usage thread. */
-/* This routine takes into account the memory used by other workers. */
+/* Can we get "lots of memory", whatever that means? (Rules, slot counts) */
 
-int avail_mem (
-	int	thread_num,
-	unsigned long minimum_memory,	/* If this much memory (in MB) can be returned without restarting other workers, then do so */
-	unsigned long desired_memory,	/* If this much memory (in MB) can be returned without restarting other workers, then do so */
-	unsigned int *memory)		/* Returned available memory, in MB */
+int avail_mem_qualitative (
+	int	thread_num)		/* Returned available memory, in MB */
 {
-	int	i, fixed_threads[MAX_NUM_WORKERS];
-	unsigned long fixed_usage, variable_usage, num_variable_threads, avail, diff;
-
+	int lots_occupied = 0;
 /* Check if we are in a period of forced low memory usage */
-
 	if (is_LowMemWhileRunning_active (thread_num)) {
 		MEM_RESTART_FLAGS[thread_num] |= MEM_RESTART_LOWMEM_ENDS;
 		return (STOP_NOT_ENOUGH_MEM);
@@ -1522,18 +1515,36 @@ int avail_mem (
 		return (STOP_NOT_ENOUGH_MEM);
 	}
 
-/* Obtain lock before accessing memory global variables */
-
-	gwmutex_lock (&MEM_MUTEX);
-
 /* Check if we must wait for more memory to become available.  This happens when we reach the maximum allowable number of threads using a lot of memory. */
 
-	if (are_threads_using_lots_of_memory (thread_num)) {
+	gwmutex_lock (&MEM_MUTEX);
+	lots_occupied = are_threads_using_lots_of_memory (thread_num);
+	gwmutex_unlock (&MEM_MUTEX);
+
+	if (lots_occupied) {
 		MEM_RESTART_FLAGS[thread_num] |= MEM_RESTART_TOO_MANY_HIGHMEM;
-		gwmutex_unlock (&MEM_MUTEX);
 		OutputStr (thread_num, "Exceeded limit on number of workers that can use lots of memory.\n");
 		return (STOP_NOT_ENOUGH_MEM);
 	}
+
+	return (0);
+}
+
+/* Return memory (in MB) now available for a variable usage thread. */
+/* This routine takes into account the memory used by other workers. */
+
+int avail_mem (
+	int	thread_num,
+	unsigned long minimum_memory,	/* If this much memory (in MB) can be returned without restarting other workers, then do so */
+	unsigned long desired_memory,	/* If this much memory (in MB) can be returned without restarting other workers, then do so */
+	unsigned int *memory)		/* Returned available memory, in MB */
+{
+	int	i, fixed_threads[MAX_NUM_WORKERS];
+	unsigned long fixed_usage, variable_usage, num_variable_threads, avail, diff;
+
+/* Obtain lock before accessing memory global variables */
+
+	gwmutex_lock (&MEM_MUTEX);
 
 /* Set flag saying this will be a variable usage thread.  Remember the */
 /* "good enough" value as it will be helpful in determining the best */
